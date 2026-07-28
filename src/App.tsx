@@ -9,6 +9,7 @@ import RightSidebar from "./components/RightSidebar";
 import CommandPalette from "./components/CommandPalette";
 import TabSwitcher, { type SwitcherTab } from "./components/TabSwitcher";
 import Settings from "./components/Settings";
+import ShortcutsHelp from "./components/ShortcutsHelp";
 import ContextMenu from "./components/ContextMenu";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
@@ -23,6 +24,7 @@ export default function App() {
   const [state, setStateRaw] = useTauriEvent<AppStateView | null>("state-changed", null);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Settings (theme, fonts, editor options) live in settingsStore: loaded
   // once here, applied there, reloaded when the Settings modal closes.
@@ -196,6 +198,7 @@ export default function App() {
       "ctrl+t": newSession,
       "ctrl+w": closeTab,
       "ctrl+p": () => setShowPalette(true),
+      "ctrl+/": () => setShowShortcuts(true),
       "ctrl+b": () => api.toggleLeftSidebar(),
       "ctrl+shift+b": () => api.toggleRightPanel(),
       "ctrl+shift+e": () => api.togglePanel("files"),
@@ -491,6 +494,7 @@ export default function App() {
           onClearTerminal={clearTerminal}
           onCloseProject={closeSelectedProject}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenShortcuts={() => setShowShortcuts(true)}
         />
       )}
       {switcherView && (
@@ -511,6 +515,7 @@ export default function App() {
       {showSettings && (
         <Settings onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }} />
       )}
+      {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       <ContextMenu />
       {closePrompt && (
         <div

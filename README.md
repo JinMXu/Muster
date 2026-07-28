@@ -1,20 +1,142 @@
 # Muster
 
-A native terminal workspace for Windows: terminals, files, diffs and git in one window. Built with Tauri, React and xterm.js.
+**Muster** 是一个 Windows 原生的终端工作区：把终端、文件、差异对比和 Git 操作收进同一个窗口，让你不用切换到完整的 IDE，就能高效地查看和监督（包括 AI agent 写入的）代码变更。
 
-## Development
+基于 **Tauri 2 + React + xterm.js** 构建，后端使用 Rust 直接驱动 ConPTY 与 libgit2，轻量且启动迅速。
+
+## 功能特性
+
+- **多窗口**：每个窗口独立保存和恢复自己的工作区状态；关闭最后一个窗口后进程驻留系统托盘，终端会话不会被杀死，可从托盘菜单重新打开窗口或彻底退出
+- **项目管理**：左侧栏以行形式展示 Git 仓库或普通文件夹，支持重命名、拖拽排序，`Ctrl+1~9` 快速切换
+- **分屏布局**：niri 风格的列 × 行网格布局，支持拖拽 pane 到任意边缘重排、焦点跟随、单 pane 最大化（zoom）
+- **终端**：基于 ConPTY 的完整终端仿真（xterm.js），PowerShell 深度集成——每条命令执行后自动上报当前目录，应用可实时跟踪会话 cwd；支持终端响铃通知
+- **文件编辑器**：Monaco 编辑器，语法高亮、查找替换、自动换行可选
+- **差异查看器**：Monaco Diff 视图，内联/分栏对比，随主题切换深浅色
+- **文件树**：懒加载目录树，支持内联重命名、新建文件/文件夹；拖拽文件到终端可直接粘贴路径
+- **Git 面板**：porcelain v2 状态、暂存/取消暂存、提交（`Ctrl+Enter` 快捷提交）、push/pull/fetch、分支管理与切换、stash、合并冲突检测、最近提交列表
+- **信息面板**：显示 shell PID、工作目录、项目根路径、Git 分支/远程信息，以及项目相关的进程和监听端口列表
+- **命令面板**：`Ctrl+P` 模糊搜索所有命令和已打开的会话
+- **标签切换器**：`Ctrl+Tab` 弹出覆盖层循环切换标签，带会话/文件路径预览
+- **主题**：内置 GitHub 风格默认主题 + 完整 Ghostty 主题目录（数百款），深色/浅色独立设置，支持跟随系统
+- **国际化**：中文 / English 界面，可跟随系统语言
+- **会话持久化**：标签、分屏布局、滚动位置、编辑器状态定时自动快照（每 5 秒），重启后完整恢复
+- **资源管理器集成**：一键安装「在 Muster 中打开」右键菜单（写入 HKCU，无需管理员权限）
+
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 外壳 / 窗口 | Tauri 2（Rust），多窗口 + 系统托盘 |
+| 前端 UI | React 18 + TypeScript + Vite + Tailwind CSS |
+| 终端仿真 | xterm.js（fit / search 插件） |
+| PTY | portable-pty（Windows ConPTY） |
+| 编辑器 / Diff | Monaco Editor |
+| Git | git2（libgit2，含 SSH） |
+| 其他 | notify（文件监听）、sysinfo（进程/端口）、toml（配置） |
+
+## 目录结构
+
+```
+kero-windows/
+├── src/                    # React 前端
+│   ├── components/         # 界面组件（终端、文件树、Git 面板、设置等）
+│   ├── lib/                # invoke 封装、设置存储、主题、模糊匹配等
+│   └── styles/             # 全局样式与设计变量
+├── src-tauri/              # Rust 后端
+│   ├── src/
+│   │   ├── commands.rs     # 全部 Tauri 命令（前端 invoke 入口）
+│   │   ├── models/         # 应用状态：项目、标签、pane、终端会话
+│   │   ├── services/       # PTY/shell、git、配置、持久化、进程等
+│   │   └── theme/          # 主题目录与解析（含 Ghostty 主题）
+│   ├── capabilities/       # Tauri 权限声明
+│   └── assets/fonts/       # 内嵌字体（JetBrains Mono + Nerd Font 符号）
+├── scripts/                # 主题目录生成脚本
+└── docs/                   # 设计文档
+```
+
+## 开发
+
+### 环境要求
+
+- Windows 10/11（依赖 WebView2 与 ConPTY）
+- [Node.js](https://nodejs.org/) 18+
+- [Rust](https://rustup.rs/) 1.77+（MSVC 工具链）
+
+### 启动开发环境
 
 ```sh
 npm install
 npm run tauri dev
 ```
 
-## Build
+### 常用命令
 
 ```sh
-npm run tauri build
+npm run dev            # 仅启动前端 Vite dev server
+npm run build          # 前端类型检查 + 产物构建（tsc && vite build）
+cargo check            # 后端编译检查（在 src-tauri/ 下执行）
+cargo test             # 后端单元测试（在 src-tauri/ 下执行）
 ```
 
-## Credits
+> 部分后端测试会真实创建进程和监听端口，默认被标记为 `#[ignore]`，需手动运行：
+> `cargo test --lib -- --ignored`
 
-Muster is a Windows re-implementation inspired by [Kero](https://github.com/egoist/kero), a macOS-native terminal workspace by [@egoist](https://github.com/egoist).
+### 打包发布
+
+```sh
+npm run tauri build    # 产出 MSI 和 NSIS 安装包（src-tauri/target/release/bundle/）
+```
+
+## 配置
+
+配置文件为 TOML 格式，位于：
+
+- 正式版：`%APPDATA%\muster\config.toml`
+- 开发版（debug 构建）：`%APPDATA%\muster-dev\config.toml`
+
+会话快照（各窗口的标签/分屏/项目布局）保存在同目录下的 `sessions*.json`。
+
+## 快捷键
+
+### 窗口与项目
+
+| 快捷键 | 功能 |
+|---|---|
+| `Ctrl+Shift+N` | 新建窗口 |
+| `Ctrl+1` ~ `Ctrl+9` | 切换到第 N 个项目 |
+| `Ctrl+Alt+[` / `Ctrl+Alt+]` | 上一个 / 下一个项目 |
+| `Ctrl+,` | 打开设置 |
+
+### 标签与分屏
+
+| 快捷键 | 功能 |
+|---|---|
+| `Ctrl+T` | 新建终端标签 |
+| `Ctrl+W` | 关闭当前标签 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 标签切换器（循环切换） |
+| `Ctrl+Shift+[` / `Ctrl+Shift+]` | 上一个 / 下一个标签 |
+| `Ctrl+D` | 向右分屏 |
+| `Ctrl+Shift+D` | 向下分屏 |
+| `Ctrl+[` / `Ctrl+]` | 上一个 / 下一个 pane |
+| `Ctrl+Alt+方向键` | 按方向切换 pane 焦点 |
+| `Ctrl+Alt+Shift+方向键` | 按方向调整 pane 尺寸 |
+| `Ctrl+Shift+Enter` | 当前 pane 最大化 / 还原 |
+
+### 面板与工具
+
+| 快捷键 | 功能 |
+|---|---|
+| `Ctrl+P` | 命令面板 |
+| `Ctrl+B` | 切换左侧项目栏 |
+| `Ctrl+Shift+B` | 切换右侧边栏 |
+| `Ctrl+Shift+E` | 文件树面板 |
+| `Ctrl+Shift+G` | Git 面板 |
+| `Ctrl+Shift+I` | 信息面板 |
+| `Ctrl+S` | 保存文件（编辑器中） |
+| `Ctrl+K` | 清空终端 |
+
+## 致谢
+
+Muster 是 [Kero](https://github.com/egoist/kero) 的 Windows 重实现——Kero 是由 [@egoist](https://github.com/egoist) 开发的 macOS 原生终端工作区（Swift + libghostty）。本项目在产品形态与交互设计上深受其启发，在此致谢。
+
+主题目录来源于 [Ghostty](https://ghostty.org/) 项目；终端字体为 [JetBrains Mono](https://www.jetbrains.com/lp/mono/) 与 [Nerd Fonts](https://www.nerdfonts.com/) 符号字体。

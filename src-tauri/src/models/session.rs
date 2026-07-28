@@ -77,6 +77,13 @@ impl TerminalSession {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "muster");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        // Give the shell the *current* PATH from the registry, not whatever
+        // environment Muster was launched with (Explorer can predate newly
+        // installed CLIs — nvm, npm globals — making them "not found").
+        #[cfg(windows)]
+        if let Some(path) = crate::services::shell::fresh_path_from_registry() {
+            cmd.env("PATH", path);
+        }
 
         let child = pair.slave.spawn_command(cmd).map_err(io_err)?;
         // The slave end must be dropped on the parent side so that EOF flows

@@ -42,6 +42,7 @@ notify = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 windows = { version = "0.58", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",

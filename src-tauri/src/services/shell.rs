@@ -71,6 +71,82 @@ function global:prompt {
 }
 "#;
 
+/// PATH for spawned shells, read fresh from the registry (machine + user)
+/// instead of inherited from Muster's own process. When the app is launched
+/// from Explorer / the Start Menu, its environment can predate a newly
+/// installed CLI (nvm, npm globals, …), making those commands "not found" in
+/// the terminal even though a freshly opened PowerShell sees them.
+#[cfg(windows)]
+pub fn fresh_path_from_registry() -> Option<String> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    let machine = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
+        .and_then(|k| k.get_value::<String, _>("Path"));
+    let user = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey("Environment")
+        .and_then(|k| k.get_value::<String, _>("Path"));
+
+    let mut parts: Vec<String> = Vec::new();
+    for raw in [machine, user].into_iter().flatten() {
+        let expanded = expand_env_vars(&raw);
+        if !expanded.is_empty() {
+            parts.push(expanded);
+        }
+    }
+    if parts.is_empty() { None } else { Some(parts.join(";")) }
+}
+
+/// Expand `%VAR%` references using this process's environment; unresolved
+/// names are kept verbatim. The registry stores PATH as REG_EXPAND_SZ.
+#[cfg(windows)]
+fn expand_env_vars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start + 1..];
+        match tail.find('%') {
+            Some(end) => {
+                let name = &tail[..end];
+                match std::env::var(name) {
+                    Ok(v) => out.push_str(&v),
+                    Err(_) => {
+                        out.push('%');
+                        out.push_str(name);
+                        out.push('%');
+                    }
+                }
+                rest = &tail[end + 1..];
+            }
+            None => {
+                out.push('%');
+                out.push_str(tail);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::expand_env_vars;
+
+    #[test]
+    fn expands_known_keeps_unknown_and_plain() {
+        std::env::set_var("MUSTER_TEST_EXPAND", "xyz");
+        assert_eq!(
+            expand_env_vars(r"%MUSTER_TEST_EXPAND%\bin;%NO_SUCH_ENV_VAR%\x"),
+            r"xyz\bin;%NO_SUCH_ENV_VAR%\x"
+        );
+        assert_eq!(expand_env_vars("plain"), "plain");
+        assert_eq!(expand_env_vars("100%"), "100%");
+    }
+}
+
 #[cfg(not(windows))]
 pub fn detect_default_shell() -> ShellSpec {
     use std::env;

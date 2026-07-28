@@ -16,3 +16,6 @@ src-tauri/target/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local research notes, not part of the app
+_oc_research/

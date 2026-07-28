@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Native controls (select popups, scrollbars) follow the app theme;
+     settingsStore flips this to "light" when a light theme is applied. */
+  color-scheme: dark;
+
+  /* Layered, borderless palette (dark-first).
+     L0 = window base, panel = 3% white overlay over L0, L1 = content.
+     `--muster-bg` now means L1 (content); `--muster-bg-float` is the window base. */
+  --muster-bg-float: #24292f;
+  --muster-panel: rgba(255, 255, 255, 0.03);
+  --muster-bg: #1c2128;
+  --muster-sidebar: #24292f;
+  --muster-accent: #58a6ff;
+  /* No longer used for component borders — popup hairlines only. */
+  --muster-divider: #30363d;
+  --muster-fg: #e6edf3;
+  --muster-muted: #7d8590;
+  /* Interaction overlays */
+  --muster-hover: rgba(255, 255, 255, 0.05);
+  --muster-hover-btn: rgba(255, 255, 255, 0.08);
+  --muster-selected: rgba(255, 255, 255, 0.1);
+  /* Shared motion token */
+  --muster-motion: 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--muster-bg-float);
+  color: var(--muster-fg);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* xterm needs the terminal container sized to fill its parent */
+.xterm {
+  height: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+button {
+  color: inherit;
+}
+
+/* Select dropdown options: the native popup otherwise falls back to OS colors
+   (white background) while inheriting the app's foreground, making options
+   unreadable in dark themes. Pin them to the theme variables instead. */
+select option {
+  background: var(--muster-bg);
+  color: var(--muster-fg);
+}
+
+/* Global 6px thin scrollbars: transparent track, subtle thumb (covers xterm too) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Focused pane: 1px inset ring at 40% accent (hairline, not a border) */
+.muster-pane-focused {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muster-accent) 40%, transparent);
+}
+
+/* Popup entrance: scale(.97) → 1 + fade, transform/opacity only so it never
+   interferes with dynamic positioning (ContextMenu left/top, Settings
+   translate centering lives on an outer wrapper). */
+@keyframes muster-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.muster-pop {
+  animation: muster-pop var(--muster-motion);
+}

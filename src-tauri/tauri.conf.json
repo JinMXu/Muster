@@ -36,6 +36,7 @@
     "shortDescription": "Terminal workspace",
     "longDescription": "A native terminal workspace for Windows.",
     "windows": {
+      "nsis": { "installMode": "perMachine" },
       "wix": { "language": ["en-US"] }
     }
   },

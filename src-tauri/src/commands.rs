@@ -19,6 +19,7 @@ use crate::models::project::RightPanel;
 use crate::models::session::SessionInfo;
 use crate::services::config::Settings;
 use crate::services::i18n::translate;
+use crate::services::usage::{self, UsageCache};
 
 /// Per-window state registry: each window label owns an independent
 /// `AppState` (projects/tabs/sessions/files/diffs) so windows restore and
@@ -26,6 +27,7 @@ use crate::services::i18n::translate;
 pub struct SharedState {
     states: Mutex<HashMap<String, Arc<Mutex<AppState>>>>,
     settings: Arc<Mutex<Settings>>,
+    pub usage: Arc<Mutex<UsageCache>>,
 }
 
 impl SharedState {
@@ -33,6 +35,7 @@ impl SharedState {
         Self {
             states: Mutex::new(HashMap::new()),
             settings: Arc::new(Mutex::new(settings)),
+            usage: Arc::new(Mutex::new(UsageCache::default())),
         }
     }
 
@@ -754,6 +757,34 @@ pub fn install_explorer_context_menu() -> Result<(), String> {
     crate::services::explorer::install_context_menu(&exe.to_string_lossy())
 }
 
+// --- Usage tracking --------------------------------------------------------
+
+#[tauri::command]
+pub fn usage_summary(state: State<SharedState>) -> usage::UsageSummary {
+    state.usage.lock().summary()
+}
+
+#[tauri::command]
+pub fn usage_sessions(
+    state: State<SharedState>,
+    tool: Option<usage::ToolKind>,
+    since: Option<i64>,
+    limit: Option<usize>,
+) -> Vec<usage::UsageSession> {
+    state.usage.lock().sessions_filtered(tool, since, limit)
+}
+
+#[tauri::command]
+pub async fn usage_refresh(state: State<'_, SharedState>) -> Result<(), String> {
+    let cache = state.usage.clone();
+    tokio::task::spawn_blocking(move || {
+        usage::scan_once(&cache);
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Register every command (called from the Tauri Builder).
 pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
@@ -837,7 +868,10 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             git_stash_all,
             git_stash_pop,
             git_init,
-            install_explorer_context_menu
+            install_explorer_context_menu,
+            usage_summary,
+            usage_sessions,
+            usage_refresh,
         ])
 }
 

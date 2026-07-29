@@ -113,6 +113,14 @@ pub fn run() {
                     let _ = crate::services::persist::save_snapshot_for(&label, &snapshot);
                 }
             });
+
+            // Usage tracking: background scan loop.
+            {
+                let handle = app.handle().clone();
+                let usage_cache = handle.state::<crate::commands::SharedState>().usage.clone();
+                crate::services::usage::spawn_scan_loop(handle, usage_cache);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| match event {

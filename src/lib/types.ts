@@ -14,7 +14,6 @@ export interface Settings {
   font_size: number;
   font_thicken: boolean;
   editor_wrap_lines: boolean;
-  terminal_restore_history: boolean;
   language: "system" | "en" | "zh";
 }
 

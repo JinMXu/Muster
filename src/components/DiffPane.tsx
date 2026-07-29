@@ -24,9 +24,14 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
   };
 
   useEffect(() => {
-    api.diffInfo(diffId).then(setDiff);
-    const interval = setInterval(() => api.diffInfo(diffId).then(setDiff), 1000);
-    return () => clearInterval(interval);
+    let alive = true;
+    const tick = () => api.diffInfo(diffId).then((d) => alive && setDiff(d));
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
   }, [diffId]);
 
   const reload = async () => {

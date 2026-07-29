@@ -19,7 +19,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Open any directories passed in argv as new projects in the
             // running instance's main window (focus follows the OS launch,
@@ -51,6 +50,10 @@ pub fn run() {
             // as process-private fonts so the terminal/editor resolve them
             // even when they aren't installed system-wide.
             crate::theme::fonts::register_fonts();
+
+            // Drop orphaned secondary-window snapshots left by earlier runs
+            // (random labels make them unrestorable; none can be live yet).
+            crate::services::persist::prune_secondary_snapshots();
 
             // System tray with keep-alive: closing the last window only hides
             // it; the process lives on here until "Quit".
@@ -145,11 +148,22 @@ pub fn run() {
             WindowEvent::Destroyed => {
                 let label = window.label().to_string();
                 let state = window.state::<SharedState>();
-                let s = state.for_label(&label);
-                for session in s.lock().sessions.values() {
-                    session.terminate();
+                if let Some(s) = state.get_label(&label) {
+                    for session in s.lock().sessions.values() {
+                        session.terminate();
+                    }
                 }
                 state.remove_label(&label);
+                // Drop this window's file-tree watcher (its debounce thread
+                // exits once the channel disconnects).
+                crate::services::watch::remove_label(&label);
+                // Secondary windows have random, per-launch labels, so their
+                // snapshot can never be restored — delete it rather than let
+                // it accumulate in the app data dir. The main window's
+                // snapshot must always survive.
+                if label != "main" {
+                    let _ = crate::services::persist::delete_snapshot_for(&label);
+                }
             }
             _ => {}
         });
@@ -195,9 +209,9 @@ pub fn spawn_window(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Save this window's layout snapshot (used by the close handler and by the
-/// tray's Quit action).
+/// tray's Quit action). No-op if the window's state is already gone.
 pub fn save_window_snapshot(state: &SharedState, label: &str) {
-    let s = state.for_label(label);
+    let Some(s) = state.get_label(label) else { return };
     let snapshot = {
         let g = s.lock();
         build_snapshot(&g)
@@ -208,7 +222,7 @@ pub fn save_window_snapshot(state: &SharedState, label: &str) {
 /// Terminate any surviving sessions of `label`'s window so the parent
 /// process can exit cleanly.
 pub fn terminate_window_sessions(state: &SharedState, label: &str) {
-    let s = state.for_label(label);
+    let Some(s) = state.get_label(label) else { return };
     let g = s.lock();
     for project in &g.projects {
         for sid in project.session_ids() {

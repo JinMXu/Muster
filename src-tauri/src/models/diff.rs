@@ -72,8 +72,6 @@ impl DiffTab {
         let root = self.repo_root.clone();
         let path = self.path.clone();
         let staged = self.staged;
-        let mutex = &self.content as *const Mutex<DiffContent> as usize;
-        let _ = mutex;
 
         let result = if staged {
             crate::services::git::load_staged_diff(&root, &path)

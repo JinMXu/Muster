@@ -75,8 +75,17 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
   // Listen for background-scan completion.
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
-    listen("usage-updated", () => { load(); }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    // Async listen vs. unmount race: if cleanup ran before the promise
+    // resolved, unlisten the moment the handle arrives.
+    let cancelled = false;
+    listen("usage-updated", () => { load(); }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [load]);
 
   // Esc to close.

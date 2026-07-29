@@ -90,6 +90,9 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
   // Auto-refresh a directory when it changes on disk outside the app.
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
+    // Async listen vs. unmount race: if cleanup ran before the promise
+    // resolved, unlisten the moment the handle arrives.
+    let cancelled = false;
     const lastReload = new Map<string, number>();
     listen<{ dir: string }>("fs-changed", (e) => {
       const dir = e.payload.dir;
@@ -99,8 +102,14 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
       if (now - (lastReload.get(dir) ?? 0) < 300) return;
       lastReload.set(dir, now);
       loadDir(dir);
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [loadDir]);
 
   // Re-list every directory that is currently loaded (after mutations).

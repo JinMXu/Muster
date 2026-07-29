@@ -37,6 +37,19 @@ pub struct ListenPort {
 /// Cap on PROCESSES rows so a runaway child tree can't flood the panel.
 const MAX_PROCESSES: usize = 50;
 
+/// Build a `Command` for a console tool without popping a console window
+/// when the GUI app spawns it. On non-Windows this is a plain passthrough.
+pub fn quiet_command(program: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// Shared `System` so per-process CPU% is computed against the previous poll
 /// (sysinfo needs two refreshes to produce a delta; polls run ~2s apart, well
 /// above its minimum CPU update interval).
@@ -325,16 +338,8 @@ pub fn listen_ports(pids: &[u32], project_root: Option<&str>) -> Vec<ListenPort>
     let root = project_root
         .map(normalize_path)
         .filter(|r| !r.is_empty() && !too_broad_root(r));
-    let mut cmd = std::process::Command::new("netstat");
+    let mut cmd = quiet_command("netstat");
     cmd.args(["-ano", "-p", "tcp"]);
-    // netstat is a console tool; keep it from popping a console window when
-    // the GUI app spawns it on every poll.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     let Ok(output) = cmd.output() else { return Vec::new() };
     let stdout = String::from_utf8_lossy(&output.stdout);
 

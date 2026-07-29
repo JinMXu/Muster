@@ -153,6 +153,13 @@ impl TerminalSession {
                     Err(_) => break,
                 }
             }
+            // The shell exited on its own (EOF / read error), e.g. the user
+            // typed `exit`: `terminate()` is never called on this path, so
+            // release the Job Object here too. Idempotent — a later
+            // `terminate()` untracks a second time harmlessly. Closing the
+            // job also reaps any children the exited shell left behind
+            // (KILL_ON_JOB_CLOSE), which is the intended cleanup.
+            crate::services::procs::untrack_session(session_id);
             let _ = app.emit_to(&label, "pty:exit", serde_json::json!({ "id": session_id }));
             *inner.has_exited.lock() = true;
         });

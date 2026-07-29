@@ -30,8 +30,6 @@ pub struct Settings {
     pub font_thicken: bool,
     #[serde(default)]
     pub editor_wrap_lines: bool,
-    #[serde(default)]
-    pub terminal_restore_history: bool,
     #[serde(default = "default_language")]
     pub language: String,
 }
@@ -46,7 +44,6 @@ impl Default for Settings {
             font_size: 13.0,
             font_thicken: false,
             editor_wrap_lines: false,
-            terminal_restore_history: false,
             language: "system".into(),
         }
     }
@@ -66,7 +63,20 @@ impl Settings {
             let _ = s.save_to(path);
             return s;
         };
-        toml::from_str::<Settings>(&text).unwrap_or_default()
+        match toml::from_str::<Settings>(&text) {
+            Ok(s) => s,
+            Err(e) => {
+                // Corrupt config: fall back to defaults, but keep the
+                // original file as config.toml.bak so the user can recover
+                // whatever was in it. Backup failure is logged, never fatal.
+                log::warn!("failed to parse {}: {e}; resetting to defaults", path.display());
+                let bak = path.with_extension("toml.bak");
+                if let Err(be) = fs::copy(path, &bak) {
+                    log::warn!("failed to back up corrupt config to {}: {be}", bak.display());
+                }
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -74,7 +84,9 @@ impl Settings {
     }
 
     fn save_to(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let toml = toml::to_string_pretty(self).unwrap_or_default();
+        // Propagate serialization failures: writing an empty string would
+        // clobber the existing config with an unusable file.
+        let toml = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -126,6 +138,9 @@ mod tests {
         assert_eq!(s.font_size, Settings::DEFAULT_FONT_SIZE);
         assert_eq!(s.theme_dark, "Default Dark");
         assert!(!s.font_thicken);
+        // The corrupt original is preserved next to the config.
+        let bak = path.with_extension("toml.bak");
+        assert_eq!(fs::read_to_string(&bak).unwrap(), "this is = [not valid toml");
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -155,7 +170,6 @@ mod tests {
             font_size: 17.5,
             font_family: "Cascadia Code".into(),
             theme: AppTheme::Light,
-            terminal_restore_history: true,
             ..Default::default()
         };
         s.save_to(&path).unwrap();
@@ -164,7 +178,6 @@ mod tests {
         assert_eq!(loaded.font_size, 17.5);
         assert_eq!(loaded.font_family, "Cascadia Code");
         assert_eq!(loaded.theme, AppTheme::Light);
-        assert!(loaded.terminal_restore_history);
         fs::remove_dir_all(&dir).ok();
     }
 }

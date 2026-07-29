@@ -25,7 +25,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws:; worker-src 'self' blob:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     }
   },
   "bundle": {
@@ -38,14 +42,6 @@
     "windows": {
       "nsis": { "installMode": "perMachine" },
       "wix": { "language": ["en-US"] }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "active": false,
-      "endpoints": [],
-      "dialog": true,
-      "pubkey": ""
     }
   }
 }

@@ -1,6 +1,6 @@
 /// Case-insensitive subsequence fuzzy match, mirroring the app's own scorer:
 /// word-boundary hits and consecutive matches score higher.
-export function fuzzyScore(candidate: string, pattern: string): number | null {
+function fuzzyScore(candidate: string, pattern: string): number | null {
   const chars = Array.from(candidate.toLowerCase());
   const pat = Array.from(pattern.toLowerCase());
   let score = 0;

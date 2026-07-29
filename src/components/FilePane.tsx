@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath } from "../lib/monaco";
@@ -19,6 +20,7 @@ export default function FilePane({
   const [info, setInfo] = useState<FileTabInfo | null>(null);
   const [text, setText] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<string | null>(null);
   const editorRef = useRef<Parameters<NonNullable<React.ComponentProps<typeof Editor>["onMount"]>>[0] | null>(null);
   const { t } = useT();
   // Editor options follow the saved settings (font size/family/wrap); the
@@ -40,13 +42,31 @@ export default function FilePane({
     if (focused) editorRef.current?.focus();
   }, [focused]);
 
+  // Immediately push any debounce-pending edit to the backend and mark the
+  // tab dirty. Called by the debounce timer and by the load effect's cleanup,
+  // so edits made within the last 300ms aren't lost on unmount/fileId switch.
+  const flushPending = () => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (pendingRef.current == null) return;
+    const next = pendingRef.current;
+    pendingRef.current = null;
+    api.fileTextChanged(fileId, next);
+    setInfo((prev) => (prev ? { ...prev, is_dirty: true } : prev));
+  };
+
   useEffect(() => {
+    let alive = true;
     api.fileInfo(fileId).then((i) => {
+      if (!alive) return;
       setInfo(i);
       if (i && i.content_kind === "text") setText(i.text);
     });
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      alive = false;
+      flushPending();
     };
   }, [fileId]);
 
@@ -64,11 +84,9 @@ export default function FilePane({
   const onText = (next: string) => {
     setText(next);
     if (!info || info.content_kind !== "text") return;
+    pendingRef.current = next;
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      api.fileTextChanged(fileId, next);
-      setInfo((prev) => (prev ? { ...prev, is_dirty: true } : prev));
-    }, 300);
+    debounceRef.current = setTimeout(flushPending, 300);
   };
 
   if (!info) {
@@ -77,7 +95,7 @@ export default function FilePane({
   if (info.content_kind === "image") {
     return (
       <div className="w-full h-full overflow-auto p-4">
-        <img src={`file://${info.path}`} alt={info.name} />
+        <img src={convertFileSrc(info.path)} alt={info.name} />
       </div>
     );
   }

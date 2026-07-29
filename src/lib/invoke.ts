@@ -25,8 +25,6 @@ export type PaneDropEdge = "left" | "right" | "top" | "bottom";
 export type FocusDirection = "up" | "down" | "left" | "right" | "next" | "previous";
 export type ResizeDirection = "up" | "down" | "left" | "right";
 
-type Edge = PaneDropEdge;
-
 const c = <T>(name: string, args?: Record<string, unknown>): Promise<T> => invoke<T>(name, args);
 
 export const api = {
@@ -54,12 +52,11 @@ export const api = {
   setProjectDirectory: (id: Uuid, directory: string | null) =>
     c<void>("set_project_directory", { id, directory }),
 
-  spawnSession: (directory?: string) => c<SessionInfo>("spawn_session", { directory: directory ?? null }),
+  spawnSession: () => c<SessionInfo>("spawn_session", { directory: null }),
   sendText: (id: Uuid, text: string) => c<void>("send_text", { id, text }),
   resizeTerminal: (id: Uuid, cols: number, rows: number) =>
     c<void>("resize_terminal", { id, cols, rows }),
   clearTerminal: (id: Uuid) => c<void>("clear_terminal", { id }),
-  terminateSession: (id: Uuid) => c<void>("terminate_session", { id }),
 
   sessionProcesses: (sessionId: Uuid, shellPid: number) =>
     c<ProcessInfo[]>("session_processes", { sessionId, shellPid }),
@@ -68,6 +65,7 @@ export const api = {
     c<ListenPort[]>("session_ports", { pids, projectRoot }),
 
   closeSelectedTab: () => c<void>("close_selected_tab"),
+  closeTab: (tabId: Uuid) => c<void>("close_tab", { tabId }),
   selectTab: (id: Uuid) => c<void>("select_tab", { id }),
   selectNextTab: () => c<void>("select_next_tab"),
   selectPreviousTab: () => c<void>("select_previous_tab"),
@@ -79,12 +77,12 @@ export const api = {
   paneContextPath: (tabId: Uuid, paneId: Uuid) =>
     c<string | null>("pane_context_path", { tabId, paneId }),
 
-  split: (edge: Edge) => c<void>("split", { edge }),
+  split: (edge: PaneDropEdge) => c<void>("split", { edge }),
   focusPane: (direction: FocusDirection) => c<void>("focus_pane", { direction }),
   resizePane: (direction: ResizeDirection) => c<void>("resize_pane", { direction }),
   resizePaneDivider: (tabId: Uuid, vertical: boolean, columnIndex: number, index: number, delta: number) =>
     c<void>("resize_pane_divider", { tabId, vertical, columnIndex, index, delta }),
-  movePane: (tabId: Uuid, paneId: Uuid, targetPaneId: Uuid, edge: Edge) =>
+  movePane: (tabId: Uuid, paneId: Uuid, targetPaneId: Uuid, edge: PaneDropEdge) =>
     c<void>("move_pane", { tabId, paneId, targetPaneId, edge }),
   togglePaneZoom: () => c<void>("toggle_pane_zoom"),
   equalizePanes: () => c<void>("equalize_panes"),

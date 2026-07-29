@@ -1,19 +1,66 @@
 # Kero Windows — 开发进度
 
-**最后更新**: 2026-07-28（第十轮）
+**最后更新**: 2026-07-29（第十一轮）
 
 ---
 
-## 整体状态：Rust 后端 ✅ | React 前端 ✅ | 单测 58 ✅ | clippy 0 警告 ✅ | i18n 中英文 ✅
+## 整体状态：Rust 后端 ✅ | React 前端 ✅ | 单测 77 ✅ | clippy 0 警告 ✅ | i18n 中英文 ✅ | 安全审计+四批修复 ✅
 
 ### 构建状态
 | 目标 | 状态 | 备注 |
 |------|------|------|
 | `cargo check` / `cargo build` | ✅ 通过 | 无需 vcvars |
-| `cargo test --lib` | ✅ 58 个测试全过 | 含 procs 路径匹配 + 2 个实进程 ignored 测试手动通过 |
+| `cargo test --lib` | ✅ 77 个测试全过 | 含 procs 路径匹配 + 2 个实进程 ignored 测试手动通过 |
 | `cargo clippy --all-targets` | ✅ 零警告 | |
 | `npm run build` | ✅ 通过 | `tsc && vite build` 零 TS 错误 |
-| 实机验证 | ⚠️ 部分 | 第 0-1 批 + UI 重设计已目检；i18n 中英文切换待实机验收 |
+| `npm audit` | ✅ 0 漏洞 | dompurify 经 overrides 升到 3.4.12 |
+| 实机验证 | ⚠️ 部分 | 第 0-1 批 + UI 重设计已目检；i18n 中英文切换、CSP 启用后实机验收待做 |
+
+---
+
+## 本轮已修复（2026-07-29 第十一轮：全面审计 + 四批修复）
+
+四路并行审计（Rust 安全 / Rust 质量 / 前端 / 依赖仓库卫生）后按批修复：
+
+**第一批（正确性）**
+- `rename_path`/`create_file` 路径逃逸：新增 `rename_target()` 助手，直接校验入参名字本身
+  （含 Windows `C:x` drive-relative 逃逸），join 后断言父目录不变；补 3 个单测
+- 快照/配置序列化失败不再写空串覆盖现有文件（persist.rs/config.rs 改为 `?` 传播）
+- git stash 失败不再假成功（`try_git!` 传播）；split 不再吞 PTY spawn 失败（死终端有报错）
+- 新增原子命令 `close_tab(tab_id)`（`AppState::close_tab`），消除 select+close 两步竞态
+- 图片预览 `file://` 改 `convertFileSrc` + 启用 assetProtocol（scope `**`）
+- FilePane 卸载 flush 防抖回写（不再丢最后一笔编辑）+ fileInfo/diffInfo/轮询 alive 守卫
+- npm：`overrides` 强制 `dompurify@^3.4.12`，audit 归零
+
+**第二批（资源泄漏）**
+- terminalRegistry 改模块级单例 listen 按 `payload.id` 分发（原每会话 2 个 listen 永不 unlisten，
+  prune 形同虚设）；useTauriEvent + FileTree/UsagePanel 的异步 listen 加 cancelled 守卫
+- 副窗口快照：启动时 `prune_secondary_snapshots()` 清孤儿 `sessions-win-*.json`，
+  Destroyed 时 `delete_snapshot_for(label)`；Job Object 句柄在读循环退出路径也 `untrack_session`
+- Header 进度条 timeout/条目清理、App subtitleCache 按存活 tab prune、InfoPanel 轮询守卫
+
+**第三批（清理）**
+- 删除死模块 `history.rs`（连带 `history_dir()`、`terminal_restore_history` 设置及前端假开关）；
+  删除 ~10 处无调用方 pub 方法/字段；i18n.rs 裁到 5 个实际使用的 key（修复中文缺 `{name}` 占位符）
+- 依赖裁剪：Rust 删 `chrono` + `tauri-plugin-updater`（含 bootstrap 注册/conf/capabilities/npm 包）；
+  tokio `full` → `rt`；usage 重复时间解析器上移到 provider.rs
+- 启用 CSP（`default-src 'self'` + asset:/blob:/ws: 白名单，**需实机验证**）；
+  子进程统一 `quiet_command()`（CREATE_NO_WINDOW）；git.rs 乱码注释修复
+- 前端散件：死 import/死按钮/死包装器清理、快捷键事实源对齐、i18n `TKey` 接线
+  （顺带修了 `git.detached` 真实拼写错误）
+
+**第四批（架构）**
+- `commands.rs`（987 行 84 命令）拆分为 `commands/` 子模块（state/window/project/terminal/tabs/
+  panes/editor/fs/git/usage）；fs 业务逻辑下沉 `services/explorer.rs`（含全部 10 个测试搬家）；
+  命令名/参数/签名零变化
+- usage 扫描器不再持锁做文件 I/O（锁内快照 → 释放 → 解析 → 重新取锁提交，`SCAN_SERIAL` 串行化）
+- watch 按窗口 label 分桶：监视集互不覆盖、`fs-changed` 改 `emit_to(label)`、窗口销毁释放 watcher
+- 杂项：`save_settings` 单 guard；app.rs 两处双 find+unwrap 合并；config 解析失败备份
+  `config.toml.bak` + warn；`SharedState::get_label`/`for_label` 拆分（迟到 invoke 不再复活空状态）
+
+**未做（记录在案）**：Monaco 主题不随全局主题（固定 muster-dark）；`useProjectCwd` 多路重复轮询
+未合并；session.rs model/service 拆分、App.tsx hook 抽取（更大重构，另议）；
+`.cargo/config.toml` 移出 git 跟踪需手动 `git rm --cached`；`sidebar.sendFeedback` 死翻译 key 保留。
 
 ---
 
@@ -339,9 +386,10 @@ Windows 10/11 SDK 在 `D:\Windows Kits\10\`（非标准盘符，这是 rustc 自
 
 1. **终端渲染**：使用 xterm.js（WebView），而非文档中的 wgpu + 原生 HWND。在 WebView 内部可以工作，延迟稍高，但比在两个完全不同的渲染管线之间搭建桥梁要更可行。
 2. ~~文件树只显示顶层~~（已修复，第三轮）/ ~~文件编辑器是 textarea~~（已修复，Monaco，第五轮）/ ~~Diff 是纯文本~~（已修复，Monaco diff，第五轮）/ ~~Ctrl+Tab 切换器~~（已实现，第五轮）/ ~~只有 6 个主题~~（已修复，592 个，第五轮）
-3. **终端回滚恢复**：`history.rs` 基础设施仍在，但始终未接入启动流程（终端保活方案已覆盖切 tab 场景；重启后的 scrollback 重放仍缺）。
-4. **自动更新器**：插件已注册但 `active: false`、无端点——**第 21 项推迟**，等有发布渠道（GitHub Releases + pubkey）再配。
-5. **多窗口恢复**：次窗口（`win-*`）不会在启动时自动重开；且 label 随机导致 `sessions-win-*.json` 实际不会被恢复（会累积陈旧文件）。主窗口恢复正常。
+3. ~~终端回滚恢复~~：`history.rs` 基础设施从未接入，第十一轮已整体删除（含假开关）。
+4. ~~自动更新器~~：第十一轮已整体移除（插件/依赖/配置/前端包）。将来有发布渠道时重新引入。
+5. **多窗口恢复**：次窗口（`win-*`）不会在启动时自动重开；第十一轮已修复快照文件泄漏
+   （启动清孤儿 + Destroyed 时删除），但 label 随机导致副窗布局本身仍不恢复。
 6. **Git 安全层**：破坏性操作没有原版的前置 fingerprint 检查；操作错误只走 alert，没有 banner。
 7. **跨 tab 拖拽 pane** 未实现（仅 tab 内换位）；Monaco 编辑器主题固定 vs-dark，不随应用主题。
 8. **实机验证不足**：第 2 批之后的功能（Monaco、菜单、多窗口、托盘等）均只通过构建/单测验证，未逐一人工实测。

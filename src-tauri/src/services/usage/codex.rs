@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use super::model::{ToolKind, TokenUsage, UsageSession};
-use super::provider::{DiscoveredSession, UsageProvider, env_path_or, home_dir};
+use super::provider::{DiscoveredSession, UsageProvider, env_path_or, home_dir, parse_iso_ms};
 
 pub struct CodexProvider {
     root: Option<PathBuf>,
@@ -160,30 +160,6 @@ fn walk_jsonl(dir: &std::path::Path, out: &mut Vec<DiscoveredSession>) {
             });
         }
     }
-}
-
-/// Parse an ISO-8601 timestamp like "2026-05-20T10:26:21.000Z" to epoch ms.
-fn parse_iso_ms(s: &str) -> Option<i64> {
-    let s = s.trim();
-    if s.len() < 20 { return None; }
-    let y: i64 = s.get(0..4)?.parse().ok()?;
-    let mo: i64 = s.get(5..7)?.parse().ok()?;
-    let d: i64 = s.get(8..10)?.parse().ok()?;
-    let h: i64 = s.get(11..13)?.parse().ok()?;
-    let mi: i64 = s.get(14..16)?.parse().ok()?;
-    let se: i64 = s.get(17..19)?.parse().ok()?;
-    let ms: i64 = s.get(20..23).unwrap_or("0").parse().ok()?;
-    let days = days_from_civil(y, mo, d);
-    Some(((days * 86400 + h * 3600 + mi * 60 + se) * 1000) + ms)
-}
-
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) as u64 + 2) / 5 + d as u64 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe as i64 - 719468
 }
 
 #[cfg(test)]

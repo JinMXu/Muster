@@ -28,9 +28,14 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const shellPid = projSession && !projSession.has_exited ? projSession.pid : null;
 
   useEffect(() => {
-    api.listAllSessions().then(setSessions);
-    const i = setInterval(() => api.listAllSessions().then(setSessions), 2000);
-    return () => clearInterval(i);
+    let alive = true;
+    const tick = () => api.listAllSessions().then((s) => alive && setSessions(s));
+    tick();
+    const i = setInterval(tick, 2000);
+    return () => {
+      alive = false;
+      clearInterval(i);
+    };
   }, [nonce]);
 
   useEffect(() => {

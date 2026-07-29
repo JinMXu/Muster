@@ -30,6 +30,29 @@ interface Entry {
 /// has been closed (i.e. is no longer present in the app state).
 const registry = new Map<string, Entry>();
 
+/// Backend PTY events are listened to once for the whole module (not once per
+/// session) and dispatched by session id. Per-session listeners would outlive
+/// their terminals — the unlisten handles were dropped, so every disposed
+/// terminal stayed subscribed forever, pinning it in memory and making event
+/// dispatch cost grow with the number of historical sessions. The unlisten
+/// handles returned here are intentionally ignored: the listeners live as
+/// long as the app itself.
+let listenersReady = false;
+function ensureListeners(): void {
+  if (listenersReady) return;
+  listenersReady = true;
+  listen<PtyDataPayload>("pty:data", (event) => {
+    const entry = registry.get(event.payload.id);
+    if (!entry) return;
+    entry.term.write(base64ToBytes(event.payload.data));
+  });
+  listen<PtyExitPayload>("pty:exit", (event) => {
+    const entry = registry.get(event.payload.id);
+    if (!entry) return;
+    entry.term.write("\r\n\x1b[2m[session exited]\x1b[0m\r\n");
+  });
+}
+
 /// The theme applied to every parked terminal — and to terminals created
 /// after it is set. `null` until the first `applyTerminalTheme` call; new
 /// terminals then fall back to the hardcoded GitHub-dark theme below.
@@ -103,6 +126,7 @@ export function applyTerminalFont(font: { family: string; size: number; thicken:
 }
 
 function create(sessionId: string): Entry {
+  ensureListeners();
   const term = new Terminal({
     fontFamily: resolveFontFamily(currentFont.family),
     fontSize: currentFont.size || DEFAULT_FONT_SIZE,
@@ -125,16 +149,9 @@ function create(sessionId: string): Entry {
   // Input → PTY. Registered once per terminal, not per pane mount.
   term.onData((data) => api.sendText(sessionId, data));
 
-  // PTY output → terminal. Keeps buffers in sync even while the pane that
-  // hosts this terminal is unmounted.
-  listen<PtyDataPayload>("pty:data", (event) => {
-    if (event.payload.id !== sessionId) return;
-    term.write(base64ToBytes(event.payload.data));
-  });
-  listen<PtyExitPayload>("pty:exit", (event) => {
-    if (event.payload.id !== sessionId) return;
-    term.write("\r\n\x1b[2m[session exited]\x1b[0m\r\n");
-  });
+  // PTY output → terminal is handled by the module-level listeners above,
+  // which dispatch to this entry via the registry. Keeps buffers in sync
+  // even while the pane that hosts this terminal is unmounted.
 
   // Restore the OSC 0 title the session had when this terminal is created
   // after the fact (e.g. on app relaunch with a restored layout).
@@ -156,7 +173,7 @@ export function acquire(sessionId: string): Entry {
 }
 
 /// Dispose the terminal for a session and drop it from the registry.
-export function release(sessionId: string): void {
+function release(sessionId: string): void {
   const entry = registry.get(sessionId);
   if (!entry) return;
   entry.term.dispose();

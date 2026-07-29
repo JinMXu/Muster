@@ -72,8 +72,6 @@ const en = {
     darkTheme: "Dark theme",
     lightTheme: "Light theme",
     wrapLines: "Wrap long lines in editor",
-    restoreHistory: "Restore previous scrollback on relaunch (not yet implemented)",
-    historyUnimplemented: "History recording/replay not yet implemented",
     integrations: "Integrations",
     integrationsTitle: "Integrations",
     integrationsInstalled: "Installed",
@@ -135,6 +133,7 @@ const en = {
 
   git: {
     locatingRepo: "Locating repository\u2026",
+    detached: "detached",
     notARepo: "Not a git repository.",
     initializeRepo: "Initialize repository",
     initCli: "git init",
@@ -299,6 +298,7 @@ const en = {
     infoPanel: "Info panel",
     saveFile: "Save file (in editor)",
     clearTerminal: "Clear terminal",
+    usagePanel: "Token usage panel",
   },
 
   usage: {

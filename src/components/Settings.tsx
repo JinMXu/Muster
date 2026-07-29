@@ -125,18 +125,6 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
           </label>
         </div>
 
-        <div className="flex items-center gap-2 mb-4 opacity-50">
-          <label className="flex items-center gap-2 text-xs" title={t("settings.historyUnimplemented")}>
-            <input
-              type="checkbox"
-              disabled
-              checked={s.terminal_restore_history}
-              onChange={(e) => update({ terminal_restore_history: e.target.checked })}
-            />
-            {t("settings.restoreHistory")}
-          </label>
-        </div>
-
         <Integrations />
 
         <UsageEntry onOpen={onOpenUsage} />

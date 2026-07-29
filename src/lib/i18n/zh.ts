@@ -72,8 +72,6 @@ const zh = {
     darkTheme: "深色主题",
     lightTheme: "浅色主题",
     wrapLines: "编辑器中自动换行",
-    restoreHistory: "重启后恢复之前的滚动历史（暂未实现）",
-    historyUnimplemented: "历史采集/回放尚未实现",
     integrations: "集成",
     integrationsTitle: "集成",
     integrationsInstalled: "已安装",
@@ -135,6 +133,7 @@ const zh = {
 
   git: {
     locatingRepo: "正在定位仓库…",
+    detached: "游离",
     notARepo: "不是 Git 仓库。",
     initializeRepo: "初始化仓库",
     initCli: "git init",
@@ -297,6 +296,7 @@ const zh = {
     infoPanel: "信息面板",
     saveFile: "保存文件（编辑器中）",
     clearTerminal: "清空终端",
+    usagePanel: "Token 用量面板",
   },
 
   usage: {

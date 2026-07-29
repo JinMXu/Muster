@@ -24,8 +24,4 @@ impl ThemeColors {
     pub fn resolve(name: &str, dark: bool) -> Self {
         catalog::by_name(name).unwrap_or_else(|| catalog::default_for(dark))
     }
-
-    /// The kеро-shipped Default Dark / Default Light (GitHub palette).
-    pub fn default_dark() -> Self { catalog::default_for(true) }
-    pub fn default_light() -> Self { catalog::default_for(false) }
 }

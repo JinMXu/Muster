@@ -66,9 +66,22 @@ fn build_providers() -> (
     )
 }
 
+/// Serialize full scan passes: the background loop and the `usage_refresh`
+/// command can otherwise interleave and clobber each other's commit.
+static SCAN_SERIAL: Mutex<()> = Mutex::new(());
+
 /// Run one full scan pass, updating the cache in place.
 pub fn scan_once(cache: &Mutex<UsageCache>) {
+    let _serial = SCAN_SERIAL.lock();
     let (oc, cc, cx, kc) = build_providers();
+
+    // Snapshot the reuse state under the lock, then RELEASE it: discovery and
+    // JSONL parsing are slow filesystem work that must not block the usage
+    // commands (summary/sessions readers) for the whole pass.
+    let (snap_fingerprints, snap_parsed) = {
+        let g = cache.lock();
+        (g.fingerprints.clone(), g.parsed.clone())
+    };
 
     let mut new_parsed: HashMap<String, UsageSession> = HashMap::new();
     let mut new_fingerprints: HashMap<String, (SystemTime, u64)> = HashMap::new();
@@ -78,12 +91,11 @@ pub fn scan_once(cache: &Mutex<UsageCache>) {
         let discovered = oc.discover();
         if let Some(src) = discovered.first() {
             let fp_key = src.key.clone() + "|oc";
-            let unchanged = cache.lock().fingerprints.get(&fp_key)
+            let unchanged = snap_fingerprints.get(&fp_key)
                 .is_some_and(|(m, s)| src.mtime == Some(*m) && src.size == Some(*s));
             if unchanged {
                 // Reuse cached OpenCode sessions (all keys ending in "|oc").
-                let g = cache.lock();
-                for (k, s) in g.parsed.iter() {
+                for (k, s) in snap_parsed.iter() {
                     if k.ends_with("|oc") {
                         new_parsed.insert(k.clone(), s.clone());
                     }
@@ -100,17 +112,14 @@ pub fn scan_once(cache: &Mutex<UsageCache>) {
         }
     }
 
-    // --- JSONL providers: Claude, Codex, Kimi ---
-    // Pass a locked view of the cache for reuse lookups. The lock is held
-    // only for the duration of each scan_jsonl_provider call (read-only).
-    {
-        let cache_guard = cache.lock();
-        scan_jsonl_provider(&cc, &mut new_parsed, &mut new_fingerprints, &cache_guard, "cc");
-        scan_jsonl_provider(&cx, &mut new_parsed, &mut new_fingerprints, &cache_guard, "cx");
-        scan_jsonl_provider(&kc, &mut new_parsed, &mut new_fingerprints, &cache_guard, "kc");
-    }
+    // --- JSONL providers: Claude, Codex, Kimi (all unlocked, against the
+    // snapshot taken above) ---
+    scan_jsonl_provider(&cc, &mut new_parsed, &mut new_fingerprints, &snap_fingerprints, &snap_parsed, "cc");
+    scan_jsonl_provider(&cx, &mut new_parsed, &mut new_fingerprints, &snap_fingerprints, &snap_parsed, "cx");
+    scan_jsonl_provider(&kc, &mut new_parsed, &mut new_fingerprints, &snap_fingerprints, &snap_parsed, "kc");
 
-    // Commit.
+    // Commit. The cache is only written by scan passes (serialized above), so
+    // a full swap cannot clobber a concurrent writer.
     let mut g = cache.lock();
     g.parsed = new_parsed;
     g.fingerprints = new_fingerprints;
@@ -121,17 +130,18 @@ fn scan_jsonl_provider<P: UsageProvider>(
     provider: &P,
     new_parsed: &mut HashMap<String, UsageSession>,
     new_fingerprints: &mut HashMap<String, (SystemTime, u64)>,
-    cache: &UsageCache,
+    fingerprints: &HashMap<String, (SystemTime, u64)>,
+    parsed: &HashMap<String, UsageSession>,
     suffix: &str,
 ) {
     for src in provider.discover() {
         let fp_key = format!("{}|{}", src.key, suffix);
-        let unchanged = cache.fingerprints.get(&fp_key)
+        let unchanged = fingerprints.get(&fp_key)
             .is_some_and(|(m, s)| src.mtime == Some(*m) && src.size == Some(*s));
         new_fingerprints.insert(fp_key.clone(), (src.mtime.unwrap_or(SystemTime::UNIX_EPOCH), src.size.unwrap_or(0)));
         if unchanged {
             // Reuse the cached parse for this exact source key.
-            if let Some(cached) = cache.parsed.get(&fp_key) {
+            if let Some(cached) = parsed.get(&fp_key) {
                 new_parsed.insert(fp_key, cached.clone());
                 continue;
             }

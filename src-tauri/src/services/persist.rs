@@ -21,8 +21,6 @@ pub fn session_snapshot_path_for(label: &str) -> PathBuf {
     }
 }
 
-pub fn history_dir() -> PathBuf { app_data_dir().join("history") }
-
 use crate::models::project::SessionSnapshot;
 
 pub fn save_snapshot_for(label: &str, snapshot: &SessionSnapshot) -> std::io::Result<()> {
@@ -30,7 +28,9 @@ pub fn save_snapshot_for(label: &str, snapshot: &SessionSnapshot) -> std::io::Re
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(snapshot).unwrap_or_default();
+    // Propagate serialization failures: writing an empty string would
+    // clobber the existing snapshot with an unusable file.
+    let json = serde_json::to_string_pretty(snapshot).map_err(std::io::Error::other)?;
     std::fs::write(path, json)?;
     Ok(())
 }
@@ -39,4 +39,76 @@ pub fn load_snapshot_for(label: &str) -> Option<SessionSnapshot> {
     let path = session_snapshot_path_for(label);
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// Delete a window's snapshot file. A missing file is not an error (the
+/// window may never have been autosaved).
+pub fn delete_snapshot_for(label: &str) -> std::io::Result<()> {
+    let path = session_snapshot_path_for(label);
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Remove leftover `sessions-win-*.json` snapshots. Secondary window labels
+/// are random per launch, so their snapshots can never be restored and every
+/// one found at startup is an orphan from an earlier run. Best-effort:
+/// failures are logged, never propagated. The main window's `sessions.json`
+/// is never touched.
+pub fn prune_secondary_snapshots() {
+    let Ok(entries) = std::fs::read_dir(app_data_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with("sessions-win-") && name.ends_with(".json") {
+            if let Err(e) = std::fs::remove_file(entry.path()) {
+                log::warn!("failed to remove orphan snapshot {}: {e}", entry.path().display());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn delete_snapshot_removes_file_and_is_idempotent() {
+        // No "win-" prefix: the prune test runs in parallel and would
+        // delete a matching file out from under this test.
+        let label = "testdelete";
+        let path = super::session_snapshot_path_for(label);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{}").unwrap();
+        assert!(path.exists());
+        super::delete_snapshot_for(label).unwrap();
+        assert!(!path.exists());
+        // Deleting a missing snapshot is not an error.
+        super::delete_snapshot_for(label).unwrap();
+    }
+
+    #[test]
+    fn prune_removes_secondary_but_keeps_main() {
+        let dir = super::app_data_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let orphan = dir.join("sessions-win-testprune.json");
+        std::fs::write(&orphan, b"{}").unwrap();
+
+        // Preserve a real main snapshot if one exists; only stand one up
+        // temporarily when it doesn't.
+        let main = dir.join("sessions.json");
+        let main_existed = main.exists();
+        if !main_existed {
+            std::fs::write(&main, b"{}").unwrap();
+        }
+
+        super::prune_secondary_snapshots();
+
+        assert!(!orphan.exists(), "orphan win-* snapshot should be pruned");
+        assert!(main.exists(), "main snapshot must survive pruning");
+        if !main_existed {
+            std::fs::remove_file(&main).unwrap();
+        }
+    }
 }

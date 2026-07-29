@@ -262,7 +262,7 @@ fn signature(repo: &Repository) -> Result<git2::Signature<'static>, String> {
 
 /// Loads staged diff content: `HEAD:path` vs `:path`.
 ///
-/// Shells out to `git show` to read each side 鈥?cleaner than walking the index
+/// Shells out to `git show` to read each side — cleaner than walking the index
 /// via libgit2's `Index::get_path` (whose arity differs across git2 versions).
 pub fn load_staged_diff(root: &str, path: &str) -> Result<(String, String), String> {
     let old = git_show(root, &format!("HEAD:{path}"))?;
@@ -286,10 +286,10 @@ pub fn load_unstaged_diff(root: &str, path: &str) -> Result<(String, String), St
     Ok((old, new))
 }
 
-/// `git show <spec>` 鈫?UTF-8 text. Returns empty content if the spec resolves
+/// `git show <spec>` → UTF-8 text. Returns empty content if the spec resolves
 /// to nothing, and `Binary file` if the bytes don't decode.
 fn git_show(root: &str, spec: &str) -> Result<String, String> {
-    let output = std::process::Command::new("git")
+    let output = super::procs::quiet_command("git")
         .args(["show", spec])
         .current_dir(root)
         .output()
@@ -568,9 +568,9 @@ pub fn fetch(repo_root: &str) -> Result<(), String> {
 }
 
 pub fn pull(repo_root: &str) -> Result<(), String> {
-    // Shell out to git for the merge step 鈥?git2's merge helpers are fiddly
+    // Shell out to git for the merge step — git2's merge helpers are fiddly
     // and we want strict --ff-only semantics.
-    std::process::Command::new("git")
+    super::procs::quiet_command("git")
         .args(["pull", "--ff-only"])
         .current_dir(repo_root)
         .output()
@@ -590,7 +590,7 @@ pub fn push(repo_root: &str, remote: &str) -> Result<(), String> {
 pub fn stash_all(repo_root: &str) -> Result<(), String> {
     let mut repo = repo_at(repo_root)?;
     let sig = signature(&repo)?;
-    let _ = repo.stash_save(&sig, "muster", Some(git2::StashFlags::INCLUDE_UNTRACKED));
+    try_git!(repo.stash_save(&sig, "muster", Some(git2::StashFlags::INCLUDE_UNTRACKED)); "stash");
     Ok(())
 }
 

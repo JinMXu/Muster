@@ -7,6 +7,9 @@ dist/
 # Rust build output
 src-tauri/target/
 
+# Machine-specific cargo toolchain paths (see README「开发」)
+src-tauri/.cargo/config.toml
+
 # Logs
 *.log
 

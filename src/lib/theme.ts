@@ -12,7 +12,7 @@ function mixHex(hex: string, target: string, amount: number): string {
   return [0, 2, 4].map((i) => mix(ch(hex, i), ch(target, i))).join("");
 }
 
-export function applyThemeColors(palette: {
+function applyThemeColors(palette: {
   background: string;
   foreground: string;
   sidebar: string;

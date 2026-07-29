@@ -53,6 +53,8 @@ export default function Header({
   // OSC 9;4 progress per session id, fed by the backend's `pty:progress`
   // event (emitted only when a session's progress value changes).
   const [progressBySession, setProgressBySession] = useState<Record<Uuid, PtyProgress>>({});
+  // Pending "clear completed progress" timers, cleared on unmount.
+  const progressTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   useEffect(() => {
     const unlisten = listen<PtyProgress>("pty:progress", (event) => {
       const p = event.payload;
@@ -65,7 +67,8 @@ export default function Header({
       // Completed progress (state 1 at 100%) lingers briefly, then clears —
       // shells don't always send the state-0 removal sequence.
       if (p.state === 1 && p.progress >= 100) {
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+          progressTimersRef.current.delete(timer);
           setProgressBySession((prev) => {
             const cur = prev[p.id];
             if (!cur || cur.state !== 1 || cur.progress < 100) return prev;
@@ -74,12 +77,35 @@ export default function Header({
             return next;
           });
         }, 1000);
+        progressTimersRef.current.add(timer);
       }
     });
     return () => {
       unlisten.then((f) => f());
+      for (const timer of progressTimersRef.current) clearTimeout(timer);
+      progressTimersRef.current.clear();
     };
   }, []);
+
+  // Sessions that exit without sending a progress-removal sequence would
+  // leave stale entries forever; prune entries whose session is gone.
+  useEffect(() => {
+    const alive = new Set<string>();
+    for (const tab of project?.tabs ?? []) {
+      for (const col of tab.columns) {
+        for (const pane of col.panes) {
+          if (pane.content.kind === "session") alive.add(pane.content.id);
+        }
+      }
+    }
+    setProgressBySession((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.every((k) => alive.has(k))) return prev;
+      const next: Record<Uuid, PtyProgress> = {};
+      for (const k of keys) if (alive.has(k)) next[k] = prev[k];
+      return next;
+    });
+  }, [project]);
 
   return (
     <header

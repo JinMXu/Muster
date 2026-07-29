@@ -15,12 +15,6 @@ pub enum PaneContent {
 }
 
 impl PaneContent {
-    pub fn id(&self) -> Uuid {
-        match self {
-            PaneContent::Session(id) | PaneContent::File(id) | PaneContent::Diff(id) => *id,
-        }
-    }
-
     pub fn is_diff(&self) -> bool {
         matches!(self, PaneContent::Diff(_))
     }
@@ -76,9 +70,6 @@ pub struct PaneTab {
     pub columns: Vec<PaneColumn>,
     pub focused_pane_id: Uuid,
     pub is_zoomed: bool,
-    /// Stable id of the terminal session whose directory this tab is oriented
-    /// around when it holds no terminal of its own.
-    pub context_session_id: Option<Uuid>,
 }
 
 impl PaneTab {
@@ -91,7 +82,6 @@ impl PaneTab {
             columns: vec![PaneColumn::one(pane)],
             focused_pane_id: id,
             is_zoomed: false,
-            context_session_id: None,
         }
     }
 
@@ -112,13 +102,6 @@ impl PaneTab {
 
     pub fn focused_pane(&self) -> Option<&Pane> {
         self.all_panes().into_iter().find(|p| p.id == self.focused_pane_id)
-    }
-
-    pub fn focused_pane_mut(&mut self) -> Option<&mut Pane> {
-        self.columns
-            .iter_mut()
-            .flat_map(|c| c.panes.iter_mut())
-            .find(|p| p.id == self.focused_pane_id)
     }
 
     pub fn focused_location(&self) -> Option<(usize, usize)> {
@@ -377,49 +360,6 @@ impl PaneTab {
         let applied = if lo > hi { 0.0 } else { delta.clamp(lo, hi) };
         *a += applied;
         *b -= applied;
-    }
-
-    /// Remove the pane with `id`. Returns false when the tab is now empty,
-    /// so the caller can drop the tab itself. Focus is reassigned.
-    pub fn remove_pane(&mut self, id: Uuid) -> bool {
-        let mut found: Option<(usize, usize)> = None;
-        for (ci, col) in self.columns.iter().enumerate() {
-            if let Some(ri) = col.panes.iter().position(|p| p.id == id) {
-                found = Some((ci, ri));
-                break;
-            }
-        }
-        let Some((ci, ri)) = found else { return !self.all_panes().is_empty() };
-        let was_focused = self.focused_pane_id == id;
-        self.columns[ci].panes.remove(ri);
-        if self.columns[ci].panes.is_empty() {
-            self.columns.remove(ci);
-        }
-        if was_focused {
-            self.reassign_focus_near(ci, ri);
-        }
-        if was_focused || self.all_panes().len() <= 1 {
-            self.is_zoomed = false;
-        }
-        !self.all_panes().is_empty()
-    }
-
-    fn reassign_focus_near(&mut self, col: usize, row: usize) {
-        if self.columns.is_empty() {
-            return;
-        }
-        let ci = col.min(self.columns.len() - 1);
-        let column = &self.columns[ci];
-        if column.panes.is_empty() {
-            self.focused_pane_id = self
-                .all_panes()
-                .first()
-                .map(|p| p.id)
-                .unwrap_or(self.focused_pane_id);
-            return;
-        }
-        let ri = row.min(column.panes.len() - 1);
-        self.focused_pane_id = column.panes[ri].id;
     }
 }
 

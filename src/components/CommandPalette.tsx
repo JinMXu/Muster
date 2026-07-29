@@ -58,7 +58,7 @@ export default function CommandPalette({
       { id: "resize-pane-up", title: t("commandPalette.resizePaneUp"), icon: "⇡", shortcut: "Ctrl+Shift+Alt+↑", action: () => api.resizePane("up") },
       { id: "resize-pane-down", title: t("commandPalette.resizePaneDown"), icon: "⇣", shortcut: "Ctrl+Shift+Alt+↓", action: () => api.resizePane("down") },
       { id: "toggle-pane-zoom", title: t("commandPalette.togglePaneZoom"), icon: "⤢", shortcut: "Ctrl+Shift+Enter", action: () => api.togglePaneZoom() },
-      { id: "equalize-panes", title: t("commandPalette.equalizePanes"), icon: "▦", shortcut: "Ctrl+=", action: () => api.equalizePanes() },
+      { id: "equalize-panes", title: t("commandPalette.equalizePanes"), icon: "▦", action: () => api.equalizePanes() },
       { id: "clear-terminal", title: t("commandPalette.clearTerminal"), icon: "⌫", shortcut: "Ctrl+K", action: onClearTerminal },
       { id: "save-file", title: t("commandPalette.saveFile"), icon: "⤓", shortcut: "Ctrl+S", action: () => api.saveSelectedFile() },
       { id: "new-project", title: t("commandPalette.newProject"), icon: "◈", shortcut: "Ctrl+N", action: onAskNewProject },

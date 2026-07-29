@@ -13,7 +13,7 @@ import type enObj from "./en";
 export type TKey = DeepPath<typeof enObj>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type TFunc = (path: string, args?: Record<string, any>) => string;
+export type TFunc = (path: TKey, args?: Record<string, any>) => string;
 
 interface LangCtx {
   lang: Lang;

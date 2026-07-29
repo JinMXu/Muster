@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import Sidebar from "./components/Sidebar";
@@ -54,14 +53,19 @@ export default function App() {
     [stateView]
   );
 
+  // Ctrl+Tab switcher subtitles, cached per tab id (see the switcher below).
+  const subtitleCache = useRef(new Map<Uuid, string>());
+
   // Dispose parked terminal instances whose session no longer exists
   // (tab/pane/project closed). Terminals for live sessions stay parked in
   // the registry so their buffers survive tab/zoom/project switches.
   useEffect(() => {
     if (!stateView) return;
     const ids = new Set<string>();
+    const tabIds = new Set<string>();
     for (const p of stateView.projects) {
       for (const t of p.tabs) {
+        tabIds.add(t.id);
         for (const c of t.columns) {
           for (const pane of c.panes) {
             if (pane.content.kind === "session") ids.add(pane.content.id);
@@ -70,6 +74,10 @@ export default function App() {
       }
     }
     pruneSessions(ids);
+    // Drop switcher-subtitle cache entries for tabs that no longer exist.
+    for (const id of [...subtitleCache.current.keys()]) {
+      if (!tabIds.has(id)) subtitleCache.current.delete(id);
+    }
   }, [stateView]);
 
   const refresh = useCallback(() => api.state().then(setStateRaw), [setStateRaw]);
@@ -90,10 +98,10 @@ export default function App() {
   const [closePrompt, setClosePrompt] = useState<{ files: DirtyFile[]; proceed: () => void } | null>(null);
 
   // Close one specific tab, with the unsaved-files confirmation. The backend
-  // only closes the *selected* tab, so select the target first.
+  // `close_tab` command closes the given tab atomically (no select-then-close).
   const closeTabById = useCallback(async (tabId: Uuid) => {
     const proceed = () => {
-      api.selectTab(tabId).then(() => api.closeSelectedTab());
+      api.closeTab(tabId);
     };
     const dirty = await api.tabDirtyFiles(tabId);
     if (dirty.length > 0) {
@@ -275,7 +283,6 @@ export default function App() {
   const [switcherView, setSwitcherView] = useState<{ tabs: SwitcherTab[]; index: number } | null>(null);
   const switcherRef = useRef<{ tabs: SwitcherTab[]; index: number } | null>(null);
   const stateRef = useRef<AppStateView | null>(null);
-  const subtitleCache = useRef(new Map<Uuid, string>());
   useEffect(() => {
     stateRef.current = stateView;
   }, [stateView]);

@@ -1,14 +1,14 @@
 import { useEffect } from "react";
-import { useT } from "../lib/i18n/context";
+import { useT, type TKey } from "../lib/i18n/context";
 
 interface ShortcutItem {
   keys: string;
-  labelKey: string;
+  labelKey: TKey;
 }
 
 /// Static shortcut reference, grouped to match the README's shortcuts
 /// section. Keep in sync with the NAV_MAP in App.tsx.
-const GROUPS: { titleKey: string; items: ShortcutItem[] }[] = [
+const GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
   {
     titleKey: "shortcuts.groupWindow",
     items: [
@@ -46,6 +46,7 @@ const GROUPS: { titleKey: string; items: ShortcutItem[] }[] = [
       { keys: "Ctrl+Shift+I", labelKey: "shortcuts.infoPanel" },
       { keys: "Ctrl+S", labelKey: "shortcuts.saveFile" },
       { keys: "Ctrl+K", labelKey: "shortcuts.clearTerminal" },
+      { keys: "Ctrl+Shift+U", labelKey: "shortcuts.usagePanel" },
     ],
   },
 ];

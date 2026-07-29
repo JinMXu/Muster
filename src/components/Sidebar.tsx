@@ -1,5 +1,5 @@
 import type { ProjectView, Uuid } from "../lib/types";
-import { IconFolder, IconMessageCircle, IconPlus, IconSettings, IconX } from "./icons";
+import { IconFolder, IconPlus, IconSettings, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 
 export default function Sidebar({
@@ -59,9 +59,6 @@ export default function Sidebar({
           <IconPlus size={14} />
         </FooterButton>
         <div className="flex-1" />
-        <FooterButton title={t("sidebar.sendFeedback")} onClick={() => {}}>
-          <IconMessageCircle size={14} />
-        </FooterButton>
         <FooterButton title={t("sidebar.settingsTooltip")} onClick={onOpenSettings}>
           <IconSettings size={14} />
         </FooterButton>

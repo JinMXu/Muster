@@ -173,7 +173,6 @@ impl AppState {
                     columns,
                     focused_pane_id,
                     is_zoomed: false,
-                    context_session_id: None,
                 });
             }
 
@@ -215,15 +214,6 @@ impl AppState {
     pub fn selected_project_mut(&mut self) -> Option<&mut Project> {
         let id = self.selected_project_id?;
         self.projects.iter_mut().find(|p| p.id == id)
-    }
-
-    pub fn selected_session(&self) -> Option<Arc<TerminalSession>> {
-        let tab = self.selected_tab()?;
-        let pane = tab.focused_pane()?;
-        match &pane.content {
-            PaneContent::Session(id) => self.sessions.get(id).cloned(),
-            _ => None,
-        }
     }
 
     /// Best-effort directory for a new session in the current project.
@@ -375,15 +365,10 @@ impl AppState {
     }
 
     fn insert_session_tab_after_selected(&mut self, project_id: Uuid, content: PaneContent) {
-        let insert_at_idx = {
-            let project = match self.projects.iter_mut().find(|p| p.id == project_id) {
-                Some(p) => p,
-                None => return,
-            };
-            let pos = project.selected_tab_id.and_then(|sid| project.tabs.iter().position(|t| t.id == sid));
-            pos
-        };
-        let project = self.projects.iter_mut().find(|p| p.id == project_id).unwrap();
+        let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) else { return };
+        let insert_at_idx = project
+            .selected_tab_id
+            .and_then(|sid| project.tabs.iter().position(|t| t.id == sid));
         let tab = PaneTab::new(content);
         let tab_id = tab.id;
         if let Some(i) = insert_at_idx {
@@ -423,6 +408,14 @@ impl AppState {
             let neighbor = i.min(p.tabs.len().saturating_sub(1));
             p.selected_tab_id = p.tabs.get(neighbor).map(|t| t.id);
         }
+    }
+
+    /// Close a specific tab by id, wherever it lives. Selection is only
+    /// reassigned when the closed tab was the selected one (see remove_tab),
+    /// so closing a background tab keeps the current selection untouched.
+    pub fn close_tab(&mut self, tab_id: Uuid) {
+        let Some(p_idx) = self.project_index_of_tab(tab_id) else { return };
+        self.remove_tab(p_idx, tab_id);
     }
 
     fn project_index_of_tab(&self, tab_id: Uuid) -> Option<usize> {
@@ -568,18 +561,24 @@ impl AppState {
         let id = file.id;
 
         let project_id = self.selected_project_id?;
-        // Reuse an existing pane for the same path?
+        // Reuse an existing pane for the same path? One lookup: compute the
+        // candidate pane and focus it while the project is borrowed.
         let existing_pane_id = self
             .projects
-            .iter()
+            .iter_mut()
             .find(|p| p.id == project_id)
-            .and_then(|p| p.selected_tab_view())
-            .and_then(|t| t.all_panes().iter().find(|pane| matches!(&pane.content, PaneContent::File(fid) if *fid == id)).map(|p| p.id));
-        if let Some(pane_id) = existing_pane_id {
-            let p = self.projects.iter_mut().find(|p| p.id == project_id).unwrap();
-            if let Some(t) = p.selected_tab_mut() {
-                t.focused_pane_id = pane_id;
-            }
+            .and_then(|p| {
+                let pane_id = p
+                    .selected_tab_view()
+                    .and_then(|t| t.all_panes().iter().find(|pane| matches!(&pane.content, PaneContent::File(fid) if *fid == id)).map(|p| p.id));
+                if let Some(pane_id) = pane_id {
+                    if let Some(t) = p.selected_tab_mut() {
+                        t.focused_pane_id = pane_id;
+                    }
+                }
+                pane_id
+            });
+        if existing_pane_id.is_some() {
             self.files.insert(id, file);
             return Some(id);
         }
@@ -668,10 +667,6 @@ impl AppState {
         out
     }
 
-    pub fn file_text_changed(&self, id: Uuid, text: String) {
-        if let Some(f) = self.files.get(&id) { f.set_text(text); }
-    }
-
     pub fn open_diff(&mut self, repo_root: &str, path: &str, staged: bool) -> Option<Uuid> {
         let diff = Arc::new(DiffTab::new(repo_root.to_string(), path.to_string(), staged));
         let id = diff.id;
@@ -679,20 +674,6 @@ impl AppState {
         self.append_tab(project_id, PaneContent::Diff(id));
         self.diffs.insert(id, diff);
         Some(id)
-    }
-
-    pub fn reload_diff(&self, id: Uuid) { if let Some(d) = self.diffs.get(&id) { d.reload(); } }
-
-    // ---- Send / receive terminal ------------------------------------------
-
-    pub fn send_text(&self, id: Uuid, text: &str) {
-        if let Some(s) = self.sessions.get(&id) { s.send_text(text); }
-    }
-    pub fn resize_terminal(&self, id: Uuid, cols: u16, rows: u16) {
-        if let Some(s) = self.sessions.get(&id) { s.resize(cols, rows); }
-    }
-    pub fn terminate_session(&self, id: Uuid) {
-        if let Some(s) = self.sessions.get(&id) { s.terminate(); }
     }
 
     // ---- Info payloads for the frontend ----------------------------------

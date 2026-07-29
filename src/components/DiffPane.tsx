@@ -39,13 +39,13 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
     setDiff(await api.diffInfo(diffId));
   };
 
-  if (!diff) return <div className="text-muster-muted text-xs">{t("diffPane.loading")}</div>;
-  if (diff.loading) return <div className="text-muster-muted text-xs anim-pulse">{t("diffPane.computingDiff")}</div>;
-  if (diff.error) return <div className="text-red-400 text-xs">{diff.error}</div>;
+  if (!diff) return <div className="text-muster-muted ui-fs-base">{t("diffPane.loading")}</div>;
+  if (diff.loading) return <div className="text-muster-muted ui-fs-base anim-pulse">{t("diffPane.computingDiff")}</div>;
+  if (diff.error) return <div className="text-red-400 ui-fs-base">{diff.error}</div>;
 
   return (
     <div className="w-full h-full flex flex-col bg-muster-bg">
-      <div className="flex items-center gap-2 border-b border-white/[0.08] px-3 py-1 text-xs text-muster-muted">
+      <div className="flex items-center gap-2 border-b border-white/[0.08] px-3 py-1 ui-fs-base text-muster-muted">
         <span className="flex-1 truncate">
           {diff.path}
           {diff.staged ? t("diffPane.stagedSuffix") : ""}

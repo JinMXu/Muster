@@ -48,7 +48,7 @@ function Tab({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 px-2 py-1.5 rounded-md text-[11px] flex items-center justify-center gap-1 ${
+      className={`flex-1 px-2 py-1.5 rounded-md ui-fs-sm flex items-center justify-center gap-1 ${
         active ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted hover:bg-muster-hover"
       }`}
     >

@@ -1,10 +1,10 @@
 # Kero Windows — 开发进度
 
-**最后更新**: 2026-07-29（第十一轮）
+**最后更新**: 2026-07-29（第十二轮）
 
 ---
 
-## 整体状态：Rust 后端 ✅ | React 前端 ✅ | 单测 77 ✅ | clippy 0 警告 ✅ | i18n 中英文 ✅ | 安全审计+四批修复 ✅
+## 整体状态：Rust 后端 ✅ | React 前端 ✅ | 单测 77 ✅ | clippy 0 警告 ✅ | i18n 中英文 ✅ | 界面字号设置 ✅（待实机验收）
 
 ### 构建状态
 | 目标 | 状态 | 备注 |
@@ -14,7 +14,24 @@
 | `cargo clippy --all-targets` | ✅ 零警告 | |
 | `npm run build` | ✅ 通过 | `tsc && vite build` 零 TS 错误 |
 | `npm audit` | ✅ 0 漏洞 | dompurify 经 overrides 升到 3.4.12 |
-| 实机验证 | ⚠️ 部分 | 第 0-1 批 + UI 重设计已目检；i18n 中英文切换、CSP 启用后实机验收待做 |
+| 实机验证 | ⚠️ 部分 | 第 0-1 批 + UI 重设计已目检；界面字号滑块、CSP 启用后实机验收待做 |
+
+---
+
+## 本轮已修复（2026-07-29 第十二轮：界面字号设置）
+
+问题：右侧面板（Info/Git/Files）及 UI 外壳文字硬编码 9-12px，全屏/远距离看不清。
+设计 spec：`docs/superpowers/specs/2026-07-29-ui-font-size-design.md`（用户已批准）。
+
+- `Settings` 新增 `ui_font_size`（默认 12，10–16 滑块，Settings 外观区，i18n 中英）
+- `settingsStore.applyAll` 换算 `--ui-font-scale = size/12` 写 `:root`，加载/保存即时生效
+- `globals.css` 新增 `ui-fs-base/sm/xs/2xs` 四个缩放工具类（calc(px × scale) + 相对行高）
+- 14 个组件 112 处硬编码字号类机械替换（`text-xs`→base、`text-[11px]`→sm、
+  `text-[10px]`→xs、`text-[9px]`→2xs），替换后 src 下静态小字号类 0 残留
+- 终端与 Monaco 编辑器字号不受影响（独立 `font_size`）；布局尺寸不缩放
+
+验证：`cargo test` 77 ✅、`clippy` 0 警告 ✅、`npm run build` ✅。实机拖滑块验收待做
+（顺带验收第十一轮的 CSP：Monaco worker / xterm / 图片预览 / HMR）。
 
 ---
 

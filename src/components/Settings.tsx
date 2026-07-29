@@ -32,11 +32,11 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
           className="bg-muster-bg border border-white/[0.08] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.5)] px-5 py-4 muster-pop"
           onClick={(e) => e.stopPropagation()}
         >
-        <h2 className="text-sm font-semibold mb-3">{t("settings.title")}</h2>
+        <h2 className="ui-fs-base font-semibold mb-3">{t("settings.title")}</h2>
 
         <Field label={t("settings.appearance")}>
           {(["system", "light", "dark"] as const).map((th) => (
-            <label key={th} className="flex items-center gap-1.5 text-xs mr-3">
+            <label key={th} className="flex items-center gap-1.5 ui-fs-base mr-3">
               <input
                 type="radio"
                 checked={s.theme === th}
@@ -51,7 +51,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
           <select
             value={s.language}
             onChange={(e) => update({ language: e.target.value as SettingsType["language"] })}
-            className="flex-1 bg-white/[0.05] px-2 py-1 rounded text-xs outline-none"
+            className="flex-1 bg-white/[0.05] px-2 py-1 rounded ui-fs-base outline-none"
           >
             <option value="system">{t("settings.languageSystem")}</option>
             <option value="en">{t("settings.languageEn")}</option>
@@ -63,7 +63,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
           <input
             value={s.font_family}
             onChange={(e) => update({ font_family: e.target.value })}
-            className="flex-1 bg-white/[0.05] px-2 py-1 rounded text-xs outline-none"
+            className="flex-1 bg-white/[0.05] px-2 py-1 rounded ui-fs-base outline-none"
             placeholder={t("settings.fontFamilyPlaceholder")}
           />
         </Field>
@@ -76,11 +76,23 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
             value={s.font_size}
             onChange={(e) => update({ font_size: Number(e.target.value) })}
           />
-          <span className="text-xs ml-2 w-8">{s.font_size}</span>
+          <span className="ui-fs-base ml-2 w-8">{s.font_size}</span>
+        </Field>
+
+        <Field label={t("settings.uiFontSize")}>
+          <input
+            type="range"
+            min={10}
+            max={16}
+            step={0.5}
+            value={s.ui_font_size}
+            onChange={(e) => update({ ui_font_size: Number(e.target.value) })}
+          />
+          <span className="ui-fs-base ml-2 w-8">{s.ui_font_size}</span>
         </Field>
 
         <div className="flex items-center gap-2 mb-3">
-          <label className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-2 ui-fs-base">
             <input
               type="checkbox"
               checked={s.font_thicken}
@@ -94,7 +106,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
           <select
             value={s.theme_dark}
             onChange={(e) => update({ theme_dark: e.target.value })}
-            className="flex-1 bg-white/[0.05] px-2 py-1 rounded text-xs outline-none"
+            className="flex-1 bg-white/[0.05] px-2 py-1 rounded ui-fs-base outline-none"
           >
             {themes.map((th) => (
               <option key={th} value={th}>{th}</option>
@@ -106,7 +118,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
           <select
             value={s.theme_light}
             onChange={(e) => update({ theme_light: e.target.value })}
-            className="flex-1 bg-white/[0.05] px-2 py-1 rounded text-xs outline-none"
+            className="flex-1 bg-white/[0.05] px-2 py-1 rounded ui-fs-base outline-none"
           >
             {themes.map((th) => (
               <option key={th} value={th}>{th}</option>
@@ -115,7 +127,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
         </Field>
 
         <div className="flex items-center gap-2 mb-3">
-          <label className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-2 ui-fs-base">
             <input
               type="checkbox"
               checked={s.editor_wrap_lines}
@@ -136,13 +148,13 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
               // (and persist) once the user clicks Save.
               api.defaultSettings().then(setS);
             }}
-            className="px-3 py-1.5 rounded-md bg-white/[0.05] text-xs hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
           >
             {t("settings.reset")}
           </button>
           <button
             onClick={save}
-            className="px-3 py-1.5 rounded-md bg-muster-accent text-white text-xs active:scale-[.97] transition-transform duration-muster ease-muster"
+            className="px-3 py-1.5 rounded-md bg-muster-accent text-white ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
           >
             {t("settings.save")}
           </button>
@@ -156,7 +168,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3">
-      <div className="text-[10px] text-muster-muted uppercase tracking-wide mb-1">{label}</div>
+      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-1">{label}</div>
       <div className="flex items-center gap-2">{children}</div>
     </div>
   );
@@ -188,8 +200,8 @@ function UsageEntry({ onOpen }: { onOpen: () => void }) {
           <IconChartBar size={16} />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-xs text-muster-fg">{t("settings.openUsage")}</span>
-          <span className="block text-[10px] text-muster-muted mt-0.5 tabular-nums">
+          <span className="block ui-fs-base text-muster-fg">{t("settings.openUsage")}</span>
+          <span className="block ui-fs-xs text-muster-muted mt-0.5 tabular-nums">
             {totals.sessions > 0
               ? t("settings.usageTotals", { tokens: formatTokens(totals.tokens), sessions: totals.sessions })
               : t("settings.usageEmpty")}
@@ -222,12 +234,12 @@ function Integrations() {
     <Field label={t("settings.integrationsTitle")}>
       <button
         onClick={install}
-        className="px-3 py-1.5 rounded-md bg-white/[0.05] text-xs hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+        className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
       >
         {t("settings.installExplorerMenu")}
       </button>
       {result && (
-        <span className={`text-xs ${result.ok ? "text-green-400" : "text-red-400"}`}>
+        <span className={`ui-fs-base ${result.ok ? "text-green-400" : "text-red-400"}`}>
           {result.text}
         </span>
       )}

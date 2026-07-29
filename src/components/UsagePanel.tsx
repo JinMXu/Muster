@@ -130,14 +130,14 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
         >
           {/* Header: title + range + refresh */}
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold">{t("usage.title")}</h2>
+            <h2 className="ui-fs-base font-semibold">{t("usage.title")}</h2>
             <div className="flex items-center gap-3">
               <div className="flex gap-1">
                 {ranges.map((r) => (
                   <button
                     key={r}
                     onClick={() => setRange(r)}
-                    className={`px-2 py-1 rounded text-[11px] transition-colors ${
+                    className={`px-2 py-1 rounded ui-fs-sm transition-colors ${
                       range === r
                         ? "bg-muster-accent text-white"
                         : "bg-white/[0.05] text-muster-muted hover:bg-muster-hover-btn"
@@ -149,7 +149,7 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
               </div>
               <button
                 onClick={handleRefresh}
-                className="px-2 py-1 rounded bg-white/[0.05] text-[11px] text-muster-muted hover:bg-muster-hover-btn transition-colors"
+                className="px-2 py-1 rounded bg-white/[0.05] ui-fs-sm text-muster-muted hover:bg-muster-hover-btn transition-colors"
                 title={t("usage.refresh")}
               >
                 &#8635; {t("usage.refresh")}
@@ -173,7 +173,7 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
                       className="inline-block w-2 h-2 rounded-full"
                       style={{ backgroundColor: color }}
                     />
-                    <span className="text-[11px] font-medium text-muster-muted truncate">
+                    <span className="ui-fs-sm font-medium text-muster-muted truncate">
                       {TOOL_LABELS[tk]}
                     </span>
                   </div>
@@ -182,16 +182,16 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
                       <div className="text-lg font-semibold tabular-nums">
                         {formatTokens(ts!.total_tokens)}
                       </div>
-                      <div className="text-[10px] text-muster-muted mb-1">
+                      <div className="ui-fs-xs text-muster-muted mb-1">
                         {t("usage.tokens")}
                       </div>
-                      <div className="text-[11px] tabular-nums text-muster-muted">
+                      <div className="ui-fs-sm tabular-nums text-muster-muted">
                         {formatCost(ts!.cost_usd)} &middot; {ts!.session_count}{" "}
                         {ts!.session_count === 1 ? t("usage.session") : t("usage.sessions")}
                       </div>
                     </>
                   ) : (
-                    <div className="text-[11px] text-muster-muted/60 py-2">
+                    <div className="ui-fs-sm text-muster-muted/60 py-2">
                       {t("usage.notFound")}
                     </div>
                   )}
@@ -202,14 +202,14 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
 
           {/* Sessions table */}
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-medium text-muster-muted uppercase tracking-wide">
+            <span className="ui-fs-sm font-medium text-muster-muted uppercase tracking-wide">
               {t("usage.sessions")}
             </span>
             <div className="flex items-center gap-2">
               <select
                 value={toolFilter}
                 onChange={(e) => setToolFilter(e.target.value as ToolKind | "all")}
-                className="bg-white/[0.05] border border-white/[0.06] rounded text-[11px] px-2 py-1 text-muster-muted outline-none"
+                className="bg-white/[0.05] border border-white/[0.06] rounded ui-fs-sm px-2 py-1 text-muster-muted outline-none"
               >
                 <option value="all">{t("usage.allTools")}</option>
                 {ALL_TOOLS.map((tk) => (
@@ -219,7 +219,7 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as "time" | "tokens")}
-                className="bg-white/[0.05] border border-white/[0.06] rounded text-[11px] px-2 py-1 text-muster-muted outline-none"
+                className="bg-white/[0.05] border border-white/[0.06] rounded ui-fs-sm px-2 py-1 text-muster-muted outline-none"
               >
                 <option value="time">{t("usage.sortByTime")}</option>
                 <option value="tokens">{t("usage.sortByTokens")}</option>
@@ -229,11 +229,11 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
 
           <div className="overflow-y-auto flex-1 -mx-1 px-1">
             {filteredSessions.length === 0 ? (
-              <div className="text-center text-[11px] text-muster-muted/60 py-8">
+              <div className="text-center ui-fs-sm text-muster-muted/60 py-8">
                 {t("usage.noSessions")}
               </div>
             ) : (
-              <table className="w-full text-[11px]">
+              <table className="w-full ui-fs-sm">
                 <thead>
                   <tr className="text-left text-muster-muted/70 border-b border-white/[0.06]">
                     <th className="py-1.5 pr-3 font-normal">{t("usage.time")}</th>

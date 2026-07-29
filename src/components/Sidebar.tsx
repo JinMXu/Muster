@@ -80,7 +80,7 @@ function FooterButton({
     <button
       title={title}
       onClick={onClick}
-      className="w-6 h-6 rounded-md text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center text-xs active:scale-[.97] transition-transform duration-muster ease-muster"
+      className="w-6 h-6 rounded-md text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
     >
       {children}
     </button>
@@ -172,13 +172,13 @@ function ProjectRow({
             }}
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="bg-transparent border border-muster-accent/60 rounded px-1 text-xs outline-none"
+            className="bg-transparent border border-muster-accent/60 rounded px-1 ui-fs-base outline-none"
           />
         ) : (
-          <div className="text-xs truncate text-muster-fg/90">{project.name}</div>
+          <div className="ui-fs-base truncate text-muster-fg/90">{project.name}</div>
         )}
         {project.session_count > 1 && (
-          <div className="text-[10px] text-muster-muted">
+          <div className="ui-fs-xs text-muster-muted">
             {t("sidebar.sessions", { n: project.session_count })}
           </div>
         )}
@@ -189,13 +189,13 @@ function ProjectRow({
             e.stopPropagation();
             onClose();
           }}
-          className="w-4 h-4 text-muster-muted hover:text-muster-fg flex items-center justify-center text-[10px]"
+          className="w-4 h-4 text-muster-muted hover:text-muster-fg flex items-center justify-center ui-fs-xs"
         >
           <IconX size={11} />
         </button>
       ) : (
         index < 9 && (
-          <span className="text-[10px] text-muster-muted/70">{t("sidebar.shortcutCtrl", { index })}</span>
+          <span className="ui-fs-xs text-muster-muted/70">{t("sidebar.shortcutCtrl", { index })}</span>
         )
       )}
     </div>

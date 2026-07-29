@@ -86,11 +86,11 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   );
 
   if (!cwd || !info) {
-    return <div className="text-muster-muted text-xs p-3">{t("git.locatingRepo")}</div>;
+    return <div className="text-muster-muted ui-fs-base p-3">{t("git.locatingRepo")}</div>;
   }
   if (!info.is_repo) {
     return (
-      <div className="p-3 text-xs text-muster-muted">
+      <div className="p-3 ui-fs-base text-muster-muted">
         {banner}
         <div className="mb-2">{t("git.notARepo")}</div>
         <button
@@ -104,7 +104,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
               })
             )
           }
-          className="px-2 py-1 rounded bg-muster-accent/80 text-white text-[11px] active:scale-[.97] transition-transform duration-muster ease-muster"
+          className="px-2 py-1 rounded bg-muster-accent/80 text-white ui-fs-sm active:scale-[.97] transition-transform duration-muster ease-muster"
         >
           {t("git.initializeRepo")}
         </button>
@@ -280,7 +280,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   const noMatches = q.length > 0 && mergeEntries.length + stagedEntries.length + changedEntries.length === 0;
 
   return (
-    <div className="h-full flex flex-col text-xs">
+    <div className="h-full flex flex-col ui-fs-base">
       <div className="px-3 pt-2 pb-1 flex items-center gap-2">
         <span className="text-muster-accent flex items-center">
           <IconGitBranch size={13} />
@@ -299,7 +299,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
                   );
                 }
               }}
-              className="bg-transparent text-[12px] font-medium outline-none max-w-[150px] cursor-pointer"
+              className="bg-transparent ui-fs-base font-medium outline-none max-w-[150px] cursor-pointer"
               title={t("git.switchBranch")}
             >
               {!info.branch && <option value="">{t("git.detached")}</option>}
@@ -323,12 +323,12 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
                   api.git.createBranch(info.repo_root, name).then(() => t("git.createdBranch", { name }))
                 );
               }}
-              className="px-1 rounded text-[10px] text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg active:scale-[.97] transition-transform duration-muster ease-muster"
+              className="px-1 rounded ui-fs-xs text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               +
             </button>
           </div>
-          <div className="text-[10px] text-muster-muted truncate">
+          <div className="ui-fs-xs text-muster-muted truncate">
             {info.upstream ? `${info.upstream}` : "unpublished"}
             {info.ahead > 0 && ` ↑${info.ahead}`}
             {info.behind > 0 && ` ↓${info.behind}`}
@@ -360,13 +360,13 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder={t("git.filterPlaceholder")}
-            className="flex-1 min-w-0 bg-white/[0.05] rounded-md px-2 py-1 text-[11px] outline-none"
+            className="flex-1 min-w-0 bg-white/[0.05] rounded-md px-2 py-1 ui-fs-sm outline-none"
           />
           {filter && (
             <button
               title={t("git.clearFilter")}
               onClick={() => setFilter("")}
-              className="px-0.5 rounded text-[9px] text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+              className="px-0.5 rounded ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               ✕
             </button>
@@ -385,13 +385,13 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
               defaultCommit();
             }
           }}
-          className="w-full bg-white/[0.05] rounded-md px-2 py-1.5 text-[11px] outline-none resize-none"
+          className="w-full bg-white/[0.05] rounded-md px-2 py-1.5 ui-fs-sm outline-none resize-none"
         />
         <div className="flex">
           <button
             onClick={defaultCommit}
             disabled={!defaultCommitEnabled}
-            className="flex-1 px-3 py-1.5 rounded-l-md bg-muster-accent/85 text-white text-[11px] disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
+            className="flex-1 px-3 py-1.5 rounded-l-md bg-muster-accent/85 text-white ui-fs-sm disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
           >
             {stagedCount > 0 ? t("git.commitNStaged", { n: stagedCount }) : t("git.stageAllAndCommitBtn")}
           </button>
@@ -493,15 +493,15 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             ) : undefined
           }
         />
-        {noMatches && <div className="px-2 py-2 text-[10px] text-muster-muted">{t("git.noMatchingFiles")}</div>}
+        {noMatches && <div className="px-2 py-2 ui-fs-xs text-muster-muted">{t("git.noMatchingFiles")}</div>}
         {!filterOpen && info.recent_commits.length > 0 && (
           <div>
-            <div className="text-[10px] text-muster-muted/80 px-2 py-1 mt-2">{t("git.recentCommits")}</div>
+            <div className="ui-fs-xs text-muster-muted/80 px-2 py-1 mt-2">{t("git.recentCommits")}</div>
             {info.recent_commits.map((c) => (
               <div key={c.hash} className="px-2 py-1 hover:bg-muster-hover rounded">
                 <div className="flex items-center gap-2">
-                  <span className="text-muster-accent/80 text-[10px] font-mono">{c.short_hash}</span>
-                  <span className="text-muster-fg/80 text-[11px] flex-1 truncate">{c.subject}</span>
+                  <span className="text-muster-accent/80 ui-fs-xs font-mono">{c.short_hash}</span>
+                  <span className="text-muster-fg/80 ui-fs-sm flex-1 truncate">{c.subject}</span>
                 </div>
               </div>
             ))}
@@ -518,8 +518,8 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             className="w-[380px] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] p-4 muster-pop"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-[13px] font-medium mb-1">{t("git.discardConfirmTitle")}</div>
-            <div className="text-[11px] text-muster-muted mb-2">
+            <div className="ui-fs-base font-medium mb-1">{t("git.discardConfirmTitle")}</div>
+            <div className="ui-fs-sm text-muster-muted mb-2">
               {discardTarget.kind === "single"
                 ? discardTarget.is_untracked
                   ? t("git.discardConfirmSingularUntracked")
@@ -530,16 +530,16 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             </div>
             <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
               {discardTarget.kind === "single" ? (
-                <div className="text-[12px] text-muster-fg/80 truncate">• {discardTarget.path}</div>
+                <div className="ui-fs-base text-muster-fg/80 truncate">• {discardTarget.path}</div>
               ) : (
                 discardTarget.guard.entries.map((entry) => (
-                  <div key={entry.path} className="text-[12px] text-muster-fg/80 truncate">
+                  <div key={entry.path} className="ui-fs-base text-muster-fg/80 truncate">
                     • {entry.path}
                   </div>
                 ))
               )}
             </div>
-            <div className="flex justify-end gap-2 text-[11px]">
+            <div className="flex justify-end gap-2 ui-fs-sm">
               <button
                 className="px-2.5 py-1 rounded-md text-muster-muted hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
                 onClick={() => setDiscardTarget(null)}
@@ -581,26 +581,26 @@ function OpsBanner({
             {op.status === "running" && (
               <span className="w-2.5 h-2.5 shrink-0 rounded-full border border-muster-muted/40 border-t-muster-accent animate-spin" />
             )}
-            {op.status === "ok" && <span className="text-green-400 text-[10px]">✓</span>}
-            {op.status === "failed" && <span className="text-red-400 text-[10px]">✕</span>}
-            <span className="flex-1 truncate text-[11px] text-muster-fg/80">{op.label}</span>
+            {op.status === "ok" && <span className="text-green-400 ui-fs-xs">✓</span>}
+            {op.status === "failed" && <span className="text-red-400 ui-fs-xs">✕</span>}
+            <span className="flex-1 truncate ui-fs-sm text-muster-fg/80">{op.label}</span>
             <button
               onClick={() => onToggle(op.id)}
               title={t("git.toggleOutput")}
-              className="text-[9px] text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
+              className="ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               {op.expanded ? "▾" : "▸"}
             </button>
             <button
               onClick={() => onDismiss(op.id)}
               title={t("git.dismiss")}
-              className="text-[9px] text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
+              className="ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               ✕
             </button>
           </div>
           {op.expanded && (
-            <pre className="mt-1 max-h-28 overflow-auto select-text whitespace-pre-wrap break-all font-mono text-[10px] text-muster-muted">
+            <pre className="mt-1 max-h-28 overflow-auto select-text whitespace-pre-wrap break-all font-mono ui-fs-xs text-muster-muted">
               {op.output}
             </pre>
           )}
@@ -635,7 +635,7 @@ function Section({
   return (
     <div className="mb-1">
       <div className="flex items-center justify-between px-2 py-1">
-        <span className="text-[10px] text-muster-muted/80">
+        <span className="ui-fs-xs text-muster-muted/80">
           {t("git.sectionCount", { title, count: items.length })}
         </span>
         {actions && <span className="flex items-center gap-0.5">{actions}</span>}
@@ -643,7 +643,7 @@ function Section({
       {items.map((e) => (
         <div
           key={e.path}
-          className="group flex items-center gap-1 px-2 py-1 hover:bg-muster-hover rounded text-[11px]"
+          className="group flex items-center gap-1 px-2 py-1 hover:bg-muster-hover rounded ui-fs-sm"
           onContextMenu={(ev) => {
             if (!onRowMenu) return;
             ev.preventDefault();
@@ -659,7 +659,7 @@ function Section({
             <button
               onClick={() => onDiscard(e)}
               title={t("git.discardRowTitle")}
-              className="opacity-0 group-hover:opacity-100 text-[9px] text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
+              className="opacity-0 group-hover:opacity-100 ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               ✕
             </button>
@@ -667,7 +667,7 @@ function Section({
           {stageLabel && onStage && (
             <button
               onClick={() => onStage(e)}
-              className="opacity-0 group-hover:opacity-100 text-[9px] text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
+              className="opacity-0 group-hover:opacity-100 ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               {stageLabel}
             </button>
@@ -691,7 +691,7 @@ function HeaderButton({
   return (
     <button
       onClick={onClick}
-      className={`px-1 rounded text-[10px] hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster ${
+      className={`px-1 rounded ui-fs-xs hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster ${
         danger ? "text-muster-muted hover:text-red-400" : "text-muster-muted hover:text-muster-fg"
       }`}
     >
@@ -713,7 +713,7 @@ function SmallButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex-1 px-1.5 py-1 rounded bg-white/[0.05] text-[10px] enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
+      className="flex-1 px-1.5 py-1 rounded bg-white/[0.05] ui-fs-xs enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
     >
       {children}
     </button>

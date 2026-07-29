@@ -35,6 +35,7 @@ async function applyAll(s: SettingsType): Promise<void> {
   }
   applyTerminalFont({ family: s.font_family, size: s.font_size, thicken: s.font_thicken });
   applyThemeFonts(s.font_family);
+  document.documentElement.style.setProperty("--ui-font-scale", String((s.ui_font_size ?? 12) / 12));
 }
 
 /// Load settings from the backend, store them, and apply everything.

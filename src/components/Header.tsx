@@ -135,7 +135,7 @@ export default function Header({
         <button
           onClick={onNewSession}
           title={t("header.newSessionTooltip")}
-          className="w-5 h-5 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center text-xs flex-shrink-0 active:scale-[.97] transition-transform duration-muster ease-muster"
+          className="w-5 h-5 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base flex-shrink-0 active:scale-[.97] transition-transform duration-muster ease-muster"
         >
           <IconPlus size={13} />
         </button>
@@ -145,7 +145,7 @@ export default function Header({
           <button
             onClick={onExitZoom}
             title={t("header.exitZoomTooltip")}
-            className="w-5 h-5 rounded text-muster-accent hover:bg-muster-hover-btn flex items-center justify-center text-xs active:scale-[.97] transition-transform duration-muster ease-muster"
+            className="w-5 h-5 rounded text-muster-accent hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
           >
             <IconMaximize2 size={13} />
           </button>
@@ -154,7 +154,7 @@ export default function Header({
           <button
             onClick={togglePanel}
             title={t("header.toggleRightSidebarTooltip")}
-            className={`w-5 h-5 rounded flex items-center justify-center text-xs hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster ${
+            className={`w-5 h-5 rounded flex items-center justify-center ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster ${
               panelVisible ? "text-muster-accent" : "text-muster-muted"
             }`}
           >
@@ -230,7 +230,7 @@ function TabItem({
         e.preventDefault();
         onMenu(e.clientX, e.clientY, startRename);
       }}
-      className={`group relative rounded-md px-2 py-1 max-w-[220px] flex items-center gap-1 cursor-pointer whitespace-nowrap text-xs flex-shrink-0 ${
+      className={`group relative rounded-md px-2 py-1 max-w-[220px] flex items-center gap-1 cursor-pointer whitespace-nowrap ui-fs-base flex-shrink-0 ${
         isSelected ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted hover:bg-muster-hover"
       } ${isDragging ? "opacity-65" : ""}`}
     >
@@ -245,14 +245,14 @@ function TabItem({
             if (e.key === "Escape") finish(false);
           }}
           onClick={(e) => e.stopPropagation()}
-          className="bg-transparent border border-muster-accent/60 rounded px-1 text-xs outline-none"
+          className="bg-transparent border border-muster-accent/60 rounded px-1 ui-fs-base outline-none"
         />
       ) : (
         <>
-          <span className={`${isSelected ? "text-muster-accent" : "text-muster-muted/60"} text-[10px]`}>•</span>
+          <span className={`${isSelected ? "text-muster-accent" : "text-muster-muted/60"} ui-fs-xs`}>•</span>
           <span className="truncate">{tab.custom_name ?? tab.display_title ?? t("header.untitled")}</span>
           {tab.pane_count > 1 && (
-            <span className="text-[9px] text-muster-muted/70">[] {tab.pane_count}</span>
+            <span className="ui-fs-2xs text-muster-muted/70">[] {tab.pane_count}</span>
           )}
           {hovering ? (
             <button

@@ -68,6 +68,7 @@ const en = {
     fontFamily: "Font family",
     fontFamilyPlaceholder: "JetBrains Mono (default)",
     fontSize: "Font size",
+    uiFontSize: "UI font size",
     thickenFont: "Thicken font strokes",
     darkTheme: "Dark theme",
     lightTheme: "Light theme",

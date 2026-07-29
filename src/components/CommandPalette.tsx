@@ -162,11 +162,11 @@ export default function CommandPalette({
                 i === selection ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted"
               }`}
             >
-              <span className={`text-[11px] ${i === selection ? "text-muster-accent" : "text-muster-muted"}`}>
+              <span className={`ui-fs-sm ${i === selection ? "text-muster-accent" : "text-muster-muted"}`}>
                 {cmd.icon}
               </span>
               <span className="flex-1 truncate">{cmd.title}</span>
-              {cmd.shortcut && <span className="text-[11px] text-muster-muted/80">{cmd.shortcut}</span>}
+              {cmd.shortcut && <span className="ui-fs-sm text-muster-muted/80">{cmd.shortcut}</span>}
             </button>
           ))}
         </div>

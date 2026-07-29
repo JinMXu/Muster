@@ -335,7 +335,7 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
   return (
     <div className="h-full overflow-y-auto px-2 py-2">
       <div className="flex items-center gap-1 mb-2 px-1">
-        <div className="flex-1 min-w-0 flex items-center gap-1 text-xs text-muster-muted truncate" title={cwd}>
+        <div className="flex-1 min-w-0 flex items-center gap-1 ui-fs-base text-muster-muted truncate" title={cwd}>
           <IconFolder size={12} className="flex-shrink-0" />
           <span className="truncate">{project?.name ?? cwd}</span>
         </div>
@@ -375,7 +375,7 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
         )
       )}
       {flattened.length === 0 && (
-        <div className="text-[11px] text-muster-muted/70 px-2 py-3">{t("fileTree.empty")}</div>
+        <div className="ui-fs-sm text-muster-muted/70 px-2 py-3">{t("fileTree.empty")}</div>
       )}
     </div>
   );
@@ -394,7 +394,7 @@ function HeaderButton({
     <button
       title={title}
       onClick={onClick}
-      className="px-1 rounded text-[10px] text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg active:scale-[.97] transition-transform duration-muster ease-muster flex items-center"
+      className="px-1 rounded ui-fs-xs text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg active:scale-[.97] transition-transform duration-muster ease-muster flex items-center"
     >
       {children}
     </button>
@@ -418,7 +418,7 @@ function DraftRow({
   const { t } = useT();
   return (
     <div
-      className="flex items-center gap-1 px-1.5 py-1 text-xs rounded"
+      className="flex items-center gap-1 px-1.5 py-1 ui-fs-base rounded"
       style={{ paddingLeft: `${depth * 12 + 6}px` }}
     >
       {isDirectory ? (
@@ -440,7 +440,7 @@ function DraftRow({
           else if (e.key === "Escape") onCancel();
         }}
         onBlur={(e) => onCommit(e.target.value)}
-        className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 text-[11px] outline-none text-muster-fg"
+        className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 ui-fs-sm outline-none text-muster-fg"
       />
     </div>
   );
@@ -495,7 +495,7 @@ function Row({
         e.preventDefault();
         onContextMenu(e.clientX, e.clientY);
       }}
-      className={`group flex items-center gap-1 px-1.5 py-1 text-xs cursor-pointer rounded ${
+      className={`group flex items-center gap-1 px-1.5 py-1 ui-fs-base cursor-pointer rounded ${
         isSelected ? "bg-muster-selected text-muster-fg" : "hover:bg-muster-hover text-muster-muted"
       }`}
       style={{ paddingLeft: `${node.depth * 12 + 6}px` }}
@@ -520,7 +520,7 @@ function Row({
             else if (e.key === "Escape") onCancelRename();
           }}
           onBlur={(e) => onRename(e.target.value)}
-          className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 text-[11px] outline-none text-muster-fg"
+          className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 ui-fs-sm outline-none text-muster-fg"
         />
       ) : (
         <span className="flex-1 truncate">{node.name}</span>
@@ -565,7 +565,7 @@ function RowButton({
         e.stopPropagation();
         onClick();
       }}
-      className="px-0.5 rounded text-[9px] text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex items-center"
+      className="px-0.5 rounded ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex items-center"
     >
       {children}
     </button>

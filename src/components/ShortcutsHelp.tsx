@@ -74,16 +74,16 @@ export default function ShortcutsHelp({ onClose }: { onClose: () => void }) {
         className="mt-16 w-[480px] max-w-[90vw] max-h-[75vh] overflow-y-auto bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] px-5 py-4 muster-pop"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-sm font-semibold mb-3">{t("shortcuts.title")}</h2>
+        <h2 className="ui-fs-base font-semibold mb-3">{t("shortcuts.title")}</h2>
         {GROUPS.map((group) => (
           <div key={group.titleKey} className="mb-3">
-            <div className="text-[10px] text-muster-muted uppercase tracking-wide mb-1">
+            <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-1">
               {t(group.titleKey)}
             </div>
             {group.items.map((item) => (
               <div key={item.keys} className="flex items-center justify-between py-[3px]">
-                <span className="text-xs text-muster-fg/80">{t(item.labelKey)}</span>
-                <kbd className="bg-white/[0.06] rounded px-1.5 py-0.5 text-[11px] font-mono text-muster-muted whitespace-nowrap">
+                <span className="ui-fs-base text-muster-fg/80">{t(item.labelKey)}</span>
+                <kbd className="bg-white/[0.06] rounded px-1.5 py-0.5 ui-fs-sm font-mono text-muster-muted whitespace-nowrap">
                   {item.keys}
                 </kbd>
               </div>

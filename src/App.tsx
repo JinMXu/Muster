@@ -542,20 +542,20 @@ export default function App() {
             className="w-[380px] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] p-4 muster-pop"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-[13px] font-medium mb-1">{t("app.unsavedChangesTitle")}</div>
-            <div className="text-[11px] text-muster-muted mb-2">
+            <div className="ui-fs-base font-medium mb-1">{t("app.unsavedChangesTitle")}</div>
+            <div className="ui-fs-sm text-muster-muted mb-2">
               {closePrompt.files.length === 1
                 ? t("app.unsavedChangesSingular")
                 : t("app.unsavedChangesPlural", { n: closePrompt.files.length })}
             </div>
             <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
               {closePrompt.files.map((f) => (
-                <div key={f.id} className="text-[12px] text-muster-fg/80 truncate">
+                <div key={f.id} className="ui-fs-base text-muster-fg/80 truncate">
                   • {f.name}
                 </div>
               ))}
             </div>
-            <div className="flex justify-end gap-2 text-[11px]">
+            <div className="flex justify-end gap-2 ui-fs-sm">
               <button
                 className="px-2.5 py-1 rounded-md text-muster-muted hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
                 onClick={() => setClosePrompt(null)}
@@ -605,9 +605,9 @@ function EmptyState({
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muster-muted">
       <IconTerminal size={32} />
-      <div className="text-sm">{hasProject ? t("app.noOpenSessions") : t("app.noOpenProjects")}</div>
+      <div className="ui-fs-base">{hasProject ? t("app.noOpenSessions") : t("app.noOpenProjects")}</div>
       <button
-        className="px-3 py-1.5 rounded-md bg-muster-accent text-white text-xs"
+        className="px-3 py-1.5 rounded-md bg-muster-accent text-white ui-fs-base"
         onClick={hasProject ? onNewSession : onNewProject}
       >
         {hasProject ? t("app.newSessionHint") : t("app.newProjectHint")}

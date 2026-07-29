@@ -114,9 +114,9 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   };
 
   return (
-    <div className="p-3 text-xs space-y-3">
+    <div className="p-3 ui-fs-base space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] text-muster-muted uppercase tracking-wide">{t("info.title")}</div>
+        <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{t("info.title")}</div>
         <button
           onClick={refresh}
           title={t("info.refresh")}
@@ -163,7 +163,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
           <hr className="border-white/[0.08]" />
           <Section label={t("info.processes")}>
             {procs.length === 0 ? (
-              <div className="text-[11px] text-muster-muted/70 px-1">{t("info.noRunningProcesses")}</div>
+              <div className="ui-fs-sm text-muster-muted/70 px-1">{t("info.noRunningProcesses")}</div>
             ) : (
               procs.map((p) => (
                 <ProcRow key={p.pid} p={p} onKill={kill} onMenu={procMenu} />
@@ -172,7 +172,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
           </Section>
           <Section label={t("info.ports")}>
             {ports.length === 0 ? (
-              <div className="text-[11px] text-muster-muted/70 px-1">{t("info.noListeningPorts")}</div>
+              <div className="ui-fs-sm text-muster-muted/70 px-1">{t("info.noListeningPorts")}</div>
             ) : (
               ports.map((pt) => (
                 <PortRow key={pt.port} pt={pt} onMenu={portMenu} />
@@ -200,8 +200,8 @@ function formatMem(bytes: number): string {
 function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
-      <div className="text-[10px] text-muster-muted uppercase tracking-wide">{label}</div>
-      <div className="text-[11px] text-muster-fg/80 break-all mt-0.5">
+      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{label}</div>
+      <div className="ui-fs-sm text-muster-fg/80 break-all mt-0.5">
         {value}
         {hint && <span className="text-muster-muted/70 ml-1">{hint}</span>}
       </div>
@@ -212,7 +212,7 @@ function Row({ label, value, hint }: { label: string; value: string; hint?: stri
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] text-muster-muted uppercase tracking-wide">{label}</div>
+      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{label}</div>
       <div className="mt-1 space-y-0.5">{children}</div>
     </div>
   );
@@ -230,7 +230,7 @@ function ProcRow({
   const { t } = useT();
   return (
     <div
-      className="group flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muster-hover text-[11px] text-muster-fg/80"
+      className="group flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muster-hover ui-fs-sm text-muster-fg/80"
       onContextMenu={(e) => onMenu(e, p)}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
@@ -263,7 +263,7 @@ function PortRow({
   const url = `http://localhost:${pt.port}`;
   return (
     <div
-      className="group flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muster-hover text-[11px] text-muster-fg/80 cursor-pointer"
+      className="group flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muster-hover ui-fs-sm text-muster-fg/80 cursor-pointer"
       title={t("info.openPortUrl", { port: pt.port })}
       onClick={() => openUrl(url)}
       onContextMenu={(e) => onMenu(e, pt)}

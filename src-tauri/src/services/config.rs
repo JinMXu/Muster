@@ -26,6 +26,8 @@ pub struct Settings {
     pub font_family: String,
     #[serde(default = "default_font_size")]
     pub font_size: f64,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: f64,
     #[serde(default)]
     pub font_thicken: bool,
     #[serde(default)]
@@ -42,6 +44,7 @@ impl Default for Settings {
             theme_light: "Default Light".into(),
             font_family: String::new(),
             font_size: 13.0,
+            ui_font_size: 12.0,
             font_thicken: false,
             editor_wrap_lines: false,
             language: "system".into(),
@@ -52,6 +55,7 @@ impl Default for Settings {
 impl Settings {
     pub const FONT_SIZE_RANGE: (f64, f64) = (8.0, 32.0);
     const DEFAULT_FONT_SIZE: f64 = 13.0;
+    const DEFAULT_UI_FONT_SIZE: f64 = 12.0;
 
     pub fn load() -> Self {
         Self::load_from(&config_path())
@@ -101,6 +105,7 @@ impl AppTheme {
 fn default_dark() -> String { "Default Dark".into() }
 fn default_light() -> String { "Default Light".into() }
 fn default_font_size() -> f64 { Settings::DEFAULT_FONT_SIZE }
+fn default_ui_font_size() -> f64 { Settings::DEFAULT_UI_FONT_SIZE }
 fn default_language() -> String { "system".into() }
 
 #[cfg(test)]
@@ -122,6 +127,7 @@ mod tests {
         let s = Settings::load_from(&path);
 
         assert_eq!(s.font_size, Settings::DEFAULT_FONT_SIZE);
+        assert_eq!(s.ui_font_size, Settings::DEFAULT_UI_FONT_SIZE);
         assert_eq!(s.theme, AppTheme::System);
         assert!(path.exists(), "defaults are written back on first load");
         fs::remove_dir_all(&dir).ok();
@@ -154,6 +160,9 @@ mod tests {
 
         assert_eq!(s.theme, AppTheme::Dark);
         assert_eq!(s.font_size, 20.0);
+        // Field added after this config was written: old files lack it and
+        // must fall back to the serde default.
+        assert_eq!(s.ui_font_size, Settings::DEFAULT_UI_FONT_SIZE);
         assert_eq!(s.theme_dark, "Default Dark");
         assert_eq!(s.theme_light, "Default Light");
         assert!(s.font_family.is_empty());
@@ -168,6 +177,7 @@ mod tests {
 
         let s = Settings {
             font_size: 17.5,
+            ui_font_size: 14.0,
             font_family: "Cascadia Code".into(),
             theme: AppTheme::Light,
             ..Default::default()
@@ -176,6 +186,7 @@ mod tests {
 
         let loaded = Settings::load_from(&path);
         assert_eq!(loaded.font_size, 17.5);
+        assert_eq!(loaded.ui_font_size, 14.0);
         assert_eq!(loaded.font_family, "Cascadia Code");
         assert_eq!(loaded.theme, AppTheme::Light);
         fs::remove_dir_all(&dir).ok();

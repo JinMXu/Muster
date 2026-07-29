@@ -58,7 +58,7 @@ export default function TabSwitcher({
               }`}
             >
               <span
-                className={`w-6 text-center text-[11px] font-mono ${
+                className={`w-6 text-center ui-fs-sm font-mono ${
                   i === index ? "text-muster-accent" : "text-muster-muted"
                 }`}
               >
@@ -66,7 +66,7 @@ export default function TabSwitcher({
               </span>
               <span className="flex-1 truncate">{tab.title}</span>
               {tab.subtitle && (
-                <span className="max-w-[45%] truncate text-[11px] text-muster-muted/80" dir="rtl">
+                <span className="max-w-[45%] truncate ui-fs-sm text-muster-muted/80" dir="rtl">
                   {tab.subtitle}
                 </span>
               )}

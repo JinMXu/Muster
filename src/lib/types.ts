@@ -12,6 +12,7 @@ export interface Settings {
   theme_light: string;
   font_family: string;
   font_size: number;
+  ui_font_size: number;
   font_thicken: boolean;
   editor_wrap_lines: boolean;
   language: "system" | "en" | "zh";

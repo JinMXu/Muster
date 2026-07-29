@@ -90,7 +90,7 @@ export default function FilePane({
   };
 
   if (!info) {
-    return <div className="w-full h-full flex items-center justify-center text-muster-muted text-xs">{t("filePane.loading")}</div>;
+    return <div className="w-full h-full flex items-center justify-center text-muster-muted ui-fs-base">{t("filePane.loading")}</div>;
   }
   if (info.content_kind === "image") {
     return (
@@ -100,13 +100,13 @@ export default function FilePane({
     );
   }
   if (info.content_kind === "unavailable") {
-    return <div className="w-full h-full flex items-center justify-center text-muster-muted text-xs">{info.name}</div>;
+    return <div className="w-full h-full flex items-center justify-center text-muster-muted ui-fs-base">{info.name}</div>;
   }
 
   return (
     <div className="w-full h-full flex flex-col bg-muster-bg">
       {info.is_dirty && (
-        <div className="text-[10px] text-amber-400 px-3 py-1 border-b border-amber-400/30">
+        <div className="ui-fs-xs text-amber-400 px-3 py-1 border-b border-amber-400/30">
           {t("filePane.modified", { name: info.name })}
         </div>
       )}

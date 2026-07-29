@@ -68,6 +68,7 @@ const zh = {
     fontFamily: "字体",
     fontFamilyPlaceholder: "JetBrains Mono（默认）",
     fontSize: "字号",
+    uiFontSize: "界面字号",
     thickenFont: "加粗字体描边",
     darkTheme: "深色主题",
     lightTheme: "浅色主题",

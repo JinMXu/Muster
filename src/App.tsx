@@ -11,6 +11,7 @@ import TabSwitcher, { type SwitcherTab } from "./components/TabSwitcher";
 import Settings from "./components/Settings";
 import ShortcutsHelp from "./components/ShortcutsHelp";
 import ContextMenu from "./components/ContextMenu";
+import UsagePanel from "./components/UsagePanel";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm } from "./lib/terminalRegistry";
@@ -25,6 +26,7 @@ export default function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
 
   // Settings (theme, fonts, editor options) live in settingsStore: loaded
   // once here, applied there, reloaded when the Settings modal closes.
@@ -233,6 +235,7 @@ export default function App() {
       "ctrl+s": saveFile,
       "ctrl+k": clearTerminal,
       "ctrl+,": () => setShowSettings(true),
+      "ctrl+shift+u": () => setShowUsage(true),
     };
     const onKey = (e: KeyboardEvent) => {
       const parts: string[] = [];
@@ -495,6 +498,7 @@ export default function App() {
           onCloseProject={closeSelectedProject}
           onOpenSettings={() => setShowSettings(true)}
           onOpenShortcuts={() => setShowShortcuts(true)}
+          onOpenUsage={() => setShowUsage(true)}
         />
       )}
       {switcherView && (
@@ -516,6 +520,7 @@ export default function App() {
         <Settings onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }} />
       )}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
+      {showUsage && <UsagePanel onClose={() => setShowUsage(false)} />}
       <ContextMenu />
       {closePrompt && (
         <div

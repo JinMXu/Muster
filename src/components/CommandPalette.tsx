@@ -21,6 +21,7 @@ export default function CommandPalette({
   onCloseProject,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenUsage,
 }: {
   onClose: () => void;
   onAskNewProject: () => void;
@@ -28,6 +29,7 @@ export default function CommandPalette({
   onCloseProject: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenUsage: () => void;
 }) {
   const { t } = useT();
   const [query, setQuery] = useState("");
@@ -80,8 +82,9 @@ export default function CommandPalette({
       })),
       { id: "open-settings", title: t("commandPalette.openSettings"), icon: "⚙", shortcut: "Ctrl+,", action: onOpenSettings },
       { id: "keyboard-shortcuts", title: t("shortcuts.title"), icon: "⌨", shortcut: "Ctrl+/", action: onOpenShortcuts },
+      { id: "open-usage", title: t("commandPalette.openUsage"), icon: "▤", shortcut: "Ctrl+Shift+U", action: onOpenUsage },
     ],
-    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, t]
+    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, onOpenUsage, t]
   );
 
   const sessionItems: CommandItem[] = sessions.map((s) => ({

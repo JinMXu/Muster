@@ -12,6 +12,7 @@ import Settings from "./components/Settings";
 import ShortcutsHelp from "./components/ShortcutsHelp";
 import ContextMenu from "./components/ContextMenu";
 import UsagePanel from "./components/UsagePanel";
+import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm } from "./lib/terminalRegistry";
@@ -596,7 +597,7 @@ function EmptyState({
   const { t } = useT();
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muster-muted">
-      <div className="text-3xl font-light">◆</div>
+      <IconTerminal size={32} />
       <div className="text-sm">{hasProject ? t("app.noOpenSessions") : t("app.noOpenProjects")}</div>
       <button
         className="px-3 py-1.5 rounded-md bg-muster-accent text-white text-xs"

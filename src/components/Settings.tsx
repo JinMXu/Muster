@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/invoke";
-import type { Settings as SettingsType } from "../lib/types";
+import { formatTokens } from "../lib/format";
+import type { Settings as SettingsType, UsageSummary } from "../lib/types";
 import { useT } from "../lib/i18n/context";
+import { IconChartBar, IconChevronRight } from "./icons";
 
 /// Modal settings window: font / colors / appearance / editor / terminal.
 export default function Settings({ onClose, onOpenUsage }: { onClose: () => void; onOpenUsage: () => void }) {
@@ -137,14 +139,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
 
         <Integrations />
 
-        <div className="mb-4">
-          <button
-            onClick={() => { onOpenUsage(); }}
-            className="text-xs text-muster-muted hover:text-white transition-colors"
-          >
-            {t("settings.openUsage")} →
-          </button>
-        </div>
+        <UsageEntry onOpen={onOpenUsage} />
 
         <div className="flex justify-end gap-2">
           <button
@@ -175,6 +170,47 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="mb-3">
       <div className="text-[10px] text-muster-muted uppercase tracking-wide mb-1">{label}</div>
       <div className="flex items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+/// Token-usage entry card: chart icon tile + live aggregate (total tokens and
+/// sessions from the cached usage summary) + chevron. Replaces the bare text
+/// link; matches the card style used inside the usage panel itself.
+function UsageEntry({ onOpen }: { onOpen: () => void }) {
+  const { t } = useT();
+  const [summary, setSummary] = useState<UsageSummary | null>(null);
+
+  useEffect(() => {
+    api.usage.summary().then(setSummary).catch(() => {});
+  }, []);
+
+  const totals = (summary?.tools ?? []).reduce(
+    (acc, ts) => ({ tokens: acc.tokens + ts.total_tokens, sessions: acc.sessions + ts.session_count }),
+    { tokens: 0, sessions: 0 }
+  );
+
+  return (
+    <div className="mb-4">
+      <button
+        onClick={onOpen}
+        className="w-full flex items-center gap-3 bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2.5 text-left hover:bg-white/[0.06] hover:border-white/[0.1] active:scale-[.99] transition-all duration-muster ease-muster"
+      >
+        <span className="w-8 h-8 shrink-0 rounded-md bg-muster-accent/15 text-muster-accent flex items-center justify-center">
+          <IconChartBar size={16} />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-xs text-muster-fg">{t("settings.openUsage")}</span>
+          <span className="block text-[10px] text-muster-muted mt-0.5 tabular-nums">
+            {totals.sessions > 0
+              ? t("settings.usageTotals", { tokens: formatTokens(totals.tokens), sessions: totals.sessions })
+              : t("settings.usageEmpty")}
+          </span>
+        </span>
+        <span className="text-muster-muted shrink-0">
+          <IconChevronRight size={14} />
+        </span>
+      </button>
     </div>
   );
 }

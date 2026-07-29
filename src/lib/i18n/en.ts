@@ -81,6 +81,9 @@ const en = {
     reset: "Reset",
     save: "Save",
     openUsage: "Token Usage",
+    usageTotals: ({ tokens, sessions }: { tokens: string; sessions: number }) =>
+      `${tokens} tokens · ${sessions} sessions`,
+    usageEmpty: "No usage recorded yet",
   },
 
   rightSidebar: {

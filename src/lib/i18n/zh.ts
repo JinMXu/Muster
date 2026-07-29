@@ -81,6 +81,9 @@ const zh = {
     reset: "重置",
     save: "保存",
     openUsage: "Token 用量",
+    usageTotals: ({ tokens, sessions }: { tokens: string; sessions: number }) =>
+      `共 ${tokens} tokens · ${sessions} 个会话`,
+    usageEmpty: "暂无使用记录",
   },
 
   rightSidebar: {

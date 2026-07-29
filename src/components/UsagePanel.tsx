@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
+import { formatTokens } from "../lib/format";
 import type { ToolKind, ToolSummary, UsageSession, UsageSummary } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 
@@ -21,12 +22,6 @@ const TOOL_LABELS: Record<ToolKind, string> = {
 };
 
 const ALL_TOOLS: ToolKind[] = ["opencode", "claude_code", "codex", "kimi_code"];
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
-  return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-}
 
 function formatCost(c: number | null): string {
   if (c === null) return "-";

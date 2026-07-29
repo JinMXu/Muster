@@ -193,3 +193,43 @@ export interface ThemeColors {
   divider: string;
   palette: string[];
 }
+
+/// Which CLI tool a usage record came from (mirrors Rust ToolKind).
+export type ToolKind = "opencode" | "claude_code" | "codex" | "kimi_code";
+
+/// Normalized token breakdown shared across all four tools.
+export interface TokenUsage {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+/// One session's usage (mirrors Rust UsageSession).
+export interface UsageSession {
+  tool: ToolKind;
+  session_id: string;
+  title: string;
+  cwd: string;
+  model: string;
+  started_at: number;
+  updated_at: number;
+  tokens: TokenUsage;
+  cost_usd: number | null;
+}
+
+/// Per-tool aggregate for the summary cards (mirrors Rust ToolSummary).
+export interface ToolSummary {
+  tool: ToolKind;
+  total_tokens: number;
+  tokens: TokenUsage;
+  session_count: number;
+  cost_usd: number | null;
+  last_updated: number;
+}
+
+/// Top-level summary payload (mirrors Rust UsageSummary).
+export interface UsageSummary {
+  tools: ToolSummary[];
+}

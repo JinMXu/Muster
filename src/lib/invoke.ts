@@ -13,6 +13,9 @@ import type {
   SessionInfo,
   Settings,
   ThemeColors,
+  ToolKind,
+  UsageSession,
+  UsageSummary,
   Uuid,
 } from "./types";
 
@@ -129,6 +132,12 @@ export const api = {
     stashAll: (repoRoot: string) => c<void>("git_stash_all", { repoRoot }),
     stashPop: (repoRoot: string) => c<void>("git_stash_pop", { repoRoot }),
     init: (repoRoot: string) => c<void>("git_init", { repoRoot }),
+  },
+  usage: {
+    summary: () => c<UsageSummary>("usage_summary"),
+    sessions: (opts?: { tool?: ToolKind; since?: number; limit?: number }) =>
+      c<UsageSession[]>("usage_sessions", opts ?? {}),
+    refresh: () => c<void>("usage_refresh"),
   },
   installExplorerContextMenu: () => c<void>("install_explorer_context_menu"),
 };

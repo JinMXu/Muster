@@ -15,6 +15,12 @@ impl OpenCodeProvider {
     }
 }
 
+impl Default for OpenCodeProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Resolve the opencode.db path, honoring XDG_DATA_HOME and OPENCODE_DB.
 fn resolve_db_path() -> Option<PathBuf> {
     // OPENCODE_DB can be an absolute path to the db file directly.
@@ -38,7 +44,7 @@ impl UsageProvider for OpenCodeProvider {
         let Some(path) = &self.db_path else { return vec![] };
         let meta = std::fs::metadata(path).ok();
         let mtime = meta.as_ref().and_then(|m| m.modified().ok());
-        let size = meta.as_ref().and_then(|m| m.len().try_into().ok());
+        let size = meta.as_ref().map(|m| m.len());
         // One "source" representing the whole DB; key is the path string.
         vec![DiscoveredSession {
             key: path.to_string_lossy().into_owned(),
@@ -119,9 +125,7 @@ impl OpenCodeProvider {
             .ok()?;
 
         let mut out = Vec::new();
-        for r in rows {
-            if let Ok(s) = r { out.push(s); }
-        }
+        for s in rows.flatten() { out.push(s); }
         Some(out)
     }
 }

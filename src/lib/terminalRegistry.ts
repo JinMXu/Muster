@@ -1,6 +1,8 @@
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./invoke";
 import type { ThemeColors } from "./types";
@@ -113,6 +115,12 @@ function create(sessionId: string): Entry {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new SearchAddon());
+  // Clickable http(s) links (dev-server URLs etc.) open in the system browser.
+  term.loadAddon(
+    new WebLinksAddon((_event, uri) => {
+      openUrl(uri).catch(() => {});
+    })
+  );
 
   // Input → PTY. Registered once per terminal, not per pane mount.
   term.onData((data) => api.sendText(sessionId, data));

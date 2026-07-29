@@ -295,6 +295,28 @@ const zh = {
     clearTerminal: "清空终端",
   },
 
+  usage: {
+    title: "用量",
+    refresh: "刷新",
+    today: "今天",
+    week: "近 7 天",
+    month: "近 30 天",
+    all: "全部",
+    tokens: "tokens",
+    sessions: "会话",
+    session: "会话",
+    cost: "成本",
+    model: "模型",
+    tool: "工具",
+    time: "时间",
+    notFound: "未找到",
+    empty: "暂无用量数据",
+    noSessions: "无会话",
+    sortByTime: "按时间",
+    sortByTokens: "按 Token",
+    allTools: "全部工具",
+  },
+
   commandPalette: {
     searchPlaceholder: "搜索命令和会话…",
     noMatches: "无匹配项",
@@ -325,6 +347,7 @@ const zh = {
     nextProject: "下一个项目",
     previousProject: "上一个项目",
     switchToProject: ({ n }: { n: number }) => `切换到项目 ${n}`,
+    openUsage: "用量",
     openSettings: "打开设置",
   },
 } as const;

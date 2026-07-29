@@ -297,6 +297,28 @@ const en = {
     clearTerminal: "Clear terminal",
   },
 
+  usage: {
+    title: "Usage",
+    refresh: "Refresh",
+    today: "Today",
+    week: "7 Days",
+    month: "30 Days",
+    all: "All",
+    tokens: "tokens",
+    sessions: "sessions",
+    session: "session",
+    cost: "Cost",
+    model: "Model",
+    tool: "Tool",
+    time: "Time",
+    notFound: "Not found",
+    empty: "No usage data yet",
+    noSessions: "No sessions",
+    sortByTime: "By Time",
+    sortByTokens: "By Tokens",
+    allTools: "All Tools",
+  },
+
   commandPalette: {
     searchPlaceholder: "Search commands and sessions\u2026",
     noMatches: "No matches",
@@ -327,6 +349,7 @@ const en = {
     nextProject: "Next Project",
     previousProject: "Previous Project",
     switchToProject: ({ n }: { n: number }) => `Switch to Project ${n}`,
+    openUsage: "Usage",
     openSettings: "Open Settings",
   },
 } as const;

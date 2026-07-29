@@ -3,7 +3,9 @@
 //! Job Objects, falling back to the shell's ppid-descendant tree) plus the
 //! TCP ports they listen on. Ports additionally include any process working
 //! in the project directory, so dev servers launched outside the session
-//! (another terminal, an earlier app run) still show up.
+//! (another terminal, an earlier app run) still show up — except for overly
+//! broad roots (home dir, drive root), where directory matching is pure noise
+//! and only session-owned ports are shown.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -311,13 +313,18 @@ pub fn kill(pid: u32) -> Result<(), String> {
 /// - one of `pids` (the session's processes), or
 /// - a process belonging to `project_root` — its working directory is the
 ///   root or below, or its command line references the root — so a dev
-///   server started outside the session still shows up.
+///   server started outside the session still shows up. The directory
+///   fallback is skipped for overly broad roots (home directory, drive
+///   roots): there it matches unrelated system processes, which is noise
+///   rather than signal.
 ///
 /// Parse failures are tolerated: rows that don't parse are skipped and
 /// whatever parsed is returned.
 pub fn listen_ports(pids: &[u32], project_root: Option<&str>) -> Vec<ListenPort> {
     let wanted: HashSet<u32> = pids.iter().copied().collect();
-    let root = project_root.map(normalize_path).filter(|r| !r.is_empty());
+    let root = project_root
+        .map(normalize_path)
+        .filter(|r| !r.is_empty() && !too_broad_root(r));
     let mut cmd = std::process::Command::new("netstat");
     cmd.args(["-ano", "-p", "tcp"]);
     // netstat is a console tool; keep it from popping a console window when
@@ -395,6 +402,24 @@ fn contains_path(hay: &str, root: &str) -> bool {
 /// Is `dir` the project root or a directory below it? Both normalize_path'd.
 fn dir_within(dir: &str, root: &str) -> bool {
     dir == root || dir.starts_with(&format!("{root}\\"))
+}
+
+/// Is `root` (normalize_path'd) too broad for directory-based port matching?
+/// A "project" rooted at the user's home directory or at a drive root sweeps
+/// in every process that happens to run from there (proxy tools, Docker,
+/// launchers) — pure noise — so the directory fallback is skipped for those
+/// and only session-owned ports are shown.
+fn too_broad_root(root: &str) -> bool {
+    let components = root.split('\\').filter(|s| !s.is_empty()).count();
+    if components < 2 {
+        return true; // drive root like "d:\"
+    }
+    if let Some(home) = dirs::home_dir() {
+        if root == normalize_path(&home.to_string_lossy()) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Does the process belong to the project at `root` (normalize_path'd)?
@@ -624,6 +649,17 @@ mod tests {
         assert!(dir_within("d:\\agents\\xs-studio\\sub\\dir", root));
         assert!(!dir_within("d:\\agents\\xs-studio2", root));
         assert!(!dir_within("d:\\agents", root));
+    }
+
+    #[test]
+    fn too_broad_root_cases() {
+        assert!(super::too_broad_root("d:\\"), "drive root is broad");
+        assert!(super::too_broad_root("c:\\"), "drive root is broad");
+        assert!(!super::too_broad_root("d:\\agents"));
+        assert!(!super::too_broad_root("d:\\agents\\xs-studio"));
+        let home = dirs::home_dir().expect("home dir");
+        let root = super::normalize_path(&home.to_string_lossy());
+        assert!(super::too_broad_root(&root), "home directory is broad");
     }
 
     /// Live check of the PEB cwd read: spawn a sleeper with a known working

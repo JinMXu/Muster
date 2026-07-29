@@ -28,6 +28,7 @@ fn resolve_root() -> Option<PathBuf> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct IndexEntry {
     #[serde(default)]
     session_id: Option<String>,
@@ -69,7 +70,9 @@ impl UsageProvider for KimiProvider {
 
     fn discover(&self) -> Vec<DiscoveredSession> {
         let Some(root) = &self.root else { return vec![] };
-        // Read session_index.jsonl for the session -> workDir mapping.
+        // Read session_index.jsonl for the session -> workDir mapping. Only
+        // entries with a usable session id count; an unparseable index (e.g.
+        // unexpected field names) must not suppress the walking fallback.
         let index_path = root.join("session_index.jsonl");
         let mut entries: Vec<IndexEntry> = Vec::new();
         if let Ok(f) = std::fs::File::open(&index_path) {
@@ -78,7 +81,9 @@ impl UsageProvider for KimiProvider {
                 let Ok(line) = line else { continue };
                 if line.is_empty() { continue; }
                 if let Ok(e) = serde_json::from_str::<IndexEntry>(&line) {
-                    entries.push(e);
+                    if e.session_id.as_deref().is_some_and(|s| !s.is_empty()) {
+                        entries.push(e);
+                    }
                 }
             }
         }
@@ -214,5 +219,54 @@ mod tests {
         assert_eq!(s.tokens.cache_write, 100);    // 0 + 100
         assert_eq!(s.model, "kimi-code/kimi-for-coding");
         assert!(s.cost_usd.is_none());
+    }
+
+    /// The on-disk session_index.jsonl uses camelCase keys; discovery must
+    /// resolve sessions through it.
+    #[test]
+    fn discovers_via_camelcase_session_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("sessions").join("wd_x").join("sid_indexed");
+        std::fs::create_dir_all(session_dir.join("agents").join("main")).unwrap();
+        std::fs::write(
+            session_dir.join("agents").join("main").join("wire.jsonl"),
+            r#"{"type":"usage.record","model":"kimi","usage":{"inputOther":1,"output":2,"inputCacheRead":0,"inputCacheCreation":0},"time":1}"#
+                .to_string() + "\n",
+        )
+        .unwrap();
+        let index_line = format!(
+            r#"{{"sessionId":"sid_indexed","sessionDir":"{}","workDir":"D:/x"}}"#,
+            session_dir.to_string_lossy().replace('\\', "/")
+        );
+        std::fs::write(dir.path().join("session_index.jsonl"), index_line + "\n").unwrap();
+
+        let provider = KimiProvider { root: Some(dir.path().to_path_buf()) };
+        let discovered = provider.discover();
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].key, "sid_indexed");
+    }
+
+    /// An index whose lines parse structurally but carry no session id (e.g.
+    /// unexpected schema) must not suppress the directory-walking fallback.
+    #[test]
+    fn falls_back_to_walking_when_index_has_no_valid_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("sessions").join("wd_x").join("sid_walked");
+        std::fs::create_dir_all(session_dir.join("agents").join("main")).unwrap();
+        std::fs::write(
+            session_dir.join("agents").join("main").join("wire.jsonl"),
+            r#"{"type":"usage.record","usage":{"inputOther":1,"output":2},"time":1}"#.to_string() + "\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("session_index.jsonl"),
+            r#"{"session_id":"wrong_schema"}"#.to_string() + "\n",
+        )
+        .unwrap();
+
+        let provider = KimiProvider { root: Some(dir.path().to_path_buf()) };
+        let discovered = provider.discover();
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].key, "sid_walked");
     }
 }

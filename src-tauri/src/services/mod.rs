@@ -6,4 +6,5 @@ pub mod i18n;
 pub mod persist;
 pub mod procs;
 pub mod shell;
+pub mod usage;
 pub mod watch;

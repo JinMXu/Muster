@@ -80,6 +80,7 @@ const zh = {
     installExplorerMenu: "安装「在 Muster 中打开」右键菜单",
     reset: "重置",
     save: "保存",
+    openUsage: "Token 用量",
   },
 
   rightSidebar: {

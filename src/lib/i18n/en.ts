@@ -80,6 +80,7 @@ const en = {
     installExplorerMenu: "Install \u2018Open in Muster\u2019 Explorer menu",
     reset: "Reset",
     save: "Save",
+    openUsage: "Token Usage",
   },
 
   rightSidebar: {

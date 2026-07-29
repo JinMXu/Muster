@@ -4,7 +4,7 @@ import type { Settings as SettingsType } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 
 /// Modal settings window: font / colors / appearance / editor / terminal.
-export default function Settings({ onClose }: { onClose: () => void }) {
+export default function Settings({ onClose, onOpenUsage }: { onClose: () => void; onOpenUsage: () => void }) {
   const [s, setS] = useState<SettingsType | null>(null);
   const [themes, setThemes] = useState<string[]>([]);
   const { t } = useT();
@@ -136,6 +136,15 @@ export default function Settings({ onClose }: { onClose: () => void }) {
         </div>
 
         <Integrations />
+
+        <div className="mb-4">
+          <button
+            onClick={() => { onOpenUsage(); }}
+            className="text-xs text-muster-muted hover:text-white transition-colors"
+          >
+            {t("settings.openUsage")} →
+          </button>
+        </div>
 
         <div className="flex justify-end gap-2">
           <button

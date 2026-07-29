@@ -517,7 +517,10 @@ export default function App() {
         />
       )}
       {showSettings && (
-        <Settings onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }} />
+        <Settings
+          onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }}
+          onOpenUsage={() => { setShowSettings(false); setShowUsage(true); }}
+        />
       )}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showUsage && <UsagePanel onClose={() => setShowUsage(false)} />}

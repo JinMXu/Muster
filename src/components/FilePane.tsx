@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath } from "../lib/monaco";
@@ -12,6 +11,12 @@ import { useT } from "../lib/i18n/context";
 
 /// Monaco-based file editor pane. Edits are reported to the backend
 /// (debounced) via `file_text_changed`; the dirty dot comes from `is_dirty`.
+///
+/// Files larger than this byte-count skip the periodic text-sync (avoiding
+/// JSON-serialising multi-MB strings on the JS thread). The full text is
+/// still sent on explicit save (Ctrl+S) and on tab close.
+const MAX_SYNC_BYTES = 100_000;
+
 export default function FilePane({
   fileId,
   focused,

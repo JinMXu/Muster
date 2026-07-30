@@ -4,7 +4,6 @@ use tauri::{Emitter, State, Window};
 use uuid::Uuid;
 
 use super::{emit_state, unknown_window, SharedState};
-use crate::models::pane::PaneContent;
 
 #[tauri::command]
 pub fn open_file(window: Window, state: State<SharedState>, path: String, to_side: bool) -> Option<Uuid> {
@@ -50,13 +49,16 @@ pub fn save_selected_file(window: Window, state: State<SharedState>) -> Result<(
 }
 
 #[tauri::command]
-pub fn save_file(window: Window, state: State<SharedState>, id: Uuid) -> Result<(), String> {
+pub fn save_file(window: Window, state: State<SharedState>, id: Uuid, text: Option<String>) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
     let file = {
         let g = s.lock();
         g.files.get(&id).cloned()
     };
     if let Some(f) = file {
+        if let Some(text) = text {
+            f.set_text(text);
+        }
         f.save()?;
         let _ = window.emit("file-saved", serde_json::json!({ "id": id }));
     }

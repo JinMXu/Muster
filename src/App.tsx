@@ -16,6 +16,7 @@ import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib/terminalRegistry";
+import { getLatestText, clearLatestText } from "./lib/fileEdits";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
 import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/context";
@@ -583,7 +584,11 @@ export default function App() {
                 onClick={async () => {
                   const p = closePrompt;
                   setClosePrompt(null);
-                  await Promise.all(p.files.map((f) => api.saveFile(f.id)));
+                  await Promise.all(p.files.map((f) => {
+                    const text = getLatestText(f.id);
+                    if (text !== undefined) clearLatestText(f.id);
+                    return api.saveFile(f.id, text);
+                  }));
                   p.proceed();
                 }}
               >

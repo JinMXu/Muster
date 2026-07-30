@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath } from "../lib/monaco";
 import { useSettings } from "../lib/settingsStore";
+import { setLatestText, clearLatestText } from "../lib/fileEdits";
 import type { FileTabInfo } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 
@@ -22,6 +24,9 @@ export default function FilePane({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<string | null>(null);
   const editorRef = useRef<Parameters<NonNullable<React.ComponentProps<typeof Editor>["onMount"]>>[0] | null>(null);
+  // Latest text for save (ctrl+s sends this along with the save command,
+  // avoiding periodic multi-MB invoke payloads that block the JS thread).
+  const latestTextRef = useRef("");
   const { t } = useT();
   // Editor options follow the saved settings (font size/family/wrap); the
   // options prop diff goes through Monaco's updateOptions automatically.
@@ -45,7 +50,7 @@ export default function FilePane({
   // Immediately push any debounce-pending edit to the backend and mark the
   // tab dirty. Called by the debounce timer and by the load effect's cleanup,
   // so edits made within the last 300ms aren't lost on unmount/fileId switch.
-  const flushPending = () => {
+  const flushPending = (forceSync = false) => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
@@ -53,7 +58,11 @@ export default function FilePane({
     if (pendingRef.current == null) return;
     const next = pendingRef.current;
     pendingRef.current = null;
-    api.fileTextChanged(fileId, next);
+    setLatestText(fileId, next);
+    const bytes = new TextEncoder().encode(next).length;
+    if (forceSync || bytes <= MAX_SYNC_BYTES) {
+      api.fileTextChanged(fileId, next);
+    }
     setInfo((prev) => (prev ? { ...prev, is_dirty: true } : prev));
   };
 
@@ -66,7 +75,8 @@ export default function FilePane({
     });
     return () => {
       alive = false;
-      flushPending();
+      flushPending(true); // force sync text to backend on unmount
+      clearLatestText(fileId);
     };
   }, [fileId]);
 
@@ -83,6 +93,7 @@ export default function FilePane({
 
   const onText = (next: string) => {
     setText(next);
+    latestTextRef.current = next;
     if (!info || info.content_kind !== "text") return;
     pendingRef.current = next;
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -120,7 +131,7 @@ export default function FilePane({
           onMount={(editor, monaco) => {
             editorRef.current = editor;
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-              api.saveFile(fileId);
+              api.saveFile(fileId, latestTextRef.current);
             });
           }}
         />

@@ -129,7 +129,13 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       <Row
         label={t("info.projectDirectory")}
         value={root ?? "—"}
-        hint={project?.custom_directory ? undefined : t("info.auto")}
+        hint={
+          git?.is_worktree
+            ? t("info.worktree")
+            : project?.custom_directory
+              ? undefined
+              : t("info.auto")
+        }
       />
       {cwd && root && normalize(cwd) !== normalize(root) && (
         <Row label={t("info.currentDirectory")} value={cwd} />

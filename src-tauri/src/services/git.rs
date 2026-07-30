@@ -38,6 +38,8 @@ pub struct GitStatusInfo {
     pub recent_commits: Vec<RecentCommit>,
     pub stash_count: usize,
     pub error: Option<String>,
+    /// True when this repository is a linked worktree (not the main checkout).
+    pub is_worktree: bool,
 }
 
 impl GitStatusInfo {
@@ -70,10 +72,15 @@ pub fn status(root: &str) -> GitStatusInfo {
         Err(_) => return GitStatusInfo::empty(root.to_string()),
     };
     let repo_root = repo.workdir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    // A linked worktree has `is_worktree() == true`; the main checkout has
+    // `false`. Used by the frontend to show a "worktree" indicator in the
+    // Info panel so users know the panels re-rooted into a linked worktree.
+    let is_worktree = repo.is_worktree();
     let mut info = GitStatusInfo {
         is_repo: true,
         repo_root: repo_root.clone(),
         root_path: root.to_string(),
+        is_worktree,
         ..Default::default()
     };
 

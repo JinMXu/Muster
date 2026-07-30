@@ -157,6 +157,7 @@ export interface GitStatusInfo {
   recent_commits: RecentCommit[];
   stash_count: number;
   error: string | null;
+  is_worktree: boolean;
 }
 
 export interface DirEntry {

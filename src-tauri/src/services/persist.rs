@@ -52,22 +52,50 @@ pub fn delete_snapshot_for(label: &str) -> std::io::Result<()> {
     }
 }
 
-/// Remove leftover `sessions-win-*.json` snapshots. Secondary window labels
-/// are random per launch, so their snapshots can never be restored and every
-/// one found at startup is an orphan from an earlier run. Best-effort:
-/// failures are logged, never propagated. The main window's `sessions.json`
-/// is never touched.
+/// Remove leftover random-label secondary-window snapshots from older
+/// versions that used `win-<uuid8>` labels. Deterministic `win-N` labels
+/// (introduced for cross-relaunch restore) are preserved so they can be
+/// restored at startup. Best-effort: failures are logged, never propagated.
+/// The main window's `sessions.json` is never touched.
 pub fn prune_secondary_snapshots() {
     let Ok(entries) = std::fs::read_dir(app_data_dir()) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if name.starts_with("sessions-win-") && name.ends_with(".json") {
-            if let Err(e) = std::fs::remove_file(entry.path()) {
-                log::warn!("failed to remove orphan snapshot {}: {e}", entry.path().display());
+        if let Some(rest) = name.strip_prefix("sessions-win-") {
+            if let Some(stem) = rest.strip_suffix(".json") {
+                // Keep deterministic numeric labels (win-1, win-2, …) — they
+                // are restorable. Only prune non-numeric (old random) labels.
+                if stem.parse::<usize>().is_ok() {
+                    continue;
+                }
+                if let Err(e) = std::fs::remove_file(entry.path()) {
+                    log::warn!("failed to remove orphan snapshot {}: {e}", entry.path().display());
+                }
             }
         }
     }
+}
+
+/// Enumerate every deterministic secondary-window snapshot label found on
+/// disk, sorted by numeric suffix. Used at startup to restore windows in
+/// creation order.
+pub fn list_secondary_labels() -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(app_data_dir()) else { return Vec::new() };
+    let mut nums: Vec<usize> = Vec::new();
+    for entry in entries.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            if let Some(rest) = name.strip_prefix("sessions-win-") {
+                if let Some(stem) = rest.strip_suffix(".json") {
+                    if let Ok(n) = stem.parse::<usize>() {
+                        nums.push(n);
+                    }
+                }
+            }
+        }
+    }
+    nums.sort_unstable();
+    nums.into_iter().map(|n| format!("win-{n}")).collect()
 }
 
 #[cfg(test)]
@@ -109,6 +137,40 @@ mod tests {
         assert!(main.exists(), "main snapshot must survive pruning");
         if !main_existed {
             std::fs::remove_file(&main).unwrap();
+        }
+    }
+
+    #[test]
+    fn prune_keeps_numeric_secondary_snapshots() {
+        let dir = super::app_data_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        // Numeric-label snapshots (win-1, win-2, …) are restorable and must
+        // survive pruning.
+        let numeric = dir.join("sessions-win-3.json");
+        std::fs::write(&numeric, b"{}").unwrap();
+        // Non-numeric (old random UUID) snapshots must be pruned.
+        let random = dir.join("sessions-win-abcd1234.json");
+        std::fs::write(&random, b"{}").unwrap();
+
+        super::prune_secondary_snapshots();
+
+        assert!(numeric.exists(), "numeric-label snapshot should survive pruning");
+        assert!(!random.exists(), "random-label snapshot should be pruned");
+
+        let _ = std::fs::remove_file(&numeric);
+    }
+
+    #[test]
+    fn list_secondary_labels_sorted() {
+        let dir = super::app_data_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in [3, 1, 12] {
+            std::fs::write(dir.join(format!("sessions-win-{n}.json")), b"{}").unwrap();
+        }
+        let labels = super::list_secondary_labels();
+        assert_eq!(labels, vec!["win-1".to_string(), "win-3".to_string(), "win-12".to_string()]);
+        for n in [1, 3, 12] {
+            let _ = std::fs::remove_file(dir.join(format!("sessions-win-{n}.json")));
         }
     }
 }

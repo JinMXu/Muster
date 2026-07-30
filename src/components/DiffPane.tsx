@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { api } from "../lib/invoke";
-import { editorOptions, languageForPath } from "../lib/monaco";
+import { editorOptions, languageForPath, MONACO_THEME } from "../lib/monaco";
 import { useSettings } from "../lib/settingsStore";
 import type { DiffTabInfo } from "../lib/types";
 import { useT } from "../lib/i18n/context";
@@ -70,7 +70,7 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
           original={diff.old}
           modified={diff.new}
           language={languageForPath(diff.path)}
-          theme="muster-dark"
+          theme={MONACO_THEME}
           options={{
             ...options,
             readOnly: true,

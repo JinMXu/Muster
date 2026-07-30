@@ -93,6 +93,54 @@ impl PaneTab {
         self.all_panes().len() > 1
     }
 
+    /// Detach (remove) a pane from this tab and return it by value so a caller
+    /// can re-insert it into another tab. The source column is dropped if it
+    /// becomes empty. The tab's focused pane id is repointed to another pane
+    /// in this tab (or left as-is if no pane remains). No-op (returns None)
+    /// when the pane is not present or this is the last pane in the tab (a tab
+    /// must always keep at least one pane).
+    pub fn detach_pane(&mut self, pane_id: Uuid) -> Option<Pane> {
+        let (ci, ri) = self.columns.iter().enumerate().find_map(|(ci, col)| {
+            col.panes.iter().position(|p| p.id == pane_id).map(|ri| (ci, ri))
+        })?;
+        if self.all_panes().len() <= 1 {
+            return None; // never empty a tab
+        }
+        let pane = self.columns[ci].panes.remove(ri);
+        if self.columns[ci].panes.is_empty() {
+            self.columns.remove(ci);
+        }
+        // Adjust weights so columns sum to 1.0 after the drop.
+        let total: f32 = self.columns.iter().map(|c| c.weight).sum();
+        if total > 0.0 {
+            for c in &mut self.columns {
+                c.weight /= total;
+            }
+        }
+        // Focus the first remaining pane if we detached the focused one.
+        if self.focused_pane_id == pane_id {
+            self.focused_pane_id = self.all_panes().first().map(|p| p.id).unwrap_or(pane_id);
+        }
+        self.is_zoomed = false;
+        Some(pane)
+    }
+
+    /// Add `pane` as a new single-pane column in this tab (so dropped panes
+    /// arriving from another tab get their own column), and focus it.
+    pub fn add_pane_as_column(&mut self, pane: Pane) {
+        self.is_zoomed = false;
+        let new_id = pane.id;
+        // Halve every existing column's weight so the new column takes half
+        // the tab while the others keep their proportions relative to each
+        // other.
+        for c in &mut self.columns {
+            c.weight *= 0.5;
+        }
+        let col = PaneColumn { id: Uuid::new_v4(), panes: vec![pane], weight: 0.5 };
+        self.columns.push(col);
+        self.focused_pane_id = new_id;
+    }
+
     pub fn can_split(&self) -> bool {
         match self.focused_pane() {
             Some(p) => !p.content.is_diff(),

@@ -16,6 +16,7 @@
     "fs:default",
     "shell:default",
     "opener:default",
-    "notification:default"
+    "notification:default",
+    "updater:default"
   ]
 }

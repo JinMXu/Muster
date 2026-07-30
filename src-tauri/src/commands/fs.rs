@@ -55,3 +55,21 @@ pub fn install_explorer_context_menu() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     explorer::install_context_menu(&exe.to_string_lossy())
 }
+
+#[tauri::command]
+pub fn add_to_path() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    crate::services::cli::add_to_path(&exe.to_string_lossy())
+}
+
+#[tauri::command]
+pub fn remove_from_path() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    crate::services::cli::remove_from_path(&exe.to_string_lossy())
+}
+
+#[tauri::command]
+pub fn is_on_path() -> Result<bool, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    crate::services::cli::is_on_path(&exe.to_string_lossy())
+}

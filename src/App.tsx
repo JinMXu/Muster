@@ -12,6 +12,7 @@ import Settings from "./components/Settings";
 import ShortcutsHelp from "./components/ShortcutsHelp";
 import ContextMenu from "./components/ContextMenu";
 import UsagePanel from "./components/UsagePanel";
+import PasteWarning, { looksDangerousPaste } from "./components/PasteWarning";
 import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
@@ -29,6 +30,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
+  const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
 
   // Settings (theme, fonts, editor options) live in settingsStore: loaded
   // once here, applied there, reloaded when the Settings modal closes.
@@ -281,6 +283,27 @@ export default function App() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [newProjectWithDialog, newSession, closeTab, split, saveFile, clearTerminal]);
+
+  // ---- global paste interception (paste protection) ---------------------
+  // Intercept paste events in terminal panes and warn before sending
+  // text that looks like executable commands to the PTY.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Check if we're inside a terminal container
+      const termContainer = target.closest("[data-terminal-pane]") as HTMLElement | null;
+      if (!termContainer) return;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!text || !looksDangerousPaste(text)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const sid = termContainer.dataset.terminalPane ?? "";
+      setPasteWarning({ text, sessionId: sid });
+    };
+    document.addEventListener("paste", onPaste, true);
+    return () => document.removeEventListener("paste", onPaste, true);
+  }, []);
 
   // ---- Ctrl+Tab switcher -------------------------------------------------
   // Separate capture-phase listeners: the NAV_MAP handler skips INPUT/TEXTAREA
@@ -597,6 +620,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+      {pasteWarning && (
+        <PasteWarning
+          text={pasteWarning.text}
+          onConfirm={() => {
+            api.sendText(pasteWarning.sessionId, pasteWarning.text);
+            setPasteWarning(null);
+          }}
+          onCancel={() => setPasteWarning(null)}
+        />
       )}
     </div>
       </LanguageProvider>

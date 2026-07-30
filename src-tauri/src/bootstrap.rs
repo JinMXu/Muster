@@ -3,7 +3,6 @@ use parking_lot::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-use uuid::Uuid;
 
 use crate::commands::SharedState;
 use crate::models::app::AppState;
@@ -19,18 +18,86 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Open any directories passed in argv as new projects in the
             // running instance's main window (focus follows the OS launch,
             // and the main window is the only one guaranteed to exist).
             let state = app.state::<SharedState>();
             let main = state.for_label("main");
-            for arg in argv.iter().skip(1) {
-                if std::path::Path::new(arg).is_dir() {
-                    main.lock().new_project(Some(arg.to_string()));
-                    // Bring up the PTY for the session the project just created.
+            // Parse CLI options: muster [--cmd "<command>"] [--cwd <path>] [directory]
+            let mut cmd: Option<String> = None;
+            let mut cwd: Option<String> = None;
+            let mut args = argv.iter().skip(1).peekable();
+            let mut dirs: Vec<String> = Vec::new();
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--cmd" | "-c" => {
+                        cmd = args.next().cloned();
+                    }
+                    "--cwd" | "-d" => {
+                        cwd = args.next().cloned();
+                    }
+                    a if std::path::Path::new(a).is_dir() => {
+                        dirs.push(a.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            // If a cwd was given but no directory, treat cwd as the directory.
+            if dirs.is_empty() {
+                if let Some(ref c) = cwd {
+                    if std::path::Path::new(c).is_dir() {
+                        dirs.push(c.clone());
+                    }
+                }
+            }
+            for dir in &dirs {
+                main.lock().new_project(Some(dir.to_string()));
+                spawn_pending(app, "main", &main);
+                start_read_loops(app, "main", &main);
+                // If a command was specified, send it to the newly spawned session.
+                if let Some(ref command) = cmd {
+                    if let Some(session_id) = main.lock().projects.last().and_then(|p| p.tabs.last()).and_then(|t| {
+                        t.columns.first().and_then(|c| c.panes.first()).and_then(|p| {
+                            match &p.content {
+                                crate::models::pane::PaneContent::Session(id) => Some(*id),
+                                _ => None,
+                            }
+                        })
+                    }) {
+                        if let Some(session) = main.lock().sessions.get(&session_id) {
+                            session.send_text(&format!("{command}\r"));
+                        }
+                    }
+                }
+                if let Some(window) = app.get_webview_window("main") {
+                    let view = main.lock().view();
+                    let _ = window.emit("state-changed", view);
+                }
+            }
+            // If no directory was given but a command was, open the current
+            // working directory as a project and run the command in it.
+            if dirs.is_empty() && cmd.is_some() {
+                let dir = cwd.unwrap_or_else(|| _cwd.clone());
+                if std::path::Path::new(&dir).is_dir() {
+                    main.lock().new_project(Some(dir.clone()));
                     spawn_pending(app, "main", &main);
                     start_read_loops(app, "main", &main);
+                    if let Some(ref command) = cmd {
+                        if let Some(session_id) = main.lock().projects.last().and_then(|p| p.tabs.last()).and_then(|t| {
+                            t.columns.first().and_then(|c| c.panes.first()).and_then(|p| {
+                                match &p.content {
+                                    crate::models::pane::PaneContent::Session(id) => Some(*id),
+                                    _ => None,
+                                }
+                            })
+                        }) {
+                            if let Some(session) = main.lock().sessions.get(&session_id) {
+                                session.send_text(&format!("{command}\r"));
+                            }
+                        }
+                    }
                     if let Some(window) = app.get_webview_window("main") {
                         let view = main.lock().view();
                         let _ = window.emit("state-changed", view);
@@ -80,8 +147,10 @@ pub fn run() {
             // even when they aren't installed system-wide.
             crate::theme::fonts::register_fonts();
 
-            // Drop orphaned secondary-window snapshots left by earlier runs
-            // (random labels make them unrestorable; none can be live yet).
+            // NOTE: secondary-window snapshots are NO LONGER pruned at startup.
+            // They use deterministic labels (win-N) so they can be restored
+            // across relaunches. prune_secondary_snapshots only removes
+            // old random-label (non-numeric) snapshots from earlier versions.
             crate::services::persist::prune_secondary_snapshots();
 
             // System tray with keep-alive: closing the last window only hides
@@ -130,6 +199,11 @@ pub fn run() {
                 let _ = window.emit("state-changed", view);
             }
 
+            // Restore secondary windows that were open when the app last quit.
+            // Each `sessions-win-N.json` on disk becomes a live window with
+            // its saved layout; deterministic labels make this possible.
+            restore_secondary_windows(app.handle());
+
             // Periodic autosave of every window's layout, so a crash doesn't
             // lose it (the close handler also saves, but only on a clean
             // exit).
@@ -162,13 +236,20 @@ pub fn run() {
                 let label = window.label().to_string();
                 let state = window.state::<SharedState>();
                 save_window_snapshot(&state, &label);
-                // Keep-alive: closing the LAST window only hides it — the
+                // Keep-alive: closing the LAST window only hides it - the
                 // process stays in the tray and its sessions keep running.
                 // "New Window" from the tray reopens; "Quit" exits properly.
                 if window.app_handle().webview_windows().len() <= 1 {
                     api.prevent_close();
                     let _ = window.hide();
                     return;
+                }
+                // User is closing a secondary window (not the last one) -
+                // delete its snapshot so it doesn't reappear next launch.
+                // Only windows present at a clean app quit (tray Quit, which
+                // calls save_all_snapshots) should persist across relaunches.
+                if label != "main" {
+                    let _ = crate::services::persist::delete_snapshot_for(&label);
                 }
                 terminate_window_sessions(&state, &label);
             }
@@ -186,11 +267,13 @@ pub fn run() {
                 // Drop this window's file-tree watcher (its debounce thread
                 // exits once the channel disconnects).
                 crate::services::watch::remove_label(&label);
-                // Secondary windows have random, per-launch labels, so their
-                // snapshot can never be restored — delete it rather than let
-                // it accumulate in the app data dir. The main window's
-                // snapshot must always survive.
-                if label != "main" {
+                // Secondary window snapshots are deleted in CloseRequested
+                // when the user closes a window (user intent to remove it).
+                // Here we only clean up if the app is shutting down entirely
+                // (no windows left) to avoid restoring dead sessions next
+                // launch. During normal app quit (tray Quit), save_all_snapshots
+                // preserves every window for restoration.
+                if label != "main" && window.app_handle().webview_windows().is_empty() {
                     let _ = crate::services::persist::delete_snapshot_for(&label);
                 }
             }
@@ -207,8 +290,12 @@ pub fn run() {
 /// BEFORE the window is built, so the webview's first `get_state` invoke
 /// already sees the restored layout. Shared by the `new_window` command and
 /// the tray menu's "New Window".
+///
+/// The label is deterministic: `win-N` where N is one past the highest
+/// existing secondary-window number. This lets secondary windows restore
+/// across relaunches (their snapshot filename is stable).
 pub fn spawn_window(app: &AppHandle) -> Result<(), String> {
-    let label = format!("win-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let label = next_window_label(app);
 
     let state = app.state::<SharedState>();
     let s = state.for_label(&label);
@@ -235,6 +322,87 @@ pub fn spawn_window(app: &AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Pick the next deterministic secondary-window label: `win-N` where N is one
+/// past the highest existing secondary-window number (across both live windows
+/// and persisted snapshot files, so a freshly restored window doesn't clash
+/// with a brand-new one opened in the same session).
+fn next_window_label(app: &AppHandle) -> String {
+    let state = app.state::<SharedState>();
+    let mut max_n = 0usize;
+    for (label, _) in state.all() {
+        if let Some(n) = label.strip_prefix("win-").and_then(|s| s.parse::<usize>().ok()) {
+            if n > max_n { max_n = n; }
+        }
+    }
+    // Also scan the snapshot directory so a freshly restored window doesn't
+    // reuse a label that a persisted (not yet restored) snapshot occupies.
+    if let Ok(entries) = std::fs::read_dir(crate::services::persist::app_data_dir()) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if let Some(rest) = name.strip_prefix("sessions-win-") {
+                    if let Some(n_str) = rest.strip_suffix(".json") {
+                        if let Ok(n) = n_str.parse::<usize>() {
+                            if n > max_n { max_n = n; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    format!("win-{}", max_n + 1)
+}
+
+/// Restore every persisted secondary-window snapshot found at startup. Each
+/// `sessions-win-N.json` file becomes a live window with its saved layout.
+/// Called from `setup` after the main window is restored.
+fn restore_secondary_windows(app: &AppHandle) {
+    let dir = crate::services::persist::app_data_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    // Collect and sort the numeric suffixes so windows restore in order.
+    let mut nums: Vec<usize> = Vec::new();
+    for entry in entries.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            if let Some(rest) = name.strip_prefix("sessions-win-") {
+                if let Some(n_str) = rest.strip_suffix(".json") {
+                    if let Ok(n) = n_str.parse::<usize>() {
+                        nums.push(n);
+                    }
+                }
+            }
+        }
+    }
+    nums.sort_unstable();
+    for n in nums {
+        let label = format!("win-{n}");
+        // Skip if a window with this label is somehow already live (shouldn't
+        // happen at startup, but defensive).
+        if app.get_webview_window(&label).is_some() { continue; }
+        let state = app.state::<SharedState>();
+        let s = state.for_label(&label);
+        {
+            let mut g = s.lock();
+            if let Some(snapshot) = crate::services::persist::load_snapshot_for(&label) {
+                g.restore(&snapshot);
+            }
+            if g.projects.is_empty() {
+                g.new_project(None);
+            }
+        }
+        spawn_pending(app, &label, &s);
+        if let Err(e) = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+            .title("Muster")
+            .inner_size(1000.0, 680.0)
+            .min_inner_size(720.0, 480.0)
+            .decorations(false)
+            .build()
+        {
+            log::warn!("failed to restore secondary window {label}: {e}");
+            // Clean up the state entry so it doesn't leak.
+            state.remove_label(&label);
+        }
+    }
 }
 
 /// Save this window's layout snapshot (used by the close handler and by the

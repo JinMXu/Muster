@@ -123,7 +123,18 @@ impl TerminalSession {
                         if let Some(cwd) = scan.cwd {
                             let mut wd = inner.working_directory.lock();
                             if wd.as_deref() != Some(cwd.as_str()) {
-                                *wd = Some(cwd);
+                                *wd = Some(cwd.to_string());
+                                // Notify the frontend immediately so panels can
+                                // re-root (e.g. `cd` into a git worktree) without
+                                // waiting for the 2s poll.
+                                let _ = app.emit_to(
+                                    &label,
+                                    "session-cwd-changed",
+                                    serde_json::json!({
+                                        "id": session_id,
+                                        "cwd": cwd,
+                                    }),
+                                );
                             }
                         }
                         if let Some((state, progress)) = scan.progress {

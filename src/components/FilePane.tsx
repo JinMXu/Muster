@@ -3,7 +3,7 @@ import Editor from "@monaco-editor/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
-import { editorOptions, languageForPath } from "../lib/monaco";
+import { editorOptions, languageForPath, MONACO_THEME } from "../lib/monaco";
 import { useSettings } from "../lib/settingsStore";
 import { setLatestText, clearLatestText } from "../lib/fileEdits";
 import type { FileTabInfo } from "../lib/types";
@@ -131,7 +131,7 @@ export default function FilePane({
           value={text}
           onChange={(v) => onText(v ?? "")}
           language={languageForPath(info.path)}
-          theme="muster-dark"
+          theme={MONACO_THEME}
           options={options}
           onMount={(editor, monaco) => {
             editorRef.current = editor;

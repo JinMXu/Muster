@@ -220,9 +220,16 @@ function UsageEntry({ onOpen }: { onOpen: () => void }) {
 /// failure message from reg.exe is shown inline.
 function Integrations() {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pathResult, setPathResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [onPath, setOnPath] = useState<boolean | null>(null);
+  const [updateResult, setUpdateResult] = useState<{ ok: boolean; text: string } | null>(null);
   const { t } = useT();
 
-  const install = () => {
+  useEffect(() => {
+    api.isOnPath().then(setOnPath).catch(() => setOnPath(false));
+  }, []);
+
+  const installExplorer = () => {
     setResult(null);
     api
       .installExplorerContextMenu()
@@ -230,19 +237,86 @@ function Integrations() {
       .catch((e) => setResult({ ok: false, text: String(e) }));
   };
 
+  const togglePath = () => {
+    setPathResult(null);
+    if (onPath) {
+      api.removeFromPath().then(() => {
+        setOnPath(false);
+        setPathResult({ ok: true, text: t("settings.integrationsInstalled") });
+      }).catch((e) => setPathResult({ ok: false, text: String(e) }));
+    } else {
+      api.addToPath().then(() => {
+        setOnPath(true);
+        setPathResult({ ok: true, text: t("settings.integrationsInstalled") });
+      }).catch((e) => setPathResult({ ok: false, text: String(e) }));
+    }
+  };
+
+  const checkUpdate = async () => {
+    setUpdateResult(null);
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (update) {
+        setUpdateResult({ ok: true, text: t("settings.updateAvailable") });
+        await update.downloadAndInstall();
+        setUpdateResult({ ok: true, text: t("settings.updateReady") });
+      } else {
+        setUpdateResult({ ok: true, text: t("settings.updateNone") });
+      }
+    } catch {
+      setUpdateResult({ ok: false, text: t("settings.updateError") });
+    }
+  };
+
   return (
     <Field label={t("settings.integrationsTitle")}>
-      <button
-        onClick={install}
-        className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-      >
-        {t("settings.installExplorerMenu")}
-      </button>
-      {result && (
-        <span className={`ui-fs-base ${result.ok ? "text-green-400" : "text-red-400"}`}>
-          {result.text}
-        </span>
-      )}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={installExplorer}
+            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+          >
+            {t("settings.installExplorerMenu")}
+          </button>
+          {result && (
+            <span className={`ui-fs-base ${result.ok ? "text-green-400" : "text-red-400"}`}>
+              {result.text}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={togglePath}
+            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+          >
+            {onPath ? t("settings.removeFromPath") : t("settings.addToPath")}
+          </button>
+          {onPath !== null && !pathResult && (
+            <span className={`ui-fs-base ${onPath ? "text-green-400" : "text-muster-muted"}`}>
+              {onPath ? t("settings.onPathInstalled") : t("settings.pathAvailable")}
+            </span>
+          )}
+          {pathResult && (
+            <span className={`ui-fs-base ${pathResult.ok ? "text-green-400" : "text-red-400"}`}>
+              {pathResult.text}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={checkUpdate}
+            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+          >
+            {t("settings.checkForUpdates")}
+          </button>
+          {updateResult && (
+            <span className={`ui-fs-base ${updateResult.ok ? "text-green-400" : "text-red-400"}`}>
+              {updateResult.text}
+            </span>
+          )}
+        </div>
+      </div>
     </Field>
   );
 }

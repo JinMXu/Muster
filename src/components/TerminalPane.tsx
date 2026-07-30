@@ -4,6 +4,7 @@ import { acquire } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
 import { openMenu } from "../lib/menuStore";
 import { useT } from "../lib/i18n/context";
+import PasteWarning, { looksDangerousPaste } from "./PasteWarning";
 
 /// One terminal pane: attaches the parked xterm instance for `sessionId`
 /// (owned by `terminalRegistry`) into its container div. The instance
@@ -23,7 +24,17 @@ export default function TerminalPane({
   // depth counter keeps the ring from flickering while moving inside.
   const [dropActive, setDropActive] = useState(false);
   const dragDepth = useRef(0);
+  const [pasteWarning, setPasteWarning] = useState<string | null>(null);
   const { t } = useT();
+
+  const doPaste = async () => {
+    const text = await navigator.clipboard.readText().catch(() => "");
+    if (text && looksDangerousPaste(text)) {
+      setPasteWarning(text);
+      return;
+    }
+    if (text) api.sendText(sessionId, text);
+  };
 
   useEffect(() => {
     const entry = acquire(sessionId);
@@ -74,8 +85,10 @@ export default function TerminalPane({
   }, [focused, paneKey, sessionId]);
 
   return (
+    <>
     <div
       ref={containerRef}
+      data-terminal-pane={sessionId}
       className={`w-full h-full overflow-hidden bg-muster-bg ${
         dropActive ? "ring-1 ring-inset ring-muster-accent" : ""
       }`}
@@ -123,10 +136,7 @@ export default function TerminalPane({
             },
             {
               label: t("terminal.paste"),
-              action: async () => {
-                const text = await navigator.clipboard.readText().catch(() => "");
-                if (text) api.sendText(sessionId, text);
-              },
+              action: doPaste,
             },
             { label: t("terminal.selectAll"), action: () => term.selectAll() },
             "sep",
@@ -136,5 +146,16 @@ export default function TerminalPane({
         });
       }}
     />
+    {pasteWarning && (
+      <PasteWarning
+        text={pasteWarning}
+        onConfirm={() => {
+          api.sendText(sessionId, pasteWarning);
+          setPasteWarning(null);
+        }}
+        onCancel={() => setPasteWarning(null)}
+      />
+    )}
+    </>
   );
 }

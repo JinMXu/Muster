@@ -500,6 +500,49 @@ impl AppState {
         }
     }
 
+    /// Drag & drop a pane across tabs: detach `pane_id` from `source_tab_id`
+    /// and add it as a new column in `target_tab_id`. Refused when the source
+    /// tab would be left empty (a tab must always keep at least one pane), or
+    /// when the same tab is both source and target (use `move_pane` instead).
+    /// Returns true when a move actually happened.
+    pub fn move_pane_cross_tab(&mut self, source_tab_id: Uuid, pane_id: Uuid, target_tab_id: Uuid) -> bool {
+        if source_tab_id == target_tab_id {
+            return false;
+        }
+        // Detach from source tab.
+        let detached: Option<Pane> = {
+            let mut found: Option<Pane> = None;
+            for p in &mut self.projects {
+                if let Some(t) = p.tabs.iter_mut().find(|t| t.id == source_tab_id) {
+                    found = t.detach_pane(pane_id);
+                    break;
+                }
+            }
+            found
+        };
+        let Some(pane) = detached else { return false };
+        // Insert into target tab.
+        let inserted = {
+            let mut ok = false;
+            for p in &mut self.projects {
+                if let Some(t) = p.tabs.iter_mut().find(|t| t.id == target_tab_id) {
+                    t.add_pane_as_column(pane);
+                    ok = true;
+                    // Switch the project so the user lands where the pane was
+                    // dropped, not left looking at the source.
+                    self.selected_project_id = Some(p.id);
+                    break;
+                }
+            }
+            ok
+        };
+        if !inserted {
+            // Should be impossible since the pane came from somewhere.
+            return false;
+        }
+        true
+    }
+
     // ---- Sidebar / panel ---------------------------------------------------
 
     pub fn toggle_left_sidebar(&mut self) { self.is_left_sidebar_visible = !self.is_left_sidebar_visible; }

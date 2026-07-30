@@ -80,6 +80,26 @@ pub fn move_pane(
     emit_state(&window, &s.lock());
 }
 
+/// Drag & drop a pane onto another tab (dropped on the tab's strip header):
+/// detach `pane_id` from `source_tab_id` and add it as a new columnise in
+/// `target_tab_id`. Refused when the source tab would be emptied or the
+/// pane is the only pane in its tab.
+#[tauri::command]
+pub fn move_pane_cross_tab(
+    window: Window,
+    state: State<SharedState>,
+    source_tab_id: Uuid,
+    pane_id: Uuid,
+    target_tab_id: Uuid,
+) -> bool {
+    let Some(s) = state.get_label(window.label()) else { return false };
+    let moved = s.lock().move_pane_cross_tab(source_tab_id, pane_id, target_tab_id);
+    if moved {
+        emit_state(&window, &s.lock());
+    }
+    moved
+}
+
 #[tauri::command]
 pub fn toggle_pane_zoom(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };

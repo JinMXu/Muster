@@ -21,19 +21,24 @@
 - **主题**：内置 GitHub 风格默认主题 + 完整 Ghostty 主题目录（数百款），深色/浅色独立设置，支持跟随系统
 - **国际化**：中文 / English 界面，可跟随系统语言
 - **会话持久化**：标签、分屏布局、项目与选中状态定时自动快照（每 5 秒），主窗口重启后完整恢复
+- **CLI 工具**：可将 Muster 添加到系统 PATH，支持从任意终端使用 `muster <path>` 直接打开项目，或 `muster --cmd "vim foo.js" <path>` 在终端会话中执行命令
+- **剪贴板安全保护**：当粘贴内容疑似可执行命令（多行命令、`sudo` / `curl` / `rm -rf` 等）时弹窗确认，防止意外执行恶意指令
+- **自动更新**：内置更新检查器，支持从 GitHub Release 频道获取最新版本与一键安装
 - **资源管理器集成**：一键安装「在 Muster 中打开」右键菜单（写入 HKCU，无需管理员权限）
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
-| 外壳 / 窗口 | Tauri 2（Rust），多窗口 + 系统托盘 |
+| 外壳 / 窗口 | Tauri 2（Rust），多窗口 + 系统托盘 + CLI PATH 注册 |
 | 前端 UI | React 18 + TypeScript + Vite + Tailwind CSS |
-| 终端仿真 | xterm.js（fit / search 插件） |
-| PTY | portable-pty（Windows ConPTY） |
+| 终端仿真 | xterm.js（fit 插件） |
+| PTY | 手动 ConPTY 驱动（bundled OpenConsole.exe） |
 | 编辑器 / Diff | Monaco Editor |
 | Git | git2（libgit2，含 SSH） |
-| 其他 | notify（文件监听）、sysinfo（进程/端口）、rusqlite（用量统计，只读）、toml（配置） |
+| 自动更新 | tauri-plugin-updater（NSIS passive 模式） |
+| 剪贴板安全 | 前端粘贴拦截 + 危险内容检测 |
+| 其他 | notify（文件监听）、sysinfo（进程/端口）、rusqlite（用量统计，只读）、toml（配置）、winreg（PATH 注册表） |
 
 ## 目录结构
 
@@ -48,7 +53,7 @@ kero-windows/
 │   ├── src/
 │   │   ├── commands/       # 全部 Tauri 命令，按域拆分（前端 invoke 入口）
 │   │   ├── models/         # 应用状态：项目、标签、pane、终端会话
-│   │   ├── services/       # PTY/shell、git、配置、持久化、进程等
+│   │   ├── services/       # PTY/shell、git、配置、持久化、进程、CLI 等
 │   │   └── theme/          # 主题目录与解析（含 Ghostty 主题）
 │   ├── capabilities/       # Tauri 权限声明
 │   └── assets/fonts/       # 内嵌字体（JetBrains Mono + Nerd Font 符号）
@@ -112,6 +117,29 @@ npm run tauri build    # 产出 MSI 和 NSIS 安装包（src-tauri/target/releas
 - 开发版（debug 构建）：`%APPDATA%\muster-dev\config.toml`
 
 会话快照（各窗口的标签/分屏/项目布局）保存在同目录下的 `sessions*.json`。
+
+## 命令行使用
+
+在设置中选择 "Add Muster to PATH" 后，可在任意终端使用 `muster` 命令：
+
+```sh
+# 在当前目录打开 Muster 项目
+muster .
+
+# 在指定目录打开 Muster 项目
+muster C:\projects\myapp
+
+# 打开项目并立即运行命令
+muster --cmd "npm run dev" C:\projects\myapp
+
+# 指定工作目录并运行命令
+muster --cwd C:\projects\myapp --cmd "git status"
+
+# 在当前目录运行命令（无需指定路径）
+muster --cmd "python hello.py"
+```
+
+快捷键 `-c` 和 `-d` 可分别替代 `--cmd` 和 `--cwd`。
 
 ## 快捷键
 

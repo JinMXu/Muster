@@ -113,3 +113,17 @@ select option {
 .muster-pop {
   animation: muster-pop var(--muster-motion);
 }
+
+/* Respect the OS "reduce motion" accessibility setting: kill every
+   transition and animation in the app. Buttons and popups snap instantly,
+   the spinner stops spinning, and the progress pulse stops pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

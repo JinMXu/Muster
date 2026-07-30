@@ -84,6 +84,8 @@ export const api = {
     c<void>("resize_pane_divider", { tabId, vertical, columnIndex, index, delta }),
   movePane: (tabId: Uuid, paneId: Uuid, targetPaneId: Uuid, edge: PaneDropEdge) =>
     c<void>("move_pane", { tabId, paneId, targetPaneId, edge }),
+  movePaneCrossTab: (sourceTabId: Uuid, paneId: Uuid, targetTabId: Uuid) =>
+    c<boolean>("move_pane_cross_tab", { sourceTabId, paneId, targetTabId }),
   togglePaneZoom: () => c<void>("toggle_pane_zoom"),
   equalizePanes: () => c<void>("equalize_panes"),
 
@@ -138,4 +140,7 @@ export const api = {
     refresh: () => c<void>("usage_refresh"),
   },
   installExplorerContextMenu: () => c<void>("install_explorer_context_menu"),
+  addToPath: () => c<void>("add_to_path"),
+  removeFromPath: () => c<void>("remove_from_path"),
+  isOnPath: () => c<boolean>("is_on_path"),
 };

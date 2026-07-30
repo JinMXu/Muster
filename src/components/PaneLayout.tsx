@@ -230,16 +230,17 @@ function Pane({
         api.movePane(tabId, draggedId, pane.id, edgeAt(e));
       }}
     >
-      {/* 6px grip along the top edge starts a pane-move drag. */}
-      <div
-        draggable
-        title={t("pane.dragToMove")}
-        onDragStart={(e) => {
-          e.dataTransfer.setData("application/x-muster-pane", pane.id);
-          e.dataTransfer.effectAllowed = "move";
-        }}
-        className="absolute top-0 left-0 right-0 h-[6px] z-20 cursor-grab active:cursor-grabbing"
-      />
+{/* 6px grip along the top edge starts a pane-move drag. */}
+        <div
+          draggable
+          title={t("pane.dragToMove")}
+          onDragStart={(e) => {
+            e.dataTransfer.setData("application/x-muster-pane", pane.id);
+            e.dataTransfer.setData("application/x-muster-pane-source-tab", tabId);
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          className="absolute top-0 left-0 right-0 h-[6px] z-20 cursor-grab active:cursor-grabbing"
+        />
       {pane.content.kind === "session" && (
         <TerminalPane sessionId={pane.content.id} focused={focused} paneKey={paneKey} />
       )}

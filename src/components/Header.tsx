@@ -4,6 +4,7 @@ import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
 import { IconMaximize2, IconPanelRight, IconPlus, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
+import { api } from "../lib/invoke";
 
 /// The session a tab's progress bar should reflect: the focused pane's
 /// session, falling back to the first session pane in the tab.
@@ -129,6 +130,9 @@ export default function Header({
               onDragEnd={() => setDragging(null)}
               onRename={(name) => onRenameTab(tab.id, name)}
               onMenu={(x, y, requestRename) => onTabMenu(tab, x, y, requestRename)}
+              onPaneDrop={(paneId, sourceTabId) =>
+                api.movePaneCrossTab(sourceTabId, paneId, tab.id)
+              }
             />
           );
         })}
@@ -179,6 +183,7 @@ function TabItem({
   onDragEnd,
   onRename,
   onMenu,
+  onPaneDrop,
 }: {
   tab: ProjectView["tabs"][number];
   isSelected: boolean;
@@ -192,11 +197,15 @@ function TabItem({
   onDragEnd: () => void;
   onRename: (name: string | null) => void;
   onMenu: (x: number, y: number, requestRename: () => void) => void;
+  /// A pane dragged from another tab and dropped on this tab: moves the pane
+  /// out of its source tab into this one as a new column.
+  onPaneDrop: (paneId: Uuid, sourceTabId: Uuid) => void;
 }) {
   const { t } = useT();
   const [hovering, setHovering] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
+  const [paneDragOver, setPaneDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const startRename = () => {
@@ -221,9 +230,30 @@ function TabItem({
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(e) => {
+        // Tab reordering AND pane drops both accept the drag.
+        if (
+          e.dataTransfer.types.includes("application/x-muster-pane") ||
+          e.dataTransfer.types.includes("application/x-muster-pane-source-tab")
+        ) {
+          e.preventDefault();
+          setPaneDragOver(true);
+        } else {
+          e.preventDefault();
+        }
+      }}
+      onDragLeave={() => setPaneDragOver(false)}
       onDrop={(e) => {
         e.preventDefault();
+        setPaneDragOver(false);
+        // Pane dropped from another tab → cross-tab move.
+        const paneId = e.dataTransfer.getData("application/x-muster-pane");
+        const sourceTabId = e.dataTransfer.getData("application/x-muster-pane-source-tab");
+        if (paneId && sourceTabId && sourceTabId !== tab.id) {
+          onPaneDrop(paneId, sourceTabId);
+          return;
+        }
+        // Otherwise it's a tab-reorder drag.
         onMove(tab.id);
       }}
       onContextMenu={(e) => {
@@ -232,7 +262,7 @@ function TabItem({
       }}
       className={`group relative rounded-md px-2 py-1 max-w-[220px] flex items-center gap-1 cursor-pointer whitespace-nowrap ui-fs-base flex-shrink-0 ${
         isSelected ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted hover:bg-muster-hover"
-      } ${isDragging ? "opacity-65" : ""}`}
+      } ${isDragging ? "opacity-65" : ""} ${paneDragOver ? "ring-1 ring-inset ring-muster-accent" : ""}`}
     >
       {renaming ? (
         <input

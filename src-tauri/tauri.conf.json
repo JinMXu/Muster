@@ -43,6 +43,18 @@
     "windows": {
       "nsis": { "installMode": "perMachine" },
       "wix": { "language": ["en-US"] }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_YOUR_PUBKEY",
+      "endpoints": [
+        "https://github.com/egoist/kero/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

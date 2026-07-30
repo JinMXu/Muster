@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppStateView } from "./types";
 import { api } from "./invoke";
 
@@ -6,7 +7,10 @@ import { api } from "./invoke";
 /// - `root`: the panel anchor — the pinned custom_directory if set, else the
 ///   toplevel of the nearest git repository containing the session's cwd (so
 ///   `cd` inside a repo does NOT re-root the panels), else the live cwd.
-/// - `cwd`: the session's live working directory (tracked via OSC 9;9).
+///   When the session `cd`s into a linked git worktree, the root follows the
+///   worktree's own toplevel (so Files/Git/Info panels re-root there).
+/// - `cwd`: the session's live working directory (tracked via OSC 9;9,
+///   with immediate event-driven updates — no 2s poll wait).
 export interface ProjectAnchor {
   root: string | null;
   cwd: string | null;
@@ -16,8 +20,9 @@ export interface ProjectAnchor {
 /// when the cwd actually changes (module scope: shared by every consumer).
 const rootCache = new Map<string, string>();
 
-/// Resolve the selected project's anchored root and live cwd. Polls every 2s
-/// because cwd changes don't emit state-changed.
+/// Resolve the selected project's anchored root and live cwd. Listens for the
+/// `session-cwd-changed` event (emitted immediately when the shell's cwd
+/// changes, e.g. after a `cd` into a worktree) and falls back to a 2s poll.
 export function useProjectCwd(state: AppStateView | null): ProjectAnchor {
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
   const projectId = project?.id ?? null;
@@ -26,6 +31,7 @@ export function useProjectCwd(state: AppStateView | null): ProjectAnchor {
   const [root, setRoot] = useState<string | null>(pinned);
 
   // Track the session's live cwd (pinned projects pin the cwd too).
+  // Uses an immediate event listener PLUS a 2s fallback poll.
   useEffect(() => {
     if (pinned) {
       setCwd(pinned);
@@ -43,10 +49,20 @@ export function useProjectCwd(state: AppStateView | null): ProjectAnchor {
         setCwd(s?.working_directory ?? null);
       });
     tick();
+    // Event-driven: re-read sessions immediately when any session's cwd
+    // changes, so worktree re-rooting is instant (no 2s delay).
+    let unlisten: UnlistenFn | null = null;
+    listen("session-cwd-changed", () => {
+      if (alive) tick();
+    }).then((u) => {
+      if (!alive) { u(); return; }
+      unlisten = u;
+    });
     const i = setInterval(tick, 2000);
     return () => {
       alive = false;
       clearInterval(i);
+      unlisten?.();
     };
   }, [projectId, pinned]);
 

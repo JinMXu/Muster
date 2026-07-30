@@ -4,6 +4,7 @@ use tauri::{Emitter, State, Window};
 use uuid::Uuid;
 
 use super::{emit_state, unknown_window, SharedState};
+use crate::models::pane::PaneContent;
 
 #[tauri::command]
 pub fn open_file(window: Window, state: State<SharedState>, path: String, to_side: bool) -> Option<Uuid> {
@@ -16,16 +17,34 @@ pub fn open_file(window: Window, state: State<SharedState>, path: String, to_sid
 #[tauri::command]
 pub fn file_text_changed(window: Window, state: State<SharedState>, id: Uuid, text: String) {
     let Some(s) = state.get_label(window.label()) else { return };
-    let g = s.lock();
-    if let Some(f) = g.files.get(&id) { f.set_text(text); }
+    // Only hold the lock to clone the Arc; release it before set_text,
+    // which clones & compares strings that can be megabytes large.
+    let file = {
+        let g = s.lock();
+        g.files.get(&id).cloned()
+    };
+    if let Some(f) = file {
+        f.set_text(text);
+    }
 }
 
 #[tauri::command]
 pub fn save_selected_file(window: Window, state: State<SharedState>) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
-    let saved = s.lock().save_selected_file()?;
-    if let Some(id) = saved {
-        let _ = window.emit("file-saved", serde_json::json!({ "id": id }));
+    let (file, file_id) = {
+        let g = s.lock();
+        let Some(tab) = g.selected_tab() else { return Ok(()) };
+        let Some(pane) = tab.focused_pane() else { return Ok(()) };
+        use crate::models::pane::PaneContent;
+        if let PaneContent::File(id) = &pane.content {
+            if let Some(f) = g.files.get(id) {
+                (Some(f.clone()), *id)
+            } else { (None, Uuid::default()) }
+        } else { (None, Uuid::default()) }
+    };
+    if let Some(f) = file {
+        f.save()?;
+        let _ = window.emit("file-saved", serde_json::json!({ "id": file_id }));
     }
     Ok(())
 }
@@ -33,8 +52,14 @@ pub fn save_selected_file(window: Window, state: State<SharedState>) -> Result<(
 #[tauri::command]
 pub fn save_file(window: Window, state: State<SharedState>, id: Uuid) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
-    s.lock().save_file(id)?;
-    let _ = window.emit("file-saved", serde_json::json!({ "id": id }));
+    let file = {
+        let g = s.lock();
+        g.files.get(&id).cloned()
+    };
+    if let Some(f) = file {
+        f.save()?;
+        let _ = window.emit("file-saved", serde_json::json!({ "id": id }));
+    }
     Ok(())
 }
 

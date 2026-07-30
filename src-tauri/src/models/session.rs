@@ -105,20 +105,21 @@ impl TerminalSession {
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 8192];
-            // Incremental escape-sequence scanner: sequences may be split
-            // across read chunk boundaries, so partial OSC bodies are kept
-            // inside the scanner between chunks.
             let mut scanner = OscScanner::new();
+            // Batch output: accumulate small chunks so rapid output (e.g.
+            // holding backspace) coalesces into fewer `pty:data` IPC events,
+            // reducing Tauri webview message bus pressure and keeping the
+            // terminal responsive.
+            let mut pending: Vec<u8> = Vec::with_capacity(16384);
+            let mut last_flush = std::time::Instant::now();
+            const FLUSH_INTERVAL_MS: u64 = 2;
+            const FLUSH_SIZE: usize = 8192;
             loop {
                 if inner.is_exited() { break }
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let payload = serde_json::json!({
-                            "id": session_id,
-                            "data": base64_encode(&buf[..n]),
-                        });
-                        let _ = app.emit_to(&label, "pty:data", payload);
+                        pending.extend_from_slice(&buf[..n]);
                         let scan = scanner.feed(&buf[..n]);
                         if let Some(cwd) = scan.cwd {
                             let mut wd = inner.working_directory.lock();
@@ -132,9 +133,28 @@ impl TerminalSession {
                         if scan.bells > 0 {
                             notify_bell(&app, &label, &inner);
                         }
+                        if pending.len() >= FLUSH_SIZE
+                            || last_flush.elapsed() > std::time::Duration::from_millis(FLUSH_INTERVAL_MS)
+                        {
+                            let payload = serde_json::json!({
+                                "id": session_id,
+                                "data": base64_encode(&pending),
+                            });
+                            let _ = app.emit_to(&label, "pty:data", payload);
+                            pending.clear();
+                            last_flush = std::time::Instant::now();
+                        }
                     }
                     Err(_) => break,
                 }
+            }
+            // Flush any remaining pending data before the exit event.
+            if !pending.is_empty() {
+                let payload = serde_json::json!({
+                    "id": session_id,
+                    "data": base64_encode(&pending),
+                });
+                let _ = app.emit_to(&label, "pty:data", payload);
             }
             // The shell exited on its own (EOF / read error), e.g. the user
             // typed `exit`: `terminate()` is never called on this path, so

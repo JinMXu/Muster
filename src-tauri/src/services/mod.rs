@@ -1,4 +1,5 @@
 pub mod config;
+pub mod conpty;
 pub mod explorer;
 pub mod git;
 pub mod i18n;

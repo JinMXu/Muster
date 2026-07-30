@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import Sidebar from "./components/Sidebar";
@@ -14,10 +15,10 @@ import UsagePanel from "./components/UsagePanel";
 import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
-import { pruneSessions, clear as clearSessionTerm } from "./lib/terminalRegistry";
+import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib/terminalRegistry";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
-import { LanguageProvider, detectInitialLang, useT } from "./lib/i18n/context";
+import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/context";
 import type { Lang } from "./lib/i18n/types";
 import type { AppStateView, DirtyFile, ProjectView, TabView, Uuid } from "./lib/types";
 
@@ -33,6 +34,8 @@ export default function App() {
   useEffect(() => {
     api.state().then((view) => setStateRaw(view));
     initSettings();
+    ensureListeners(); // eagerly register pty:data / pty:exit listeners so restored sessions don't miss initial output
+    invoke('init_read_loops'); // then start the read pumps now that listeners are ready
   }, [setStateRaw]);
 
   const savedSettings = useSettings();
@@ -45,7 +48,10 @@ export default function App() {
     if (sl === "en" || sl === "zh") setLang(sl);
   }, [savedSettings]);
 
-  const { t } = useT();
+  // App renders the LanguageProvider below, so it cannot consume it with
+  // useT() (that would return the default identity t, printing raw keys).
+  // Build t directly from the same lang state the provider receives.
+  const t = useMemo(() => makeT(lang), [lang]);
 
   const stateView = state ?? null;
   const selectedProject = useMemo(

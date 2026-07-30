@@ -30,6 +30,7 @@ pub fn run() {
                     main.lock().new_project(Some(arg.to_string()));
                     // Bring up the PTY for the session the project just created.
                     spawn_pending(app, "main", &main);
+                    start_read_loops(app, "main", &main);
                     if let Some(window) = app.get_webview_window("main") {
                         let view = main.lock().view();
                         let _ = window.emit("state-changed", view);
@@ -45,6 +46,34 @@ pub fn run() {
         .manage(shared)
         .setup(|app| {
             let _ = env_logger::try_init();
+
+            // Resolve the bundled OpenConsole.exe (from the Windows Terminal
+            // project) that our manual ConPTY backend drives instead of the
+            // inbox system conhost.exe. In dev it sits next to Cargo.toml;
+            // in a bundled install it's a Tauri resource.
+            {
+                let mut candidates = Vec::new();
+                if let Ok(rd) = app.path().resource_dir() {
+                    candidates.push(rd.join("resources").join("OpenConsole.exe"));
+                }
+                candidates.push(
+                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("resources")
+                        .join("OpenConsole.exe"),
+                );
+                if let Ok(exe) = std::env::current_exe() {
+                    if let Some(dir) = exe.parent() {
+                        candidates.push(dir.join("resources").join("OpenConsole.exe"));
+                        candidates.push(dir.join("OpenConsole.exe"));
+                    }
+                }
+                let oc = candidates
+                    .iter()
+                    .find(|p| p.exists())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "OpenConsole.exe".to_string());
+                crate::services::conpty::init_openconsole_path(oc);
+            }
 
             // Register the bundled fonts (JetBrains Mono + Nerd Font symbols)
             // as process-private fonts so the terminal/editor resolve them
@@ -260,7 +289,7 @@ fn terminate_all_sessions(app: &AppHandle) {
 /// yet. Restored sessions (and the starter session) are created without a
 /// PTY; commands (spawn_session / split) spawn their own. The read loops
 /// are scoped to `label` so output lands in the owning window only.
-pub fn spawn_pending(app: &AppHandle, label: &str, state: &Arc<Mutex<AppState>>) {
+pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>>) {
     let pending: Vec<Arc<TerminalSession>> = state
         .lock()
         .sessions
@@ -269,7 +298,25 @@ pub fn spawn_pending(app: &AppHandle, label: &str, state: &Arc<Mutex<AppState>>)
         .cloned()
         .collect();
     for session in pending {
-        let _ = session.spawn(80, 24);
+        match session.spawn(80, 24) {
+            Ok(()) => log::info!("spawn_pending: session {} spawned ok", session.id),
+            Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", session.id, e),
+        }
+    }
+}
+
+/// Start read pumps for all spawned sessions in the given window. Called by
+/// the frontend after its pty:data listeners are registered, so the race
+/// between the PTY output and the listener setup is closed.
+pub fn start_read_loops(app: &AppHandle, label: &str, state: &Arc<Mutex<AppState>>) {
+    let sessions: Vec<Arc<TerminalSession>> = state
+        .lock()
+        .sessions
+        .values()
+        .filter(|s| s.is_spawned())
+        .cloned()
+        .collect();
+    for session in sessions {
         session.attach_read_loop(app.clone(), label.to_string());
     }
 }

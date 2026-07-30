@@ -15,6 +15,7 @@ pub fn new_project(window: Window, state: State<SharedState>, directory: Option<
     // new_project spawns a session model without a PTY — bring it up now,
     // same as bootstrap does for restored/starter sessions.
     crate::bootstrap::spawn_pending(window.app_handle(), window.label(), &s);
+    crate::bootstrap::start_read_loops(window.app_handle(), window.label(), &s);
     emit_state(&window, &s.lock());
     id
 }

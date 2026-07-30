@@ -88,3 +88,13 @@ pub fn session_ports(
 ) -> Vec<crate::services::procs::ListenPort> {
     crate::services::procs::listen_ports(&pids, project_root.as_deref())
 }
+
+/// Called by the frontend after its pty:data / pty:exit listeners are
+/// registered, so that restored sessions' read pumps start after the
+/// listeners are in place (closes the race between PTY output and listener
+/// setup during application startup).
+#[tauri::command]
+pub fn init_read_loops(window: Window, state: State<SharedState>) {
+    let Some(s) = state.get_label(window.label()) else { return };
+    crate::bootstrap::start_read_loops(window.app_handle(), window.label(), &s);
+}

@@ -41,25 +41,6 @@ export default function TerminalPane({
       }
     };
 
-    // Terminal clipboard conventions: Ctrl+C copies only when there is a
-    // selection (otherwise the ^C must reach the shell), Ctrl+V pastes.
-    entry.term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown" || !e.ctrlKey || e.altKey || e.shiftKey) return true;
-      const key = e.key.toLowerCase();
-      if (key === "c" && entry.term.hasSelection()) {
-        navigator.clipboard.writeText(entry.term.getSelection());
-        entry.term.clearSelection();
-        return false;
-      }
-      if (key === "v") {
-        navigator.clipboard.readText().then((text) => {
-          if (text) api.sendText(sessionId, text);
-        });
-        return false;
-      }
-      return true;
-    });
-
     // Fit once attached (element may have zero size on first mount).
     const raf = requestAnimationFrame(() => {
       try {

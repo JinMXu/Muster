@@ -124,6 +124,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             terminal::session_processes,
             terminal::kill_process,
             terminal::session_ports,
+            terminal::init_read_loops,
             tabs::close_selected_tab,
             tabs::close_tab,
             tabs::select_tab,

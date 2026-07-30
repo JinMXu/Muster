@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
+use crate::services::conpty::ConPty;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -12,13 +12,6 @@ use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 use crate::base64_encode;
-
-/// Convert any error's `to_string()` into a generic `io::Error`. portable-pty
-/// returns `anyhow::Error` rather than `io::Error`, so we wrap for our
-/// `io::Result` return type.
-fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
-    std::io::Error::other(e.to_string())
-}
 
 /// One login shell owned by a terminal pane. The PTY is spawned via
 /// `spawn()`, after which the master is held for `resize`, the writer for
@@ -38,9 +31,8 @@ pub struct TerminalSession {
     /// Last OSC 9;4 progress value seen, so we only emit on change.
     progress: Mutex<Option<(u8, u8)>>,
 
-    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
+    conpty: Mutex<Option<ConPty>>,
     writer: Mutex<Option<Box<dyn Write + Send>>>,
-    child: Mutex<Option<Box<dyn Child + Send + Sync>>>,
 }
 
 impl TerminalSession {
@@ -56,52 +48,33 @@ impl TerminalSession {
             has_exited: Mutex::new(false),
             last_bell_notify: Mutex::new(None),
             progress: Mutex::new(None),
-            master: Mutex::new(None),
+            conpty: Mutex::new(None),
             writer: Mutex::new(None),
-            child: Mutex::new(None),
         }
     }
 
     pub fn spawn(self: &Arc<Self>, cols: u16, rows: u16) -> std::io::Result<()> {
-        use portable_pty::native_pty_system;
-        let pty = native_pty_system();
-        let pair = pty
-            .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(io_err)?;
+        let mut conpty = ConPty::create(cols, rows)?;
 
         let shell = crate::services::shell::detect_default_shell();
-        let mut cmd = CommandBuilder::new(&shell.path);
-        cmd.args(&shell.args);
-        cmd.cwd(&self.launch_directory);
-        cmd.env("TERM", "alacritty");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "muster");
-        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-        // Give the shell the *current* PATH from the registry, not whatever
-        // environment Muster was launched with (Explorer can predate newly
-        // installed CLIs — nvm, npm globals — making them "not found").
+        let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+        env.insert("TERM".into(), "alacritty".into());
+        env.insert("COLORTERM".into(), "truecolor".into());
+        env.insert("TERM_PROGRAM".into(), "muster".into());
+        env.insert("TERM_PROGRAM_VERSION".into(), env!("CARGO_PKG_VERSION").into());
         #[cfg(windows)]
         if let Some(path) = crate::services::shell::fresh_path_from_registry() {
-            cmd.env("PATH", path);
+            env.insert("PATH".into(), path);
         }
+        let env_vec: Vec<(String, String)> = env.into_iter().collect();
 
-        let child = pair.slave.spawn_command(cmd).map_err(io_err)?;
-        // The slave end must be dropped on the parent side so that EOF flows
-        // correctly when the child exits; we simply let it go out of scope.
-        drop(pair.slave);
+        let pid = conpty.spawn_shell(&shell.path, &shell.args, &self.launch_directory, &env_vec)?;
 
-        // Track the shell in a kill-on-close Job Object so the Info panel can
-        // find the whole process tree even when MSYS2 re-parenting breaks the
-        // ppid chain. Best-effort: on failure the ppid-BFS fallback applies.
-        if let Some(pid) = child.process_id() {
-            crate::services::procs::track_session(self.id, pid);
-        }
+        crate::services::procs::track_session(self.id, pid);
 
-        let writer = pair.master.take_writer().map_err(io_err)?;
-
+        let writer = conpty.take_writer()?;
         *self.writer.lock() = Some(writer);
-        *self.child.lock() = Some(child);
-        *self.master.lock() = Some(pair.master);
+        *self.conpty.lock() = Some(conpty);
 
         Ok(())
     }
@@ -111,12 +84,19 @@ impl TerminalSession {
     /// session only — with multiple windows each must see just its own
     /// terminals.
     pub fn attach_read_loop(self: &Arc<Self>, app: AppHandle, label: String) {
-        let guard = self.master.lock();
-        let Some(master) = guard.as_ref() else { return };
-        let reader = match master.try_clone_reader() {
-            Ok(r) => r,
-            Err(_) => return,
+        let mut guard = self.conpty.lock();
+        let Some(conpty) = guard.as_mut() else {
+            log::warn!("attach_read_loop: session {} has no conpty (not spawned?)", self.id);
+            return;
         };
+        let reader = match conpty.take_reader() {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("attach_read_loop: session {} take_reader failed: {}", self.id, e);
+                return;
+            }
+        };
+        log::info!("attach_read_loop: session {} starting read pump", self.id);
         let session_id = self.id;
         let inner = self.clone();
         std::thread::spawn(move || {
@@ -179,16 +159,15 @@ impl TerminalSession {
     }
 
     pub fn resize(&self, cols: u16, rows: u16) {
-        if let Some(master) = self.master.lock().as_ref() {
-            let _ = master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+        if let Some(conpty) = self.conpty.lock().as_ref() {
+            let _ = conpty.resize(cols, rows);
         }
     }
 
     pub fn terminate(&self) {
-        if let Some(child) = self.child.lock().as_mut() {
-            let _ = child.kill();
+        if let Some(conpty) = self.conpty.lock().as_mut() {
+            conpty.kill_child();
         }
-        // Closing the job also kills anything still in it (dev servers etc.).
         crate::services::procs::untrack_session(self.id);
         *self.has_exited.lock() = true;
     }
@@ -198,7 +177,7 @@ impl TerminalSession {
     /// Whether the PTY child process has been spawned for this session.
     /// Sessions created by snapshot restore start unspawned; bootstrap spawns
     /// them once the app handle is ready.
-    pub fn is_spawned(&self) -> bool { self.master.lock().is_some() }
+    pub fn is_spawned(&self) -> bool { self.conpty.lock().is_some() }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,7 +193,7 @@ pub struct SessionInfo {
 
 impl From<&TerminalSession> for SessionInfo {
     fn from(s: &TerminalSession) -> Self {
-        let pid = s.child.lock().as_ref().and_then(|c| c.process_id());
+        let pid = s.conpty.lock().as_ref().and_then(|c| c.process_id());
         Self {
             id: s.id,
             project_id: s.project_id,

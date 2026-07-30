@@ -30,6 +30,11 @@ interface Entry {
 /// has been closed (i.e. is no longer present in the app state).
 const registry = new Map<string, Entry>();
 
+/// Per-session buffer of incoming PTY data that arrived before the xterm
+/// instance was registered. Data is base64-encoded strings from the backend,
+/// flushed into the terminal when `create()` is called.
+const pendingBuffers = new Map<string, string[]>();
+
 /// Backend PTY events are listened to once for the whole module (not once per
 /// session) and dispatched by session id. Per-session listeners would outlive
 /// their terminals — the unlisten handles were dropped, so every disposed
@@ -38,17 +43,29 @@ const registry = new Map<string, Entry>();
 /// handles returned here are intentionally ignored: the listeners live as
 /// long as the app itself.
 let listenersReady = false;
-function ensureListeners(): void {
+export function ensureListeners(): void {
   if (listenersReady) return;
   listenersReady = true;
   listen<PtyDataPayload>("pty:data", (event) => {
     const entry = registry.get(event.payload.id);
-    if (!entry) return;
+    if (!entry) {
+      // Terminal not yet created — buffer output so it renders when the pane mounts.
+      const buf = pendingBuffers.get(event.payload.id);
+      if (buf) {
+        buf.push(event.payload.data);
+      } else {
+        pendingBuffers.set(event.payload.id, [event.payload.data]);
+      }
+      return;
+    }
     entry.term.write(base64ToBytes(event.payload.data));
   });
   listen<PtyExitPayload>("pty:exit", (event) => {
     const entry = registry.get(event.payload.id);
-    if (!entry) return;
+    if (!entry) {
+      pendingBuffers.delete(event.payload.id); // cleanup pending buffer
+      return;
+    }
     entry.term.write("\r\n\x1b[2m[session exited]\x1b[0m\r\n");
   });
 }
@@ -149,6 +166,28 @@ function create(sessionId: string): Entry {
   // Input → PTY. Registered once per terminal, not per pane mount.
   term.onData((data) => api.sendText(sessionId, data));
 
+  // Clipboard: Ctrl+C copies only when there is a selection, Ctrl+V pastes.
+  // Attached here (in create) rather than TerminalPane's useEffect so the
+  // handler isn't stacked on every unmount/remount (tab switch, zoom).
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown" || !e.ctrlKey || e.altKey || e.shiftKey) return true;
+    const key = e.key.toLowerCase();
+    if (key === "c" && term.hasSelection()) {
+      navigator.clipboard.writeText(term.getSelection());
+      term.clearSelection();
+      e.preventDefault();
+      return false;
+    }
+    if (key === "v") {
+      e.preventDefault();
+      navigator.clipboard.readText().then((text) => {
+        if (text) api.sendText(sessionId, text);
+      });
+      return false;
+    }
+    return true;
+  });
+
   // PTY output → terminal is handled by the module-level listeners above,
   // which dispatch to this entry via the registry. Keeps buffers in sync
   // even while the pane that hosts this terminal is unmounted.
@@ -158,6 +197,17 @@ function create(sessionId: string): Entry {
   api.sessionInfo(sessionId).then((info) => {
     if (info && info.title) term.write(`\x1b]0;${info.title}\x1b\\`);
   });
+
+  // Flush any PTY output that arrived before this terminal was registered
+  // (race between the read pump starting during setup and React mounting
+  // the pane).
+  const pending = pendingBuffers.get(sessionId);
+  if (pending) {
+    for (const data of pending) {
+      term.write(base64ToBytes(data));
+    }
+    pendingBuffers.delete(sessionId);
+  }
 
   return { term, fit };
 }

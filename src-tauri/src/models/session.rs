@@ -24,6 +24,10 @@ pub struct TerminalSession {
     pub shell_name: String,
     pub launch_directory: String,
     pub has_exited: Mutex<bool>,
+    /// Whether `attach_read_loop` has taken the reader for this session
+    /// (set to `true` inside `attach_read_loop`, used by `start_read_loops`
+    /// to skip sessions that already have a running read pump).
+    pub read_loop_started: Mutex<bool>,
 
     /// Last time a bell notification was sent for this session, for rate
     /// limiting (BEL bursts are common, e.g. `cat` of a binary file).
@@ -46,6 +50,7 @@ impl TerminalSession {
             shell_name: shell.name,
             launch_directory: directory,
             has_exited: Mutex::new(false),
+            read_loop_started: Mutex::new(false),
             last_bell_notify: Mutex::new(None),
             progress: Mutex::new(None),
             conpty: Mutex::new(None),
@@ -91,12 +96,10 @@ impl TerminalSession {
         };
         let reader = match conpty.take_reader() {
             Ok(r) => r,
-            Err(e) => {
-                log::error!("attach_read_loop: session {} take_reader failed: {}", self.id, e);
-                return;
-            }
+            Err(_) => return, // reader already taken (e.g. StrictMode double-mount)
         };
         log::info!("attach_read_loop: session {} starting read pump", self.id);
+        *self.read_loop_started.lock() = true;
         let session_id = self.id;
         let inner = self.clone();
         std::thread::spawn(move || {

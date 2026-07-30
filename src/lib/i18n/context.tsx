@@ -41,7 +41,7 @@ function resolve(
   return undefined;
 }
 
-function makeT(lang: Lang): TFunc {
+export function makeT(lang: Lang): TFunc {
   const dict = translations[lang] as Record<string, unknown>;
   return (path, args) => {
     const segments = path.split(".");

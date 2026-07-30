@@ -313,7 +313,7 @@ pub fn start_read_loops(app: &AppHandle, label: &str, state: &Arc<Mutex<AppState
         .lock()
         .sessions
         .values()
-        .filter(|s| s.is_spawned())
+        .filter(|s| s.is_spawned() && !*s.read_loop_started.lock())
         .cloned()
         .collect();
     for session in sessions {

@@ -60,7 +60,8 @@ export const api = {
 
   sessionProcesses: (sessionId: Uuid, shellPid: number) =>
     c<ProcessInfo[]>("session_processes", { sessionId, shellPid }),
-  killProcess: (pid: number) => c<void>("kill_process", { pid }),
+  killProcess: (sessionId: Uuid, shellPid: number, pid: number) =>
+    c<void>("kill_process", { sessionId, shellPid, pid }),
   sessionPorts: (pids: number[], projectRoot: string | null) =>
     c<ListenPort[]>("session_ports", { pids, projectRoot }),
 

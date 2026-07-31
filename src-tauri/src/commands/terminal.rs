@@ -71,9 +71,15 @@ pub fn session_processes(session_id: Uuid, shell_pid: u32) -> Vec<crate::service
 }
 
 /// Force-kill a process (Windows has only TerminateProcess semantics, hence a
-/// single kill command — see services::procs::kill).
+/// single kill command - see services::procs::kill). The PID is validated
+/// against the session's tracked process set to prevent killing arbitrary
+/// system processes.
 #[tauri::command]
-pub fn kill_process(pid: u32) -> Result<(), String> {
+pub fn kill_process(session_id: Uuid, shell_pid: u32, pid: u32) -> Result<(), String> {
+    let valid_pids = crate::services::procs::session_pids(session_id, shell_pid);
+    if !valid_pids.contains(&pid) {
+        return Err("PID does not belong to this session".to_string());
+    }
     crate::services::procs::kill(pid)
 }
 

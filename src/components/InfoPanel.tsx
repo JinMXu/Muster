@@ -31,7 +31,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
     let alive = true;
     const tick = () => api.listAllSessions().then((s) => alive && setSessions(s));
     tick();
-    const i = setInterval(tick, 2000);
+    const i = setInterval(tick, 5000);
     return () => {
       alive = false;
       clearInterval(i);
@@ -46,7 +46,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
     let alive = true;
     const tick = () => api.gitStatus(root).then((g) => alive && setGit(g));
     tick();
-    const i = setInterval(tick, 4000);
+    const i = setInterval(tick, 5000);
     return () => {
       alive = false;
       clearInterval(i);
@@ -77,7 +77,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       setPorts(ps);
     };
     tick();
-    const i = setInterval(tick, 2000);
+    const i = setInterval(tick, 3000);
     return () => {
       alive = false;
       clearInterval(i);
@@ -86,7 +86,9 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
 
   /// Kill and re-poll after a beat so the OS has time to reap the process.
   const kill = (pid: number) => {
-    api.killProcess(pid).catch(() => {});
+    if (shellPid != null && projSession) {
+      api.killProcess(projSession.id, shellPid, pid).catch(() => {});
+    }
     setTimeout(refresh, 300);
   };
 

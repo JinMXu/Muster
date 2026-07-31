@@ -1,4 +1,4 @@
-use parking_lot::Mutex;
+﻿use parking_lot::Mutex;
 use crate::services::conpty::ConPty;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -86,7 +86,7 @@ impl TerminalSession {
 
     /// Start the output pump thread. All events (`pty:data`, `pty:exit`,
     /// `pty:progress`) are emitted to the window `label` that owns this
-    /// session only — with multiple windows each must see just its own
+    /// session only 閳?with multiple windows each must see just its own
     /// terminals.
     pub fn attach_read_loop(self: &Arc<Self>, app: AppHandle, label: String) {
         let mut guard = self.conpty.lock();
@@ -144,12 +144,12 @@ impl TerminalSession {
                             notify_bell(&app, &label, &inner);
                         }
                     }
-                    Err(_) => break,
+                    Err(e) => { log::debug!("pty read ended (session {}): {e}", session_id); break; },
                 }
             }
             // The shell exited on its own (EOF / read error), e.g. the user
             // typed `exit`: `terminate()` is never called on this path, so
-            // release the Job Object here too. Idempotent — a later
+            // release the Job Object here too. Idempotent 閳?a later
             // `terminate()` untracks a second time harmlessly. Closing the
             // job also reaps any children the exited shell left behind
             // (KILL_ON_JOB_CLOSE), which is the intended cleanup.
@@ -167,14 +167,21 @@ impl TerminalSession {
 
     pub fn send_text(&self, text: &str) {
         if let Some(w) = self.writer.lock().as_mut() {
-            let _ = w.write_all(text.as_bytes());
-            let _ = w.flush();
+            if let Err(e) = w.write_all(text.as_bytes()) {
+                log::warn!("pty write failed (session {}): {e}", self.id);
+                return;
+            }
+            if let Err(e) = w.flush() {
+                log::warn!("pty flush failed (session {}): {e}", self.id);
+            }
         }
     }
 
     pub fn resize(&self, cols: u16, rows: u16) {
         if let Some(conpty) = self.conpty.lock().as_ref() {
-            let _ = conpty.resize(cols, rows);
+            if let Err(e) = conpty.resize(cols, rows) {
+                log::warn!("pty resize failed (session {}): {e}", self.id);
+            }
         }
     }
 
@@ -238,7 +245,7 @@ struct OscScanner {
     /// OSC body bytes collected so far (after `ESC ]`); None when not inside
     /// a sequence.
     body: Option<Vec<u8>>,
-    /// Last byte was ESC — the next byte decides whether an OSC starts (`]`),
+    /// Last byte was ESC 閳?the next byte decides whether an OSC starts (`]`),
     /// a sequence ends (`\`, i.e. ST), or the escape was something else.
     esc: bool,
 }
@@ -379,7 +386,7 @@ fn notify_bell(app: &AppHandle, label: &str, session: &TerminalSession) {
         .notification()
         .builder()
         .title("Muster")
-        .body(format!("{} — Bell", session.title()))
+        .body(format!("{} 閳?Bell", session.title()))
         .show();
 }
 

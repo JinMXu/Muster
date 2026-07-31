@@ -37,8 +37,18 @@ pub fn save_snapshot_for(label: &str, snapshot: &SessionSnapshot) -> std::io::Re
 
 pub fn load_snapshot_for(label: &str) -> Option<SessionSnapshot> {
     let path = session_snapshot_path_for(label);
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+    let text = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<SessionSnapshot>(&text) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            // Corrupt snapshot: back it up (like config.rs does) so the user
+            // can recover manually, instead of silently losing their layout.
+            log::warn!("corrupt snapshot {}: {e}", path.display());
+            let bak = path.with_extension("json.bak");
+            let _ = std::fs::rename(&path, &bak);
+            None
+        }
+    }
 }
 
 /// Delete a window's snapshot file. A missing file is not an error (the

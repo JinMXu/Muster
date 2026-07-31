@@ -15,7 +15,7 @@ pub fn translate<'a>(key: &'a str, lang: &str) -> &'a str {
         ("session-not-registered", _) => "session not registered",
         ("name-already-exists", _) => "An item named '{name}' already exists here.",
         ("invalid-name", _) => "'{name}' is not a valid name.",
-        ("name-no-slash", _) => "A name can't contain '/' or '\\\\'.",
+        ("name-no-slash", _) => "A name can't contain '/' or '\\'.",
         _ => key,
     }
 }

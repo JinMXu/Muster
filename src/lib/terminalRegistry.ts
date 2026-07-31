@@ -235,6 +235,11 @@ export function pruneSessions(active: ReadonlySet<string>): void {
   for (const id of [...registry.keys()]) {
     if (!active.has(id)) release(id);
   }
+  // Also prune any pending buffers for sessions that no longer exist
+  // (session created but terminal never mounted, then session closed).
+  for (const id of [...pendingBuffers.keys()]) {
+    if (!active.has(id)) pendingBuffers.delete(id);
+  }
 }
 
 /// Wipe the visible buffer + scrollback of a parked terminal (Ctrl+K).

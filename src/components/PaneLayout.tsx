@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { api } from "../lib/invoke";
 import type { PaneDropEdge } from "../lib/invoke";
@@ -15,6 +15,41 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
   const tab = project.tabs.find((t) => t.id === project.selected_tab_id);
   if (!tab) return null;
 
+  // Local weight override for drag-resize: the backend no longer emits
+  // full state on resize_pane_divider (to avoid serializing the entire
+  // workspace on every mousemove). Instead we apply the delta locally
+  // and clear the override when any other state change arrives.
+  const [weightOverride, setWeightOverride] = useState<Map<string, number>>(new Map());
+  useEffect(() => { setWeightOverride(new Map()); }, [project]);
+
+  const getWeight = (id: string, original: number) => weightOverride.get(id) ?? original;
+
+  const applyResize = (vertical: boolean, ci: number, index: number, deltaFrac: number, total: number) => {
+    const delta = deltaFrac * total;
+    setWeightOverride((prev) => {
+      const next = new Map(prev);
+      if (vertical) {
+        const a = tab.columns[ci];
+        const b = tab.columns[ci + 1];
+        if (a && b) {
+          next.set(a.id, getWeight(a.id, a.weight) + delta);
+          next.set(b.id, getWeight(b.id, b.weight) - delta);
+        }
+      } else {
+        const col = tab.columns[ci];
+        if (col) {
+          const a = col.panes[index];
+          const b = col.panes[index + 1];
+          if (a && b) {
+            next.set(a.id, getWeight(a.id, a.weight) + delta);
+            next.set(b.id, getWeight(b.id, b.weight) - delta);
+          }
+        }
+      }
+      return next;
+    });
+  };
+
   if (tab.is_zoomed && tab.pane_count > 1) {
     const focused = tab.columns
       .flatMap((c) => c.panes)
@@ -28,28 +63,28 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
     }
   }
 
-  const colTotal = tab.columns.reduce((sum, c) => sum + c.weight, 0);
+  const colTotal = tab.columns.reduce((sum, c) => sum + getWeight(c.id, c.weight), 0);
 
   return (
     <div className="absolute inset-0 flex flex-row gap-[2px]">
       {tab.columns.map((col, ci) => {
-        const paneTotal = col.panes.reduce((sum, p) => sum + p.weight, 0);
+        const paneTotal = col.panes.reduce((sum, p) => sum + getWeight(p.id, p.weight), 0);
         let paneCum = 0;
         return (
           <div
             key={col.id}
             className="relative flex flex-col min-w-0 gap-[2px]"
-            style={{ flexBasis: `${col.weight * 100}%` }}
+            style={{ flexBasis: `${getWeight(col.id, col.weight) * 100}%` }}
           >
             {col.panes.map((pane, pi) => {
-              paneCum += pane.weight;
+              paneCum += getWeight(pane.id, pane.weight);
               const dividerAt = paneCum;
               return (
                 <Fragment key={pane.id}>
                   <div
                     className="min-h-0 bg-muster-bg"
                     style={{
-                      flexBasis: `${pane.weight * 100}%`,
+                      flexBasis: `${getWeight(pane.id, pane.weight) * 100}%`,
                       zIndex: pane.id === tab.focused_pane_id ? 2 : 1,
                     }}
                   >
@@ -64,9 +99,10 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
                     <DividerHandle
                       vertical={false}
                       style={{ top: `${(dividerAt / paneTotal) * 100}%` }}
-                      onDrag={(frac) =>
-                        api.resizePaneDivider(tab.id, false, ci, pi, frac * paneTotal)
-                      }
+                      onDrag={(frac) => {
+                        applyResize(false, ci, pi, frac, paneTotal);
+                        api.resizePaneDivider(tab.id, false, ci, pi, frac * paneTotal);
+                      }}
                     />
                   )}
                 </Fragment>
@@ -76,7 +112,10 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
               <DividerHandle
                 vertical={true}
                 style={{ left: "100%" }}
-                onDrag={(frac) => api.resizePaneDivider(tab.id, true, ci, ci, frac * colTotal)}
+                onDrag={(frac) => {
+                  applyResize(true, ci, ci, frac, colTotal);
+                  api.resizePaneDivider(tab.id, true, ci, ci, frac * colTotal);
+                }}
               />
             )}
           </div>

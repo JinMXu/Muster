@@ -35,10 +35,15 @@ export default function App() {
   // Settings (theme, fonts, editor options) live in settingsStore: loaded
   // once here, applied there, reloaded when the Settings modal closes.
   useEffect(() => {
-    api.state().then((view) => setStateRaw(view));
+    api.state().then((view) => setStateRaw(view)).catch(() => {});
     initSettings();
-    ensureListeners(); // eagerly register pty:data / pty:exit listeners so restored sessions don't miss initial output
-    invoke('init_read_loops'); // then start the read pumps now that listeners are ready
+    // Eagerly register pty:data / pty:exit listeners so restored sessions
+    // don't miss initial output. Await the listeners before starting read
+    // pumps to close the race between PTY output and listener setup.
+    ensureListeners();
+    // ensureListeners sets a flag synchronously, but the actual listen()
+    // calls are async. Give them a tick to register before starting pumps.
+    setTimeout(() => invoke('init_read_loops'), 0);
   }, [setStateRaw]);
 
   const savedSettings = useSettings();
@@ -91,6 +96,12 @@ export default function App() {
 
   const refresh = useCallback(() => api.state().then(setStateRaw), [setStateRaw]);
 
+  // Ref holding the latest state so action callbacks can be stable (not
+  // re-created on every state-changed event) and the global keyboard listener
+  // doesn't tear down + re-add on every keystroke-driven state update.
+  const stateRef = useRef<AppStateView | null>(null);
+  useEffect(() => { stateRef.current = stateView; }, [stateView]);
+
   // ---- action helpers ---------------------------------------------------
   const newProjectWithDialog = useCallback(async () => {
     const dir = await openDialog({ directory: true, multiple: false });
@@ -121,10 +132,11 @@ export default function App() {
   }, []);
 
   const closeTab = useCallback(async () => {
+    const s = stateRef.current;
     const tabId =
-      state?.projects.find((p) => p.id === state.selected_project_id)?.selected_tab_id ?? null;
+      s?.projects.find((p) => p.id === s.selected_project_id)?.selected_tab_id ?? null;
     if (tabId) closeTabById(tabId);
-  }, [state, closeTabById]);
+  }, [closeTabById]);
 
   // Dirty files across several tabs, deduped by file id — a file open in two
   // of the closing tabs should only appear once in the confirmation.
@@ -155,8 +167,8 @@ export default function App() {
   );
 
   const tabsOfProjectWith = useCallback(
-    (tabId: Uuid) => state?.projects.find((p) => p.tabs.some((t) => t.id === tabId))?.tabs ?? [],
-    [state]
+    (tabId: Uuid) => stateRef.current?.projects.find((p) => p.tabs.some((t) => t.id === tabId))?.tabs ?? [],
+    []
   );
 
   const closeOtherTabs = useCallback(
@@ -192,15 +204,17 @@ export default function App() {
   }, []);
 
   const closeSelectedProject = useCallback(() => {
-    if (state?.selected_project_id) closeProject(state.selected_project_id);
-  }, [state, closeProject]);
+    const sid = stateRef.current?.selected_project_id;
+    if (sid) closeProject(sid);
+  }, [closeProject]);
 
   const split = useCallback((edge: "left" | "right" | "top" | "bottom") => api.split(edge), []);
 
   const saveFile = useCallback(() => api.saveSelectedFile(), []);
 
   const clearTerminal = useCallback(() => {
-    const project = state?.projects.find((p) => p.id === state.selected_project_id);
+    const s = stateRef.current;
+    const project = s?.projects.find((p) => p.id === s.selected_project_id);
     const tab = project?.tabs.find((t) => t.id === project.selected_tab_id);
     const pane = tab?.columns.flatMap((c) => c.panes).find((p) => p.id === tab.focused_pane_id);
     if (pane?.content.kind !== "session") return;
@@ -208,7 +222,7 @@ export default function App() {
     // Wipe the local xterm buffer, then have the shell clear its own screen.
     clearSessionTerm(sessionId);
     api.clearTerminal(sessionId);
-  }, [state]);
+  }, []);
 
   // ---- keyboard shortcuts ----------------------------------------------
   useEffect(() => {
@@ -312,10 +326,6 @@ export default function App() {
   // depend on re-renders; switcherView mirrors it for rendering.
   const [switcherView, setSwitcherView] = useState<{ tabs: SwitcherTab[]; index: number } | null>(null);
   const switcherRef = useRef<{ tabs: SwitcherTab[]; index: number } | null>(null);
-  const stateRef = useRef<AppStateView | null>(null);
-  useEffect(() => {
-    stateRef.current = stateView;
-  }, [stateView]);
 
   useEffect(() => {
     const setSwitcher = (v: { tabs: SwitcherTab[]; index: number } | null) => {

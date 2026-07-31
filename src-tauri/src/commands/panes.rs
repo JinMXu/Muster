@@ -49,6 +49,8 @@ pub fn resize_pane(window: Window, state: State<SharedState>, direction: ResizeD
 
 /// Drag-resize one divider: `vertical` = between columns `index`/`index + 1`,
 /// otherwise between panes `index`/`index + 1` of `columns[column_index]`.
+/// Skips `emit_state` to avoid full-tree serialization on every mousemove;
+/// the frontend updates pane weights locally during drag.
 #[tauri::command]
 pub fn resize_pane_divider(
     window: Window,
@@ -61,7 +63,6 @@ pub fn resize_pane_divider(
 ) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().resize_pane_divider(tab_id, vertical, column_index, index, delta);
-    emit_state(&window, &s.lock());
 }
 
 /// Drag & drop rearrange: move `pane_id` to `edge` of `target_pane_id`

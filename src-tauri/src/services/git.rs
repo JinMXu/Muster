@@ -383,7 +383,7 @@ pub struct GuardEntry {
 
 /// Fingerprint of the repo + target files, re-validated before a discard
 /// runs. Any drift aborts the operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitGuard {
     pub head_oid: Option<String>,
     pub branch: Option<String>,

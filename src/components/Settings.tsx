@@ -4,6 +4,7 @@ import { formatTokens } from "../lib/format";
 import type { Settings as SettingsType, UsageSummary } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 import { IconChartBar, IconChevronRight } from "./icons";
+import Modal from "./Modal";
 
 /// Modal settings window: font / colors / appearance / editor / terminal.
 export default function Settings({ onClose, onOpenUsage }: { onClose: () => void; onOpenUsage: () => void }) {
@@ -25,13 +26,8 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
     if (s) api.saveSettings(s).then(onClose);
   };
 
-  return (
-    <div className="absolute inset-0 z-40 bg-black/35" onClick={onClose}>
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[440px]">
-        <div
-          className="bg-muster-bg border border-white/[0.08] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.5)] px-5 py-4 muster-pop"
-          onClick={(e) => e.stopPropagation()}
-        >
+return (
+    <Modal onClose={onClose}>
         <h2 className="ui-fs-base font-semibold mb-3">{t("settings.title")}</h2>
 
         <Field label={t("settings.appearance")}>
@@ -159,9 +155,7 @@ export default function Settings({ onClose, onOpenUsage }: { onClose: () => void
             {t("settings.save")}
           </button>
         </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -222,7 +216,6 @@ function Integrations() {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [pathResult, setPathResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [onPath, setOnPath] = useState<boolean | null>(null);
-  const [updateResult, setUpdateResult] = useState<{ ok: boolean; text: string } | null>(null);
   const { t } = useT();
 
   useEffect(() => {
@@ -249,23 +242,6 @@ function Integrations() {
         setOnPath(true);
         setPathResult({ ok: true, text: t("settings.integrationsInstalled") });
       }).catch((e) => setPathResult({ ok: false, text: String(e) }));
-    }
-  };
-
-  const checkUpdate = async () => {
-    setUpdateResult(null);
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (update) {
-        setUpdateResult({ ok: true, text: t("settings.updateAvailable") });
-        await update.downloadAndInstall();
-        setUpdateResult({ ok: true, text: t("settings.updateReady") });
-      } else {
-        setUpdateResult({ ok: true, text: t("settings.updateNone") });
-      }
-    } catch {
-      setUpdateResult({ ok: false, text: t("settings.updateError") });
     }
   };
 
@@ -300,19 +276,6 @@ function Integrations() {
           {pathResult && (
             <span className={`ui-fs-base ${pathResult.ok ? "text-green-400" : "text-red-400"}`}>
               {pathResult.text}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={checkUpdate}
-            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            {t("settings.checkForUpdates")}
-          </button>
-          {updateResult && (
-            <span className={`ui-fs-base ${updateResult.ok ? "text-green-400" : "text-red-400"}`}>
-              {updateResult.text}
             </span>
           )}
         </div>

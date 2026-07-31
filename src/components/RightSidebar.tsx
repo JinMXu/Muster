@@ -17,7 +17,7 @@ import { IconFolder, IconGitBranch, IconInfo } from "./icons";
 /// caption buttons, flush to the window's top-right corner (Header skips its
 /// own WindowControls while this panel is visible); the panel tabs sit on
 /// their own row below.
-export default function RightSidebar({ state }: { state: AppStateView | null }) {
+export default function RightSidebar({ state, width }: { state: AppStateView | null; width: number }) {
   const [tab, setTab] = useState<RightPanel>(state?.panel_tab ?? "files");
   const { t } = useT();
   useEffect(() => {
@@ -26,7 +26,8 @@ export default function RightSidebar({ state }: { state: AppStateView | null }) 
 
   return (
     <aside
-      className="w-64 bg-muster-panel flex flex-col flex-shrink-0"
+      className="bg-muster-panel flex flex-col flex-shrink-0"
+      style={{ width }}
     >
       <div className="h-9 flex items-center flex-shrink-0" data-tauri-drag-region>
         <div className="flex-1 self-stretch" data-tauri-drag-region />

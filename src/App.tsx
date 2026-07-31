@@ -6,6 +6,7 @@ import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import PaneLayout from "./components/PaneLayout";
 import RightSidebar from "./components/RightSidebar";
+import ResizeHandle from "./components/ResizeHandle";
 import CommandPalette from "./components/CommandPalette";
 import TabSwitcher, { type SwitcherTab } from "./components/TabSwitcher";
 import Settings from "./components/Settings";
@@ -19,6 +20,7 @@ import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib/terminalRegistry";
 import { getLatestText, clearLatestText } from "./lib/fileEdits";
 import { useTauriEvent } from "./hooks/useTauriEvent";
+import { usePanelWidth } from "./hooks/usePanelWidth";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
 import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/context";
 import type { Lang } from "./lib/i18n/types";
@@ -31,6 +33,9 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
   const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
+  // Resizable sidebar widths (drag handles between the panels and main).
+  const leftPanel = usePanelWidth("muster:leftSidebarWidth", 224, "left");
+  const rightPanel = usePanelWidth("muster:rightSidebarWidth", 256, "right");
 
   // Settings (theme, fonts, editor options) live in settingsStore: loaded
   // once here, applied there, reloaded when the Settings modal closes.
@@ -501,17 +506,21 @@ export default function App() {
     <div className="h-screen w-screen flex flex-col bg-muster-float text-muster-fg overflow-hidden">
       <div className="flex-1 flex min-h-0">
         {stateView?.is_left_sidebar_visible && (
-          <Sidebar
-            projects={stateView?.projects ?? []}
-            selected={stateView?.selected_project_id ?? null}
-            onSelect={selectProject}
-            onClose={(id) => closeProject(id)}
-            onNewProject={newProjectBlank}
-            onMove={moveProject}
-            onRename={(id, name) => api.renameProject(id, name)}
-            onProjectMenu={projectMenu}
-            onOpenSettings={() => setShowSettings(true)}
-          />
+          <>
+            <Sidebar
+              projects={stateView?.projects ?? []}
+              selected={stateView?.selected_project_id ?? null}
+              onSelect={selectProject}
+              onClose={(id) => closeProject(id)}
+              onNewProject={newProjectBlank}
+              onMove={moveProject}
+              onRename={(id, name) => api.renameProject(id, name)}
+              onProjectMenu={projectMenu}
+              onOpenSettings={() => setShowSettings(true)}
+              width={leftPanel.width}
+            />
+            <ResizeHandle onMouseDown={leftPanel.onHandleMouseDown} />
+          </>
         )}
         <main className="flex-1 flex flex-col min-w-0">
           <Header
@@ -535,7 +544,12 @@ export default function App() {
             )}
           </div>
         </main>
-        {(stateView?.is_panel_visible ?? false) && <RightSidebar state={stateView} />}
+        {(stateView?.is_panel_visible ?? false) && (
+          <>
+            <ResizeHandle onMouseDown={rightPanel.onHandleMouseDown} />
+            <RightSidebar state={stateView} width={rightPanel.width} />
+          </>
+        )}
       </div>
 
       {showPalette && (

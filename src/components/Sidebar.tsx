@@ -12,6 +12,7 @@ export default function Sidebar({
   onRename,
   onProjectMenu,
   onOpenSettings,
+  width,
 }: {
   projects: ProjectView[];
   selected: Uuid | null;
@@ -24,13 +25,16 @@ export default function Sidebar({
   /// re-enters the row's inline rename field.
   onProjectMenu: (project: ProjectView, x: number, y: number, requestRename: () => void) => void;
   onOpenSettings: () => void;
+  /// Resizable panel width in px (drag handle lives in App).
+  width: number;
 }) {
   const { t } = useT();
   const [dragging, setDragging] = useState<Uuid | null>(null);
 
   return (
     <aside
-      className="w-56 bg-muster-panel flex flex-col"
+      className="bg-muster-panel flex flex-col flex-shrink-0"
+      style={{ width }}
       data-tauri-drag-region
     >
       <div className="h-9" data-tauri-drag-region />

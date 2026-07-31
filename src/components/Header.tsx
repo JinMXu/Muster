@@ -170,7 +170,9 @@ export default function Header({
           </button>
         )}
       </div>
-      <WindowControls />
+      {/* While the right panel is visible it hosts the caption buttons flush
+          to the window's top-right corner; otherwise they live here. */}
+      {!panelVisible && <WindowControls />}
     </header>
   );
 }

@@ -5,12 +5,18 @@ import { useT } from "../lib/i18n/context";
 import FileTree from "./FileTree";
 import GitPanel from "./GitPanel";
 import InfoPanel from "./InfoPanel";
+import WindowControls from "./WindowControls";
 import { IconFolder, IconGitBranch, IconInfo } from "./icons";
 
 /// Right sidebar with Files / Git / Info tabs, anchored to the selected
 /// project's directory (its custom_directory, or the cwd of its session).
 /// All three panels stay mounted (hidden via CSS) so switching tabs doesn't
 /// lose expansion state, git info, or kill/restart polling intervals.
+///
+/// The top row mirrors the main Header's height and hosts only the window
+/// caption buttons, flush to the window's top-right corner (Header skips its
+/// own WindowControls while this panel is visible); the panel tabs sit on
+/// their own row below.
 export default function RightSidebar({ state }: { state: AppStateView | null }) {
   const [tab, setTab] = useState<RightPanel>(state?.panel_tab ?? "files");
   const { t } = useT();
@@ -22,7 +28,11 @@ export default function RightSidebar({ state }: { state: AppStateView | null }) 
     <aside
       className="w-64 bg-muster-panel flex flex-col flex-shrink-0"
     >
-      <div className="flex items-center gap-1 px-2 pt-3 pb-1">
+      <div className="h-9 flex items-center flex-shrink-0" data-tauri-drag-region>
+        <div className="flex-1 self-stretch" data-tauri-drag-region />
+        <WindowControls />
+      </div>
+      <div className="flex items-center gap-1 px-2 pb-1 flex-shrink-0">
         <Tab active={tab === "info"} onClick={() => api.togglePanel("info")} icon={<IconInfo size={13} />} label={t("rightSidebar.info")} />
         <Tab active={tab === "files"} onClick={() => api.togglePanel("files")} icon={<IconFolder size={13} />} label={t("rightSidebar.files")} />
         <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={13} />} label={t("rightSidebar.git")} />

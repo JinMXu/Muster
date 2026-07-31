@@ -113,7 +113,11 @@ export default function Header({
       className="h-9 flex items-center pl-2"
       data-tauri-drag-region
     >
-      <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+      <div
+        className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto self-stretch"
+        style={{ scrollbarWidth: "none" }}
+        data-tauri-drag-region
+      >
         {project?.tabs.map((tab) => {
           const sessionId = tabProgressSession(tab);
           return (
@@ -144,7 +148,7 @@ export default function Header({
           <IconPlus size={13} />
         </button>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0 pr-2">
+      <div className="flex items-center gap-1 flex-shrink-0 pr-2 self-stretch" data-tauri-drag-region>
         {isPaneZoomed && (
           <button
             onClick={onExitZoom}

@@ -5,6 +5,8 @@ import type { AppStateView, DirEntry } from "../lib/types";
 import { api } from "../lib/invoke";
 import { useT } from "../lib/i18n/context";
 import { useProjectCwd } from "../lib/useProjectCwd";
+import { shellQuotePath } from "../lib/shellEscape";
+import { getFocusedSessionId, getFocusedFileId } from "../lib/sessionUtils";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import {
   IconChevronDown,
@@ -218,32 +220,11 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
 
   // Focused terminal session (selected tab -> focused pane), used by the
   // "cd Here" menu item. Omitted when no terminal is focused.
-  const selectedTab = project?.tabs.find((t) => t.id === project.selected_tab_id) ?? null;
-  const focusedSessionId = (() => {
-    if (!selectedTab) return null;
-    for (const col of selectedTab.columns) {
-      for (const pane of col.panes) {
-        if (pane.id === selectedTab.focused_pane_id && pane.content.kind === "session") {
-          return pane.content.id;
-        }
-      }
-    }
-    return null;
-  })();
+  const focusedSessionId = getFocusedSessionId(state);
 
   // Focused file tab (selected tab -> focused pane), used to keep the
   // tree's selection in sync with the file open in the focused pane.
-  const focusedFileId = (() => {
-    if (!selectedTab) return null;
-    for (const col of selectedTab.columns) {
-      for (const pane of col.panes) {
-        if (pane.id === selectedTab.focused_pane_id && pane.content.kind === "file") {
-          return pane.content.id;
-        }
-      }
-    }
-    return null;
-  })();
+  const focusedFileId = getFocusedFileId(state);
 
   // Resolve the focused file tab's path (cached per tab id).
   const filePathCache = useRef<Map<string, string>>(new Map());
@@ -307,7 +288,7 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
     items.push({ label: t("common.copyPath"), action: () => navigator.clipboard.writeText(node.path) });
     if (focusedSessionId) {
       const sessionId = focusedSessionId;
-      items.push({ label: t("fileTree.cdHere"), action: () => api.sendText(sessionId, `cd "${targetDir}"\r`) });
+      items.push({ label: t("fileTree.cdHere"), action: () => api.sendText(sessionId, `cd ${shellQuotePath(targetDir)}\r`) });
     }
     items.push("sep");
     items.push({ label: t("fileTree.newFile"), action: () => startCreate(targetDir, false) });

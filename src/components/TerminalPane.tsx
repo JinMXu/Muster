@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { acquire } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
+import { shellQuotePath } from "../lib/shellEscape";
 import { openMenu } from "../lib/menuStore";
 import { useT } from "../lib/i18n/context";
 import PasteWarning, { looksDangerousPaste } from "./PasteWarning";
@@ -116,9 +117,9 @@ export default function TerminalPane({
         if (!path) return;
         e.preventDefault();
         e.stopPropagation();
-        // Quote paths with spaces; no trailing newline so the user can
-        // compose the rest of the command before running it.
-        api.sendText(sessionId, path.includes(" ") ? `"${path}"` : path);
+        // Quote the path safely for the shell; no trailing newline so the
+        // user can compose the rest of the command before running it.
+        api.sendText(sessionId, shellQuotePath(path));
       }}
       onContextMenu={(e) => {
         e.preventDefault();

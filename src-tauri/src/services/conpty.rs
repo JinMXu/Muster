@@ -444,6 +444,38 @@ fn build_commandline(exe: &str, args: &[String]) -> Vec<u16> {
     cmd.encode_utf16().collect()
 }
 
+/// Quote an argument for the Windows command line using the
+/// CommandLineToArgvW-safe algorithm: wrap in double quotes if the
+/// string contains whitespace or quotes, escape backslashes that
+/// precede a quote, and escape embedded quotes as `\"`.
 fn quote_arg(s: &str) -> String {
-    if s.contains(' ') || s.contains('\t') { format!("\"{}\"", s) } else { s.to_string() }
+    if !s.contains(' ') && !s.contains('\t') && !s.contains('"') {
+        return s.to_string();
+    }
+    let mut result = String::from("\"");
+    let mut backslashes = 0;
+    for c in s.chars() {
+        match c {
+            '\\' => {
+                backslashes += 1;
+                result.push('\\');
+            }
+            '"' => {
+                for _ in 0..backslashes {
+                    result.push('\\');
+                }
+                result.push_str("\\\"");
+                backslashes = 0;
+            }
+            _ => {
+                backslashes = 0;
+                result.push(c);
+            }
+        }
+    }
+    for _ in 0..backslashes {
+        result.push('\\');
+    }
+    result.push('"');
+    result
 }

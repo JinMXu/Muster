@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { AppStateView, GitGuard, GitStatusEntry, GitStatusInfo } from "../lib/types";
 import { api } from "../lib/invoke";
 import { useProjectCwd } from "../lib/useProjectCwd";
+import { shellQuotePath } from "../lib/shellEscape";
+import { getFocusedSessionId } from "../lib/sessionUtils";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconChevronDown, IconGitBranch, IconSearch } from "./icons";
 import { useT } from "../lib/i18n/context";
@@ -48,7 +50,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
     let alive = true;
     const tick = () => api.gitStatus(cwd!).then((i) => alive && setInfo(i));
     tick();
-    const interval = setInterval(tick, 2000);
+    const interval = setInterval(tick, 3000);
     return () => {
       alive = false;
       clearInterval(interval);
@@ -85,6 +87,15 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
     />
   );
 
+  // Path filter (case-insensitive substring) applied to all three sections.
+  // Must be before the early returns to comply with the Rules of Hooks.
+  const q = filter.trim().toLowerCase();
+  const match = (e: GitStatusEntry) => !q || e.path.toLowerCase().includes(q);
+  const mergeEntries = useMemo(() => info?.merge_entries.filter(match) ?? [], [info?.merge_entries, q]);
+  const stagedEntries = useMemo(() => info?.staged_entries.filter(match) ?? [], [info?.staged_entries, q]);
+  const changedEntries = useMemo(() => info?.changed_entries.filter(match) ?? [], [info?.changed_entries, q]);
+  const noMatches = q.length > 0 && mergeEntries.length + stagedEntries.length + changedEntries.length === 0;
+
   if (!cwd || !info) {
     return <div className="text-muster-muted ui-fs-base p-3">{t("git.locatingRepo")}</div>;
   }
@@ -115,19 +126,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   // Focused terminal session (selected tab -> focused pane), used by the row
   // menu's "Insert Absolute Path in Terminal" item. Omitted when no terminal
   // is focused.
-  const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
-  const selectedTab = project?.tabs.find((t) => t.id === project.selected_tab_id) ?? null;
-  const focusedSessionId = (() => {
-    if (!selectedTab) return null;
-    for (const col of selectedTab.columns) {
-      for (const pane of col.panes) {
-        if (pane.id === selectedTab.focused_pane_id && pane.content.kind === "session") {
-          return pane.content.id;
-        }
-      }
-    }
-    return null;
-  })();
+  const focusedSessionId = getFocusedSessionId(state);
 
   // Commit validation: a message is always required, conflicts block any
   // commit, and the staged-only variants need something staged. Amend needs
@@ -265,19 +264,11 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
       const sessionId = focusedSessionId;
       items.push({
         label: t("git.insertPathInTerminal"),
-        action: () => api.sendText(sessionId, `"${abs}" `),
+        action: () => api.sendText(sessionId, `${shellQuotePath(abs)} `),
       });
     }
     openMenu({ x, y, items });
   };
-
-  // Path filter (case-insensitive substring) applied to all three sections.
-  const q = filter.trim().toLowerCase();
-  const match = (e: GitStatusEntry) => !q || e.path.toLowerCase().includes(q);
-  const mergeEntries = info.merge_entries.filter(match);
-  const stagedEntries = info.staged_entries.filter(match);
-  const changedEntries = info.changed_entries.filter(match);
-  const noMatches = q.length > 0 && mergeEntries.length + stagedEntries.length + changedEntries.length === 0;
 
   return (
     <div className="h-full flex flex-col ui-fs-base">

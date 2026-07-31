@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { api } from "../lib/invoke";
-import { editorOptions, languageForPath, MONACO_THEME } from "../lib/monaco";
+import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
 import { useSettings } from "../lib/settingsStore";
 import type { DiffTabInfo } from "../lib/types";
 import { useT } from "../lib/i18n/context";
@@ -11,17 +11,18 @@ import { useT } from "../lib/i18n/context";
 export default function DiffPane({ diffId, focused }: { diffId: string; focused: boolean }) {
   const [diff, setDiff] = useState<DiffTabInfo | null>(null);
   const [sideBySide, setSideBySide] = useState(true);
+  const [monacoReady, setMonacoReady] = useState(false);
   const { t } = useT();
   // Same settings-driven options as the file editor (font size/family/wrap).
   const settings = useSettings();
-  const options = {
+  const options = useMemo(() => ({
     ...editorOptions,
     fontSize: settings?.font_size ?? 13,
     fontFamily: settings?.font_family
       ? `${settings.font_family}, 'JetBrains Mono', Consolas, monospace`
       : editorOptions.fontFamily,
     wordWrap: (settings?.editor_wrap_lines ? "on" : "off") as "on" | "off",
-  };
+  }), [settings?.font_size, settings?.font_family, settings?.editor_wrap_lines]);
 
   useEffect(() => {
     let alive = true;
@@ -34,12 +35,14 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
     };
   }, [diffId]);
 
+  useEffect(() => { ensureMonaco().then(() => setMonacoReady(true)); }, []);
+
   const reload = async () => {
     await api.reloadDiff(diffId);
     setDiff(await api.diffInfo(diffId));
   };
 
-  if (!diff) return <div className="text-muster-muted ui-fs-base">{t("diffPane.loading")}</div>;
+  if (!diff || !monacoReady) return <div className="text-muster-muted ui-fs-base">{t("diffPane.loading")}</div>;
   if (diff.loading) return <div className="text-muster-muted ui-fs-base anim-pulse">{t("diffPane.computingDiff")}</div>;
   if (diff.error) return <div className="text-red-400 ui-fs-base">{diff.error}</div>;
 

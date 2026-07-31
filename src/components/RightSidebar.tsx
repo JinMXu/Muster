@@ -9,6 +9,8 @@ import { IconFolder, IconGitBranch, IconInfo } from "./icons";
 
 /// Right sidebar with Files / Git / Info tabs, anchored to the selected
 /// project's directory (its custom_directory, or the cwd of its session).
+/// All three panels stay mounted (hidden via CSS) so switching tabs doesn't
+/// lose expansion state, git info, or kill/restart polling intervals.
 export default function RightSidebar({ state }: { state: AppStateView | null }) {
   const [tab, setTab] = useState<RightPanel>(state?.panel_tab ?? "files");
   const { t } = useT();
@@ -26,9 +28,15 @@ export default function RightSidebar({ state }: { state: AppStateView | null }) 
         <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={13} />} label={t("rightSidebar.git")} />
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
-        {tab === "files" && <FileTree state={state} />}
-        {tab === "git" && <GitPanel state={state} />}
-        {tab === "info" && <InfoPanel state={state} />}
+        <div className="h-full" style={{ display: tab === "files" ? "block" : "none" }}>
+          <FileTree state={state} />
+        </div>
+        <div className="h-full" style={{ display: tab === "git" ? "block" : "none" }}>
+          <GitPanel state={state} />
+        </div>
+        <div className="h-full" style={{ display: tab === "info" ? "block" : "none" }}>
+          <InfoPanel state={state} />
+        </div>
       </div>
     </aside>
   );

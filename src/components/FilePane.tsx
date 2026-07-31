@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
-import { editorOptions, languageForPath, MONACO_THEME } from "../lib/monaco";
+import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
 import { useSettings } from "../lib/settingsStore";
 import { setLatestText, clearLatestText } from "../lib/fileEdits";
 import type { FileTabInfo } from "../lib/types";
@@ -26,6 +26,7 @@ export default function FilePane({
 }) {
   const [info, setInfo] = useState<FileTabInfo | null>(null);
   const [text, setText] = useState("");
+  const [monacoReady, setMonacoReady] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<string | null>(null);
   const editorRef = useRef<Parameters<NonNullable<React.ComponentProps<typeof Editor>["onMount"]>>[0] | null>(null);
@@ -36,14 +37,14 @@ export default function FilePane({
   // Editor options follow the saved settings (font size/family/wrap); the
   // options prop diff goes through Monaco's updateOptions automatically.
   const settings = useSettings();
-  const options = {
+  const options = useMemo(() => ({
     ...editorOptions,
     fontSize: settings?.font_size ?? 13,
     fontFamily: settings?.font_family
       ? `${settings.font_family}, 'JetBrains Mono', Consolas, monospace`
       : editorOptions.fontFamily,
     wordWrap: (settings?.editor_wrap_lines ? "on" : "off") as "on" | "off",
-  };
+  }), [settings?.font_size, settings?.font_family, settings?.editor_wrap_lines]);
 
   // Monaco renders its own internal textarea, which the app's global
   // shortcut handler deliberately ignores — so Ctrl+S must be bound inside
@@ -51,6 +52,9 @@ export default function FilePane({
   useEffect(() => {
     if (focused) editorRef.current?.focus();
   }, [focused]);
+
+  // Lazily load Monaco on first file pane mount.
+  useEffect(() => { ensureMonaco().then(() => setMonacoReady(true)); }, []);
 
   // Immediately push any debounce-pending edit to the backend and mark the
   // tab dirty. Called by the debounce timer and by the load effect's cleanup,
@@ -117,6 +121,9 @@ export default function FilePane({
   }
   if (info.content_kind === "unavailable") {
     return <div className="w-full h-full flex items-center justify-center text-muster-muted ui-fs-base">{info.name}</div>;
+  }
+  if (!monacoReady) {
+    return <div className="w-full h-full flex items-center justify-center text-muster-muted ui-fs-base">{t("filePane.loading")}</div>;
   }
 
   return (

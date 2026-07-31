@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { api } from "./invoke";
 import { applyFullTheme, applyThemeFonts } from "./theme";
 import { applyTerminalFont } from "./terminalRegistry";
-import { applyMonacoTheme } from "./monaco";
+import { applyMonacoTheme, ensureMonaco } from "./monaco";
 import type { Settings as SettingsType } from "./types";
 
 /// Module-level settings store (same useSyncExternalStore pattern as
@@ -36,7 +36,7 @@ async function applyAll(s: SettingsType): Promise<void> {
   }
   applyTerminalFont({ family: s.font_family, size: s.font_size, thicken: s.font_thicken });
   applyThemeFonts(s.font_family);
-  applyMonacoTheme(colors, dark);
+  ensureMonaco().then(() => applyMonacoTheme(colors, dark));
   document.documentElement.style.setProperty("--ui-font-scale", String((s.ui_font_size ?? 12) / 12));
 }
 

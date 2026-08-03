@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import Sidebar from "./components/Sidebar";
@@ -155,6 +156,28 @@ export default function App() {
   // doesn't tear down + re-add on every keystroke-driven state update.
   const stateRef = useRef<AppStateView | null>(null);
   useEffect(() => { stateRef.current = stateView; }, [stateView]);
+
+  // Narrow `tab-focused` event: the backend sends just the tab UUID on tab
+  // switches (the most frequent state mutation) instead of a full
+  // `state-changed` broadcast. Patch `selected_tab_id` locally - the frontend
+  // already has all tab data in its state; it only needs to know which tab is
+  // now active. A full `state-changed` from other operations (open/close/split)
+  // still arrives and authoritatively replaces this patched state.
+  useEffect(() => {
+    const unlisten = listen<Uuid>("tab-focused", (event) => {
+      const prev = stateRef.current;
+      if (!prev || !prev.selected_project_id) return;
+      setStateRaw({
+        ...prev,
+        projects: prev.projects.map((p) =>
+          p.id === prev.selected_project_id
+            ? { ...p, selected_tab_id: event.payload }
+            : p,
+        ),
+      });
+    });
+    return () => { unlisten.then((u) => u()); };
+  }, [setStateRaw]);
 
   // ---- action helpers ---------------------------------------------------
   const newProjectWithDialog = useCallback(async () => {

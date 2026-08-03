@@ -1,6 +1,6 @@
 //! Tab management commands.
 
-use tauri::{State, Window};
+use tauri::{Emitter, State, Window};
 use uuid::Uuid;
 
 use super::{emit_state, unknown_window, SharedState};
@@ -24,25 +24,46 @@ pub fn close_tab(window: Window, state: State<SharedState>, tab_id: Uuid) -> Res
     Ok(())
 }
 
+/// Switch active tab. Emits a narrow `tab-focused` event (just the tab UUID)
+/// instead of a full `state-changed` broadcast - tab switching is the most
+/// frequent state mutation and the frontend already has all tab data in its
+/// local state; it only needs to know which tab is now selected.
 #[tauri::command]
 pub fn select_tab(window: Window, state: State<SharedState>, id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
-    s.lock().select_tab(id);
-    emit_state(&window, &s.lock());
+    let mut g = s.lock();
+    g.select_tab(id);
+    // Only emit when the tab was actually selected (select_tab checks
+    // existence inside the selected project).
+    let selected = g.selected_project().and_then(|p| p.selected_tab_id);
+    drop(g);
+    if selected == Some(id) {
+        let _ = window.emit("tab-focused", id);
+    }
 }
 
 #[tauri::command]
 pub fn select_next_tab(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
-    s.lock().select_next_tab();
-    emit_state(&window, &s.lock());
+    let mut g = s.lock();
+    g.select_next_tab();
+    let selected = g.selected_project().and_then(|p| p.selected_tab_id);
+    drop(g);
+    if let Some(id) = selected {
+        let _ = window.emit("tab-focused", id);
+    }
 }
 
 #[tauri::command]
 pub fn select_previous_tab(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
-    s.lock().select_previous_tab();
-    emit_state(&window, &s.lock());
+    let mut g = s.lock();
+    g.select_previous_tab();
+    let selected = g.selected_project().and_then(|p| p.selected_tab_id);
+    drop(g);
+    if let Some(id) = selected {
+        let _ = window.emit("tab-focused", id);
+    }
 }
 
 #[tauri::command]

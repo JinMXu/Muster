@@ -132,8 +132,52 @@ muster doctor              # bridge health: version, windows, sessions, agents
 
 `muster agents` is worth knowing about: it reports each session running a
 recognised coding agent (opencode, Claude Code, Codex, Kimi Code, aider,
-Gemini CLI, Goose) as `working` or `waiting`. If you are one of them, you are
-in that list too.
+Gemini CLI, Goose) with a semantic state:
+
+- `working` — alive, produced output recently;
+- `waiting` — alive but silent (likely needs input/approval);
+- `done` — the agent process exited but the session is still alive and the
+  user hasn't looked at it yet.
+
+If you are one of the recognised agents, you are in that list too.
+
+### Coordinating with `wait` and `watch`
+
+```bash
+muster wait $SID                    # blocks until the session's agent reaches `done` (default)
+muster wait $SID --until working    # or --until waiting
+muster wait $SID --timeout 30       # default timeout 600s; exits 1 on timeout
+muster watch                        # streams agent-status-changed events until you stop it
+```
+
+`wait` polls the shared agent cache every ~0.5s (the cache itself is
+refreshed every ~3s by the background poller) and returns the resolved
+state. A session whose agent disappears (closed, or the user already saw it
+finish) counts as `done` for a `--until done` wait, so multi-agent
+orchestration ("kick off the other agent, then wait for it to finish")
+works even when nobody is watching the pane.
+
+`watch` opens a long-lived connection and prints one `agent-status-changed`
+JSON object per line as statuses change (plus a `ping` heartbeat). It's the
+push equivalent of repeatedly polling `muster agents`. Stop it with Ctrl+C
+or by closing the pipe.
+
+### Sending key combos, not just text
+
+```bash
+muster send-keys $SID ctrl+c        # interrupt the running command
+muster send-keys $SID enter         # press Enter
+muster send-keys $SID "ctrl+l up"   # multiple combos, space-separated
+muster send-keys $SID '["ctrl+c","enter"]' --json   # or a JSON array
+```
+
+`send-keys` sends semantic key combos (not literal text): named keys
+(`enter`, `esc`, `tab`, `backspace`, `space`, `up`/`down`/`left`/`right`,
+`home`, `end`, `pageup`/`pagedown`, `insert`, `delete`, `f1`–`f12`), an
+ASCII char, or `ctrl+`/`alt+`/`shift+` combos of those (`ctrl+c`,
+`shift+tab`, `alt+f1`, `ctrl+right`, …). `send` is for literal text; reach
+for `send-keys` when you mean a key (interrupting, scrolling history with
+arrows, accepting a prompt with Enter).
 
 Add `--json` to any verb for machine-readable output.
 
@@ -161,8 +205,11 @@ other coding agents mid-task. Treat anything you did not create as read-only:
 | `new` | `[dir]` / `--dir <path>` | new project's first session id |
 | `split` | `--v` / `--h` (default `--h`), `--dir <path>` | new session id |
 | `send` | `<id> <text> [--enter]` | `ok` |
+| `send-keys` | `<id> <combo...>` (e.g. `ctrl+c enter`) | number of combos sent |
 | `capture` | `<id> [--lines N]` | plain text |
 | `procs` | `<id>` | process tree + listening ports |
 | `run` | `-- <command>`, `--dir <path>`, `--timeout <secs>` | session id, then output |
+| `wait` | `<id>`, `--until done\|working\|waiting`, `--timeout <secs>` | resolved state; exit 1 on timeout |
+| `watch` | — | streamed `agent-status-changed` events (newline JSON) |
 
 Common flags: `--json` (structured output). `--` ends flag parsing.

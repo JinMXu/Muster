@@ -281,7 +281,7 @@ export type AgentKind =
   | "goose";
 
 /// Two-state heuristic: working (output recently) or waiting (quiet).
-export type AgentState = "working" | "waiting";
+export type AgentState = "working" | "waiting" | "done";
 
 /// One row of the `agent-status-changed` event payload. `agent`/`state` are
 /// null for a removal (the session's agent disappeared) — the UI drops the

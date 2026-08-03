@@ -25,8 +25,8 @@
 - **主题**：内置 GitHub 风格默认主题 + 完整 Ghostty 主题目录（数百款），深色/浅色独立设置，支持跟随系统；Monaco 编辑器与差异视图同步跟随
 - **国际化**：中文 / English 界面，可跟随系统语言
 - **会话持久化**：标签、分屏布局、项目与选中状态定时自动快照（每 5 秒），主窗口与次窗口重启后均完整恢复
-- **Agent 感知**：识别会话进程树中的 coding agent（opencode / Claude Code / Codex / Kimi Code / aider / Gemini CLI / Goose），标签上显示状态点（绿=运行中，黄=等待输入，等待时发系统通知）；检测原理是进程名 + 命令行匹配，无需 agent 配合
-- **Agent CLI 桥**：`muster` 命令支持 agent 驱动的工作流——`muster split` 开分屏、`muster send <id> <text>` 发送按键、`muster capture <id>` 读取终端输出（后端维护 400 行 ANSI 剥离的滚动回滚）、`muster run -- <cmd>` 在新标签真实 PTY 中执行并等待完成返回退出码、`muster procs <id>` 查看进程树与监听端口、`muster agents` 查看各会话 agent 状态；自带 `skills/muster/SKILL.md` 供 AI 代理使用
+- **Agent 感知**：识别会话进程树中的 coding agent（opencode / Claude Code / Codex / Kimi Code / aider / Gemini CLI / Goose），标签上显示状态点（绿=运行中、黄=等待输入、蓝=已完成待查看）；等待与完成都会在窗口失焦时发系统通知。检测原理是进程名 + 命令行匹配，无需 agent 配合
+- **Agent CLI 桥**：`muster` 命令支持 agent 驱动的工作流——`muster split` 开分屏、`muster send <id> <text>` 发送文本、`muster send-keys <id> ctrl+c` 发送语义按键（enter/up/shift+tab/alt+f1 等）、`muster capture <id>` 读取终端输出（后端维护 400 行 ANSI 剥离的滚动回滚）、`muster run -- <cmd>` 在新标签真实 PTY 中执行并等待完成返回退出码、`muster wait <id> --until done` 事件式等待某 agent 完成、`muster watch` 以换行 JSON 流式订阅所有会话的 agent 状态变化、`muster procs <id>` 查看进程树与监听端口、`muster agents` 查看各会话 agent 状态（working/waiting/done）；自带 `skills/muster/SKILL.md` 供 AI 代理使用
 - **CLI 工具**：可将 Muster 添加到系统 PATH，支持从任意终端使用 `muster <path>` 直接打开项目，或 `muster --cmd "vim foo.js" <path>` 在终端会话中执行命令
 - **剪贴板安全保护**：当粘贴内容疑似可执行命令（多行命令、`sudo` / `curl` / `rm -rf` 等）时弹窗确认，防止意外执行恶意指令
 - **无障碍**：跟随系统 `prefers-reduced-motion` 偏好，启用时全局禁用动画与过渡效果

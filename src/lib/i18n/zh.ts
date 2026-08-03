@@ -156,6 +156,7 @@ const zh = {
     untitled: "未命名",
     agentWorking: ({ agent }: { agent: string }) => `${agent} 正在运行`,
     agentWaiting: ({ agent }: { agent: string }) => `${agent} 等待输入`,
+    agentDone: ({ agent }: { agent: string }) => `${agent} 已完成 — 查看结果`,
   },
 
   git: {

@@ -300,12 +300,16 @@ function TabItem({
               title={
                 agent.state === "waiting"
                   ? t("header.agentWaiting", { agent: agentLabel(agent.agent) })
-                  : t("header.agentWorking", { agent: agentLabel(agent.agent) })
+                  : agent.state === "done"
+                    ? t("header.agentDone", { agent: agentLabel(agent.agent) })
+                    : t("header.agentWorking", { agent: agentLabel(agent.agent) })
               }
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                 agent.state === "waiting"
                   ? "bg-amber-400 animate-pulse"
-                  : "bg-emerald-400"
+                  : agent.state === "done"
+                    ? "bg-sky-400"
+                    : "bg-emerald-400"
               }`}
             />
           )}

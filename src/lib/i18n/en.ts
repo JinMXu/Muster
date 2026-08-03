@@ -156,6 +156,7 @@ const en = {
     untitled: "untitled",
     agentWorking: ({ agent }: { agent: string }) => `${agent} is working`,
     agentWaiting: ({ agent }: { agent: string }) => `${agent} is waiting for input`,
+    agentDone: ({ agent }: { agent: string }) => `${agent} finished — review the result`,
   },
 
   git: {

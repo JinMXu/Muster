@@ -1,14 +1,17 @@
 //! Agent awareness: detects coding-agent CLIs running inside a session's
-//! process tree and tracks whether they are actively working or sitting
-//! quiet waiting for input. A background loop refreshes the statuses every
-//! few seconds, emits `agent-status-changed` events to each window, and
-//! raises a system notification when an agent has been waiting for a while.
+//! process tree and tracks whether they are actively working, sitting quiet
+//! waiting for input, or have finished without the user looking yet. A
+//! background loop refreshes the statuses every few seconds, emits
+//! `agent-status-changed` events to each window, and raises a system
+//! notification when an agent turns waiting or finishes.
 //!
-//! Status is a two-state heuristic: the agent process is alive and has
-//! produced PTY output recently (`working`), or it has been silent for
-//! `WAITING_AFTER` (`waiting` — usually "it wants input").
+//! Status is a three-state model:
+//! - `working` — agent process alive, produced PTY output recently;
+//! - `waiting` — alive but silent for `WAITING_AFTER` (likely needs input);
+//! - `done` — the agent process exited while the session is still alive and
+//!   the user hasn't viewed that tab yet (drops the dot once they do).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -19,6 +22,7 @@ use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 use crate::commands::SharedState;
+use crate::models::pane::PaneContent;
 
 /// A coding-agent CLI that Muster recognises inside a session's process tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -49,13 +53,15 @@ impl AgentKind {
     }
 }
 
-/// Two-state heuristic: `Working` (agent process alive, output recently) or
-/// `Waiting` (alive but silent for a while — likely needs input).
+/// Three-state model: `Working` (alive, output recently), `Waiting` (alive,
+/// silent — likely needs input), or `Done` (agent exited, session alive, the
+/// user hasn't viewed the tab yet; the dot drops once they do).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
     Working,
     Waiting,
+    Done,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -178,11 +184,28 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
     // Every live session's owning window label (removals need to know where
     // to tell the frontend to drop the dot).
     let mut owner: HashMap<Uuid, String> = HashMap::new();
+    // Sessions the user is currently viewing (any pane of a window's selected
+    // tab). A `done` agent whose session is in here is "seen" — drop the dot
+    // instead of keeping it.
+    let mut seen: HashSet<Uuid> = HashSet::new();
 
     for (label, state) in shared.all() {
         let g = state.lock();
         for sid in g.sessions.keys() {
             owner.insert(*sid, label.clone());
+        }
+        // Collect the sessions inside each project's selected tab — the
+        // user is looking at that tab, so a finished agent there is "seen".
+        for project in &g.projects {
+            if let Some(tab) = project.selected_tab_view() {
+                for col in &tab.columns {
+                    for pane in &col.panes {
+                        if let PaneContent::Session(id) = &pane.content {
+                            seen.insert(*id);
+                        }
+                    }
+                }
+            }
         }
         for project in &g.projects {
             for sid in project.session_ids() {
@@ -192,24 +215,43 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
                 }
                 let shell_pid = session.shell_pid().unwrap_or(0);
                 let pids = crate::services::procs::session_pids(sid, shell_pid);
-                let Some(agent) = detect_agent(&pids) else { continue };
-                let agent_state = if session.idle_for() >= WAITING_AFTER {
-                    AgentState::Waiting
-                } else {
-                    AgentState::Working
-                };
-                let status = AgentStatus { agent, state: agent_state };
-                current.insert(sid, status);
-                if prev.get(&sid) != Some(&status) {
-                    changed.insert(sid, Some(status));
-                    per_window.entry(label.clone()).or_default().push((sid, Some(status)));
+                if let Some(agent) = detect_agent(&pids) {
+                    // Agent alive this poll → working / waiting.
+                    let agent_state = if session.idle_for() >= WAITING_AFTER {
+                        AgentState::Waiting
+                    } else {
+                        AgentState::Working
+                    };
+                    let status = AgentStatus { agent, state: agent_state };
+                    current.insert(sid, status);
+                    if prev.get(&sid) != Some(&status) {
+                        changed.insert(sid, Some(status));
+                        per_window.entry(label.clone()).or_default().push((sid, Some(status)));
+                    }
+                } else if let Some(prev_status) = prev.get(&sid) {
+                    // The agent was alive last poll but is gone now, while the
+                    // session itself is still alive → it finished. Show a
+                    // `done` dot unless the user is already looking at it
+                    // (then drop the dot — it's been "seen").
+                    if seen.contains(&sid) {
+                        changed.insert(sid, None);
+                        per_window.entry(label.clone()).or_default().push((sid, None));
+                    } else {
+                        let status = AgentStatus { agent: prev_status.agent, state: AgentState::Done };
+                        current.insert(sid, status);
+                        if prev.get(&sid) != Some(&status) {
+                            changed.insert(sid, Some(status));
+                            per_window.entry(label.clone()).or_default().push((sid, Some(status)));
+                        }
+                    }
                 }
+                // else: no agent now and never had one → nothing to report.
             }
         }
     }
 
-    // Sessions whose agent disappeared (or whose session closed) lose their
-    // status — the frontend must drop the dot.
+    // Sessions that closed entirely (in prev, no longer in current and not
+    // already handled above) lose their status — the frontend drops the dot.
     for sid in prev.keys() {
         if !current.contains_key(sid) && !changed.contains_key(sid) {
             changed.insert(*sid, None);
@@ -229,17 +271,37 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
             }).collect::<Vec<_>>(),
         });
         let _ = app.emit_to(&label, "agent-status-changed", payload);
-        notify_waiting(app, &label, shared, &rows);
+        notify_changed(app, &label, shared, &prev, &rows);
+    }
+
+    // Push all changed rows (across windows) to any live `muster watch` IPC
+    // subscribers. Cheap when nobody is watching — `broadcast` returns after a
+    // single empty-subscribers check.
+    if !changed.is_empty() {
+        let sessions = changed
+            .iter()
+            .map(|(id, status)| match status {
+                Some(s) => serde_json::json!({ "id": id, "agent": s.agent, "state": s.state }),
+                None => serde_json::json!({ "id": id, "agent": null, "state": null }),
+            })
+            .collect::<Vec<_>>();
+        crate::services::ipc::broadcast(serde_json::json!({
+            "event": "agent-status-changed",
+            "sessions": sessions,
+        }));
     }
 }
 
-/// Send a system notification when a session turned waiting (from working or
-/// from none), throttled per session and skipped while the owning window is
-/// focused — the user is already looking.
-fn notify_waiting(
+/// Send a system notification when a session turned waiting or finished,
+/// throttled per session (waiting) and skipped while the owning window is
+/// focused — the user is already looking. A `done` transition always
+/// notifies once (it fires exactly once per agent run); the cooldown is
+/// still recorded so a later `waiting` can't immediately re-fire.
+fn notify_changed(
     app: &AppHandle,
     label: &str,
     shared: &SharedState,
+    prev: &HashMap<Uuid, AgentStatus>,
     rows: &[(Uuid, Option<AgentStatus>)],
 ) {
     let focused = app
@@ -253,22 +315,30 @@ fn notify_waiting(
     let g = s.lock();
     for (sid, status) in rows {
         let Some(status) = status else { continue };
-        if status.state != AgentState::Waiting {
-            continue;
-        }
+        let prev_state = prev.get(sid).map(|p| p.state);
         let Some(session) = g.sessions.get(sid) else { continue };
-        if !session.try_mark_agent_notify(NOTIFY_COOLDOWN) {
-            continue;
-        }
+        let body = match status.state {
+            AgentState::Waiting if prev_state != Some(AgentState::Waiting) => {
+                if !session.try_mark_agent_notify(NOTIFY_COOLDOWN) {
+                    continue;
+                }
+                format!("{} is waiting for input \u{2014} {}", status.agent.label(), session.title())
+            }
+            AgentState::Done
+                if matches!(prev_state, Some(AgentState::Working) | Some(AgentState::Waiting)) =>
+            {
+                // Record the send so a flapping agent can't re-notify, but
+                // don't gate the `done` notification itself — it fires once.
+                session.try_mark_agent_notify(NOTIFY_COOLDOWN);
+                format!("{} finished \u{2014} {}", status.agent.label(), session.title())
+            }
+            _ => continue,
+        };
         let _ = app
             .notification()
             .builder()
             .title("Muster")
-            .body(format!(
-                "{} is waiting for input \u{2014} {}",
-                status.agent.label(),
-                session.title()
-            ))
+            .body(body)
             .show();
     }
 }

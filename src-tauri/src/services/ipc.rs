@@ -14,9 +14,10 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -28,6 +29,7 @@ use uuid::Uuid;
 use crate::commands::SharedState;
 use crate::models::pane::PaneContent;
 use crate::models::session::TerminalSession;
+use crate::services::agents::{AgentState, AgentStatus};
 
 /// Max accepted request size (a `send` of a huge script is the realistic
 /// ceiling; anything beyond is a misbehaving client).
@@ -37,6 +39,23 @@ const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 /// How long the CLI waits for a freshly spawned Muster to bring up its
 /// server before giving up.
 const BOOT_WAIT: Duration = Duration::from_secs(20);
+
+/// Live `watch` subscribers: each holds a receiver reading from this channel.
+/// `broadcast` pushes one JSON event object to every live subscriber (and
+/// prunes dead ones). Empty when nobody is watching, so the poll loop's
+/// per-tick cost is a single lock.
+static SUBSCRIBERS: Lazy<Mutex<Vec<mpsc::Sender<Value>>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+/// Push one event object to every live `watch` subscriber. Called by the
+/// agent poller whenever a session's status changes. Dead subscribers
+/// (client closed the socket) are pruned here.
+pub fn broadcast(event: Value) {
+    let mut subs = SUBSCRIBERS.lock();
+    if subs.is_empty() {
+        return;
+    }
+    subs.retain(|tx| tx.send(event.clone()).is_ok());
+}
 
 // ---------------------------------------------------------------------------
 // Server (GUI side)
@@ -107,6 +126,10 @@ struct Args {
     command: Option<String>,
     timeout_secs: Option<u64>,
     vertical: Option<bool>,
+    /// `wait` target state: "done" | "working" | "waiting".
+    until: Option<String>,
+    /// `send-keys` combos: a space-separated string or a JSON array.
+    keys: Option<Value>,
 }
 
 fn handle_connection(mut stream: TcpStream, app: &AppHandle, token: &str) {
@@ -143,6 +166,12 @@ fn handle_connection(mut stream: TcpStream, app: &AppHandle, token: &str) {
     };
     if req.token != token {
         write_response(&stream, req.id, Err("unauthorized".into()));
+        return;
+    }
+    // `watch` keeps the connection open and streams events; it can't go
+    // through the one-shot dispatch path.
+    if req.verb == "watch" {
+        handle_watch(stream, app, req.id);
         return;
     }
     let result = dispatch(app, &req.verb, req.args);
@@ -198,6 +227,8 @@ fn dispatch(app: &AppHandle, verb: &str, args_value: Value) -> Result<Value, Str
         "capture" => verb_capture(shared, &args),
         "procs" => verb_procs(shared, &args),
         "run" => verb_run(app, shared, &args),
+        "wait" => verb_wait(shared, &args),
+        "send-keys" => verb_send_keys(shared, &args),
         other => Err(format!("unknown verb '{other}'")),
     }
 }
@@ -519,6 +550,310 @@ fn extract_rc(output: &str) -> (String, Option<i64>) {
     (out, rc)
 }
 
+/// Write one JSON object followed by a newline to the socket. Returns the
+/// underlying I/O error so `watch` can detect a closed client and stop.
+fn write_line(stream: &TcpStream, v: &Value) -> std::io::Result<()> {
+    let mut s = v.to_string();
+    s.push('\n');
+    let mut clone = stream.try_clone()?;
+    clone.write_all(s.as_bytes())?;
+    Ok(())
+}
+
+/// `watch`: keep the connection open and stream `agent-status-changed`
+/// (and `ping` heartbeat) events as newline-delimited JSON until the client
+/// disconnects. One subscriber per connection; dead subscribers are pruned by
+/// `broadcast` once the receiver here is dropped.
+fn handle_watch(stream: TcpStream, _app: &AppHandle, id: u64) {
+    let (tx, rx) = mpsc::channel::<Value>();
+    SUBSCRIBERS.lock().push(tx);
+    if write_line(&stream, &json!({ "id": id, "ok": true, "data": { "type": "watch_started" } })).is_err() {
+        return;
+    }
+    let mut last_hb = Instant::now();
+    loop {
+        match rx.recv_timeout(Duration::from_secs(25)) {
+            Ok(event) => {
+                if write_line(&stream, &event).is_err() {
+                    break;
+                }
+                last_hb = Instant::now();
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if last_hb.elapsed() >= Duration::from_secs(25) {
+                    if write_line(&stream, &json!({ "event": "ping" })).is_err() {
+                        break;
+                    }
+                    last_hb = Instant::now();
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    // rx drops here → tx becomes disconnected → broadcast prunes the subscriber.
+}
+
+/// `wait <id> --until <state>`: block until the session's agent reaches the
+/// target state (or the session closes / the agent is gone, which counts as
+/// `done`). Returns the resolved state and whether it timed out. Polls the
+/// shared agent cache every 500ms; the cache is refreshed by the background
+/// poller every ~3s.
+fn verb_wait(shared: &SharedState, args: &Args) -> Result<Value, String> {
+    let id = args.id.ok_or("wait requires 'id'")?;
+    let until = match args.until.as_deref().unwrap_or("done") {
+        "done" | "finished" => "done",
+        "working" | "work" => "working",
+        "waiting" | "blocked" => "waiting",
+        other => return Err(format!("unknown wait target '{other}' (done|working|waiting)")),
+    };
+    let timeout = args.timeout_secs.unwrap_or(600).clamp(1, 86400);
+    let deadline = Instant::now() + Duration::from_secs(timeout);
+    let state_str = |s: AgentStatus| match s.state {
+        AgentState::Working => "working",
+        AgentState::Waiting => "waiting",
+        AgentState::Done => "done",
+    };
+    let resolved;
+    let mut timed_out = false;
+    loop {
+        let entry = shared.agents.lock().statuses.get(&id).copied();
+        let state = entry.map(state_str);
+        let reached = match state {
+            Some(s) => s == until,
+            // Session closed/agent gone: counts as "done" for done waits,
+            // otherwise wait out the timeout.
+            None => until == "done",
+        };
+        if reached {
+            resolved = state.unwrap_or("gone").to_string();
+            break;
+        }
+        if Instant::now() >= deadline {
+            timed_out = true;
+            resolved = state.unwrap_or("gone").to_string();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Ok(json!({ "id": id, "state": resolved, "timed_out": timed_out }))
+}
+
+/// `send-keys <id> <combo...>`: send semantic key combos (e.g. `ctrl+c`,
+/// `enter`, `up`, `shift+tab`, `alt+f1`) to a session, instead of literal
+/// text. All encodings are ASCII, so they go through `send_text` unchanged.
+fn verb_send_keys(shared: &SharedState, args: &Args) -> Result<Value, String> {
+    let id = args.id.ok_or("send-keys requires 'id'")?;
+    let combos = parse_keys(args.keys.clone().unwrap_or(Value::Null))?;
+    let (_label, session) = find_session(shared, id).ok_or("unknown session")?;
+    let mut bytes = Vec::new();
+    for combo in &combos {
+        bytes.extend_from_slice(&encode_combo(combo)?);
+    }
+    let text = std::str::from_utf8(&bytes).map_err(|_| "key combo produced non-utf8 bytes")?;
+    session.send_text(text);
+    Ok(json!({ "sent": combos.len() }))
+}
+
+/// Parse the `keys` argument — a space-separated string or a JSON array of
+/// combo strings — into a list of combos.
+fn parse_keys(keys: Value) -> Result<Vec<String>, String> {
+    match keys {
+        Value::Null => Err("send-keys requires 'keys'".into()),
+        Value::String(s) => {
+            let combos: Vec<String> = s.split_whitespace().map(String::from).collect();
+            if combos.is_empty() {
+                Err("send-keys requires 'keys'".into())
+            } else {
+                Ok(combos)
+            }
+        }
+        Value::Array(arr) => {
+            let mut out = Vec::with_capacity(arr.len());
+            for v in arr {
+                match v {
+                    Value::String(s) => out.push(s),
+                    _ => return Err("keys array items must be strings".into()),
+                }
+            }
+            if out.is_empty() {
+                Err("send-keys requires 'keys'".into())
+            } else {
+                Ok(out)
+            }
+        }
+        _ => Err("'keys' must be a string or array".into()),
+    }
+}
+
+/// xterm modifier parameter (the `M` in `CSI 1;{M}A`). None when no modifier.
+fn mod_param(shift: bool, alt: bool, ctrl: bool) -> Option<u8> {
+    match (shift, alt, ctrl) {
+        (false, false, false) => None,
+        (true, false, false) => Some(2),
+        (false, true, false) => Some(3),
+        (true, true, false) => Some(4),
+        (false, false, true) => Some(5),
+        (true, false, true) => Some(6),
+        (false, true, true) => Some(7),
+        (true, true, true) => Some(8),
+    }
+}
+
+/// Encode one key combo (e.g. `ctrl+c`, `up`, `shift+tab`, `alt+f1`) to the
+/// raw bytes a terminal expects. Supports the common ANSI/xterm sequences.
+fn encode_combo(combo: &str) -> Result<Vec<u8>, String> {
+    let parts: Vec<&str> = combo.split('+').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return Err("empty combo".into());
+    }
+    let key = parts.last().unwrap().to_lowercase();
+    let mut shift = false;
+    let mut alt = false;
+    let mut ctrl = false;
+    for m in &parts[..parts.len() - 1] {
+        match m.to_ascii_lowercase().as_str() {
+            "shift" => shift = true,
+            "alt" | "opt" | "meta" | "super" | "cmd" | "win" => alt = true,
+            "ctrl" | "control" => ctrl = true,
+            other => return Err(format!("unknown modifier '{other}' in '{combo}'")),
+        }
+    }
+
+    // ctrl + single ASCII char (or the named "space") → C0 byte. `alt`
+    // prefixes an ESC. Other combos with ctrl fall through to named/char.
+    if ctrl {
+        let maybe_byte = if key == "space" {
+            Some(b' ')
+        } else if key.len() == 1 && key.is_ascii() {
+            Some(key.as_bytes()[0])
+        } else {
+            None
+        };
+        if let Some(b) = maybe_byte {
+            if (b'a'..=b'z').contains(&b)
+                || (b'A'..=b'Z').contains(&b)
+                || matches!(b, b'@' | b'[' | b'\\' | b']' | b'^' | b'_' | b' ')
+            {
+                let c = b & 0x1f;
+                let mut out = if alt { vec![0x1b] } else { Vec::new() };
+                out.push(c);
+                return Ok(out);
+            }
+        }
+    }
+
+    // Named special key.
+    if let Some(seq) = encode_named(&key, shift, alt, ctrl)? {
+        return Ok(seq);
+    }
+
+    // Plain single ASCII char (shift uppercases letters; alt prefixes ESC).
+    if key.len() == 1 && key.is_ascii() {
+        let mut b = key.as_bytes()[0];
+        if shift && (b'a'..=b'z').contains(&b) {
+            b -= 32;
+        }
+        let mut out = if alt { vec![0x1b] } else { Vec::new() };
+        out.push(b);
+        return Ok(out);
+    }
+
+    Err(format!("unknown key '{key}' in '{combo}'"))
+}
+
+/// Encode a named key. Returns `Ok(Some(bytes))` for recognised names,
+/// `Ok(None)` when the key is not a named key (caller falls back to char
+/// handling), `Err` for malformed names.
+fn encode_named(key: &str, shift: bool, alt: bool, ctrl: bool) -> Result<Option<Vec<u8>>, String> {
+    let m = mod_param(shift, alt, ctrl);
+    let letter = |l: &str, m: Option<u8>| -> Vec<u8> {
+        match m {
+            None => format!("\x1b[{l}").into_bytes(),
+            Some(mp) => format!("\x1b[1;{mp}{l}").into_bytes(),
+        }
+    };
+    let tilde = |code: u8, m: Option<u8>| -> Vec<u8> {
+        match m {
+            None => format!("\x1b[{code}~").into_bytes(),
+            Some(mp) => format!("\x1b[{code};{mp}~").into_bytes(),
+        }
+    };
+    // f1-f4 use SS3 (`ESC O P/Q/R/S`) without modifiers; CSI 1;{M}{L} with.
+    let func14 = |n: u8, m: Option<u8>| -> Vec<u8> {
+        let l = match n {
+            1 => 'P',
+            2 => 'Q',
+            3 => 'R',
+            4 => 'S',
+            _ => unreachable!(),
+        };
+        match m {
+            None => format!("\x1bO{l}").into_bytes(),
+            Some(mp) => format!("\x1b[1;{mp}{l}").into_bytes(),
+        }
+    };
+
+    let seq = match key {
+        "up" => letter("A", m),
+        "down" => letter("B", m),
+        "right" => letter("C", m),
+        "left" => letter("D", m),
+        "home" => letter("H", m),
+        "end" => letter("F", m),
+        "pageup" | "pgup" => tilde(5, m),
+        "pagedown" | "pgdn" => tilde(6, m),
+        "insert" => tilde(2, m),
+        "delete" | "del" => tilde(3, m),
+        "f1" => func14(1, m),
+        "f2" => func14(2, m),
+        "f3" => func14(3, m),
+        "f4" => func14(4, m),
+        "f5" => tilde(15, m),
+        "f6" => tilde(17, m),
+        "f7" => tilde(18, m),
+        "f8" => tilde(19, m),
+        "f9" => tilde(20, m),
+        "f10" => tilde(21, m),
+        "f11" => tilde(23, m),
+        "f12" => tilde(24, m),
+        // Editor-style keys that don't use the CSI param form.
+        "tab" => {
+            if shift {
+                b"\x1b[Z".to_vec()
+            } else {
+                let mut v = if alt { vec![0x1b] } else { vec![] };
+                v.push(b'\t');
+                v
+            }
+        }
+        "enter" | "return" => {
+            let mut v = if alt { vec![0x1b] } else { vec![] };
+            v.push(b'\r');
+            v
+        }
+        "esc" | "escape" => {
+            // alt+esc = ESC ESC.
+            if alt {
+                b"\x1b\x1b".to_vec()
+            } else {
+                b"\x1b".to_vec()
+            }
+        }
+        "backspace" | "bksp" | "bs" => {
+            let mut v = if alt { vec![0x1b] } else { vec![] };
+            v.push(0x7f);
+            v
+        }
+        "space" => {
+            let mut v = if alt { vec![0x1b] } else { vec![] };
+            v.push(b' ');
+            v
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(seq))
+}
+
 // ---------------------------------------------------------------------------
 // Client (CLI side)
 // ---------------------------------------------------------------------------
@@ -528,7 +863,7 @@ pub mod client {
 
     /// The verbs this CLI understands. Anything else falls through to the
     /// normal GUI launch (e.g. `muster .` opens a project).
-    const VERBS: &[&str] = &["doctor", "ls", "agents", "new", "split", "send", "capture", "procs", "run"];
+    const VERBS: &[&str] = &["doctor", "ls", "agents", "new", "split", "send", "send-keys", "capture", "procs", "run", "wait", "watch"];
 
     /// Entry point from `main`: if argv looks like a CLI invocation, talk to
     /// the running app and exit; otherwise return None so the GUI boots.
@@ -568,6 +903,7 @@ pub mod client {
         pub(crate) lines: Option<usize>,
         pub(crate) timeout: Option<u64>,
         pub(crate) vertical: bool,
+        pub(crate) until: Option<String>,
         pub(crate) positionals: Vec<String>,
     }
 
@@ -581,6 +917,7 @@ pub mod client {
             lines: None,
             timeout: None,
             vertical: false,
+            until: None,
             positionals: Vec::new(),
         };
         let mut i = 0;
@@ -615,6 +952,10 @@ pub mod client {
                         .get(i)
                         .and_then(|s| s.parse::<u64>().ok())
                         .ok_or("--timeout needs a number")?);
+                }
+                "--until" => {
+                    i += 1;
+                    out.until = args.get(i).cloned();
                 }
                 other if other.starts_with("--") => {
                     return Err(format!("unknown flag '{other}' (use '--' before command text)"));
@@ -663,12 +1004,62 @@ pub mod client {
                     "timeout_secs": parsed.timeout,
                 });
             }
+            "wait" => {
+                let id = parsed
+                    .positionals
+                    .first()
+                    .ok_or("wait needs a session id")?;
+                args = json!({ "id": id, "until": parsed.until, "timeout_secs": parsed.timeout });
+            }
+            "send-keys" => {
+                let id = parsed
+                    .positionals
+                    .first()
+                    .ok_or("send-keys needs a session id")?;
+                let keys = parsed.positionals[1..].join(" ");
+                args = json!({ "id": id, "keys": keys });
+            }
             _ => {}
+        }
+
+        // `watch` streams events over a long-lived connection; it doesn't fit
+        // the one-request/one-response shape the rest of the verbs use.
+        if verb == "watch" {
+            return run_watch(&info);
         }
 
         let data = request(&info, verb, args)?;
         let code = print_result(verb, &data, parsed.json);
         Ok(code)
+    }
+
+    /// Open a connection and stream `watch` events (newline-delimited JSON)
+    /// until the server closes the socket or the reader hits EOF.
+    fn run_watch(info: &IpcInfo) -> Result<i32, String> {
+        let addr: std::net::SocketAddr = format!("127.0.0.1:{}", info.port)
+            .parse::<std::net::SocketAddr>()
+            .map_err(|e| e.to_string())?;
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2))
+            .map_err(|e| format!("cannot reach Muster: {e}"))?;
+        // No read timeout: block until the next event (or a closed socket).
+        let _ = stream.set_read_timeout(None);
+        let req = json!({ "id": 1, "token": info.token, "verb": "watch", "args": {} });
+        let mut s = req.to_string();
+        s.push('\n');
+        stream.write_all(s.as_bytes()).map_err(|e| e.to_string())?;
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        let reader = BufReader::new(stream);
+        for line in reader.lines() {
+            let line = line.map_err(|e| e.to_string())?;
+            // Skip the watch-started ack envelope; stream only event objects.
+            if line.contains("\"watch_started\"") || line.contains("\"event\":\"ping\"") {
+                continue;
+            }
+            writeln!(out, "{line}").map_err(|e| e.to_string())?;
+            out.flush().map_err(|e| e.to_string())?;
+        }
+        Ok(0)
     }
 
     fn ensure_info() -> Result<IpcInfo, String> {
@@ -802,6 +1193,25 @@ pub mod client {
             "send" => {
                 println!("ok");
                 0
+            }
+            "send-keys" => {
+                if let Some(n) = data["sent"].as_u64() {
+                    println!("sent {n} combo(s)");
+                } else {
+                    println!("ok");
+                }
+                0
+            }
+            "wait" => {
+                let state = data["state"].as_str().unwrap_or("");
+                let timed_out = data["timed_out"] == true;
+                println!("state: {state}{}", if timed_out { " (timed out)" } else { "" });
+                // Exit code reflects the wait outcome: 0 reached, 1 timed out.
+                if timed_out {
+                    1
+                } else {
+                    0
+                }
             }
             "capture" => {
                 print!("{}", data["text"].as_str().unwrap_or(""));
@@ -947,6 +1357,74 @@ mod tests {
 
         assert_eq!(find_rc_marker(&["just text\n".to_string()]), None);
         assert_eq!(find_rc_marker(&[]), None);
+    }
+
+    #[test]
+    fn key_combo_ctrl_letters_and_symbols() {
+        assert_eq!(encode_combo("ctrl+c").unwrap(), vec![0x03]);
+        assert_eq!(encode_combo("ctrl+d").unwrap(), vec![0x04]);
+        assert_eq!(encode_combo("ctrl+l").unwrap(), vec![0x0c]);
+        assert_eq!(encode_combo("ctrl+u").unwrap(), vec![0x15]);
+        assert_eq!(encode_combo("ctrl+z").unwrap(), vec![0x1a]);
+        assert_eq!(encode_combo("ctrl+a").unwrap(), vec![0x01]);
+        assert_eq!(encode_combo("ctrl+[").unwrap(), vec![0x1b]); // ESC
+        assert_eq!(encode_combo("ctrl+m").unwrap(), vec![0x0d]); // CR
+        assert_eq!(encode_combo("ctrl+i").unwrap(), vec![0x09]); // TAB
+        assert_eq!(encode_combo("ctrl+h").unwrap(), vec![0x08]); // BS
+        assert_eq!(encode_combo("ctrl+space").unwrap(), vec![0x00]); // NUL
+        // alt+ctrl+letter prefixes ESC.
+        assert_eq!(encode_combo("alt+ctrl+c").unwrap(), vec![0x1b, 0x03]);
+    }
+
+    #[test]
+    fn key_combo_named_keys_and_arrows() {
+        assert_eq!(encode_combo("enter").unwrap(), vec![b'\r']);
+        assert_eq!(encode_combo("esc").unwrap(), vec![0x1b]);
+        assert_eq!(encode_combo("tab").unwrap(), vec![b'\t']);
+        assert_eq!(encode_combo("backspace").unwrap(), vec![0x7f]);
+        assert_eq!(encode_combo("up").unwrap(), b"\x1b[A".to_vec());
+        assert_eq!(encode_combo("down").unwrap(), b"\x1b[B".to_vec());
+        assert_eq!(encode_combo("right").unwrap(), b"\x1b[C".to_vec());
+        assert_eq!(encode_combo("left").unwrap(), b"\x1b[D".to_vec());
+        assert_eq!(encode_combo("home").unwrap(), b"\x1b[H".to_vec());
+        assert_eq!(encode_combo("end").unwrap(), b"\x1b[F".to_vec());
+        assert_eq!(encode_combo("pageup").unwrap(), b"\x1b[5~".to_vec());
+        assert_eq!(encode_combo("pgdn").unwrap(), b"\x1b[6~".to_vec());
+        assert_eq!(encode_combo("delete").unwrap(), b"\x1b[3~".to_vec());
+        assert_eq!(encode_combo("f1").unwrap(), b"\x1bOP".to_vec());
+        assert_eq!(encode_combo("f5").unwrap(), b"\x1b[15~".to_vec());
+        assert_eq!(encode_combo("f12").unwrap(), b"\x1b[24~".to_vec());
+        // modifiers fold into the CSI param.
+        assert_eq!(encode_combo("shift+up").unwrap(), b"\x1b[1;2A".to_vec());
+        assert_eq!(encode_combo("ctrl+right").unwrap(), b"\x1b[1;5C".to_vec());
+        assert_eq!(encode_combo("alt+down").unwrap(), b"\x1b[1;3B".to_vec());
+        assert_eq!(encode_combo("shift+tab").unwrap(), b"\x1b[Z".to_vec());
+        assert_eq!(encode_combo("alt+enter").unwrap(), b"\x1b\r".to_vec());
+        assert_eq!(encode_combo("alt+f1").unwrap(), b"\x1b[1;3P".to_vec());
+    }
+
+    #[test]
+    fn key_combo_plain_chars_and_errors() {
+        assert_eq!(encode_combo("a").unwrap(), vec![b'a']);
+        assert_eq!(encode_combo("shift+a").unwrap(), vec![b'A']);
+        assert_eq!(encode_combo("alt+x").unwrap(), b"\x1bx".to_vec());
+        assert_eq!(encode_combo("0").unwrap(), vec![b'0']);
+        // Unknown named key / bad modifier.
+        assert!(encode_combo("nonsense").is_err());
+        assert!(encode_combo("hyper+x").is_err());
+    }
+
+    #[test]
+    fn parse_keys_string_or_array() {
+        assert_eq!(parse_keys(Value::String("ctrl+c enter".into())).unwrap(), vec!["ctrl+c", "enter"]);
+        assert_eq!(
+            parse_keys(json!(["ctrl+c", "enter"])).unwrap(),
+            vec!["ctrl+c", "enter"]
+        );
+        assert!(parse_keys(Value::Null).is_err());
+        assert!(parse_keys(Value::String("".into())).is_err());
+        assert!(parse_keys(json!([])).is_err());
+        assert!(parse_keys(json!([1])).is_err());
     }
 }
 

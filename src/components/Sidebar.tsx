@@ -1,6 +1,7 @@
 import type { ProjectView, Uuid } from "../lib/types";
 import { IconFolder, IconPlus, IconSettings, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
+import AgentMiniBar from "./AgentMiniBar";
 
 export default function Sidebar({
   projects,
@@ -13,6 +14,9 @@ export default function Sidebar({
   onProjectMenu,
   onOpenSettings,
   width,
+  agentBarOpen,
+  onAgentBarToggle,
+  onAgentBarClose,
 }: {
   projects: ProjectView[];
   selected: Uuid | null;
@@ -27,6 +31,11 @@ export default function Sidebar({
   onOpenSettings: () => void;
   /// Resizable panel width in px (drag handle lives in App).
   width: number;
+  /// Cross-state agent mini-bar popover is owned by App so the global
+  /// `Ctrl+Shift+A` shortcut can toggle it without a ref.
+  agentBarOpen: boolean;
+  onAgentBarToggle: () => void;
+  onAgentBarClose: () => void;
 }) {
   const { t } = useT();
   const [dragging, setDragging] = useState<Uuid | null>(null);
@@ -59,13 +68,18 @@ export default function Sidebar({
         </div>
       </div>
       <div className="px-2 py-1.5 flex items-center gap-1">
-        <FooterButton title={t("sidebar.newProjectTooltip")} onClick={onNewProject}>
-          <IconPlus size={14} />
-        </FooterButton>
-        <div className="flex-1" />
-        <FooterButton title={t("sidebar.settingsTooltip")} onClick={onOpenSettings}>
-          <IconSettings size={14} />
-        </FooterButton>
+<FooterButton title={t("sidebar.newProjectTooltip")} onClick={onNewProject}>
+        <IconPlus size={14} />
+      </FooterButton>
+      <AgentMiniBar
+        open={agentBarOpen}
+        onToggle={onAgentBarToggle}
+        onClose={onAgentBarClose}
+      />
+      <div className="flex-1" />
+      <FooterButton title={t("sidebar.settingsTooltip")} onClick={onOpenSettings}>
+        <IconSettings size={14} />
+      </FooterButton>
       </div>
     </aside>
   );

@@ -42,6 +42,7 @@ export const api = {
   listAllSessions: () => c<SessionInfo[]>("list_all_sessions"),
   fileInfo: (id: Uuid) => c<FileTabInfo | null>("file_info", { id }),
   diffInfo: (id: Uuid) => c<DiffTabInfo | null>("diff_info", { id }),
+  focusAgentSession: (sessionId: Uuid) => c<boolean>("focus_agent_session", { sessionId }),
 
   newWindow: () => c<void>("new_window"),
 

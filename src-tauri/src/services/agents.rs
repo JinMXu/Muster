@@ -188,6 +188,10 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
     // tab). A `done` agent whose session is in here is "seen" — drop the dot
     // instead of keeping it.
     let mut seen: HashSet<Uuid> = HashSet::new();
+    // Display info per detected-agent session (title, project name), so the
+    // cross-window mini-bar popover can show "what" and "where" without
+    // another IPC round-trip.
+    let mut meta: HashMap<Uuid, (String, String)> = HashMap::new();
 
     for (label, state) in shared.all() {
         let g = state.lock();
@@ -224,6 +228,7 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
                     };
                     let status = AgentStatus { agent, state: agent_state };
                     current.insert(sid, status);
+                    meta.insert(sid, (session.title(), project.name(&g)));
                     if prev.get(&sid) != Some(&status) {
                         changed.insert(sid, Some(status));
                         per_window.entry(label.clone()).or_default().push((sid, Some(status)));
@@ -239,6 +244,7 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
                     } else {
                         let status = AgentStatus { agent: prev_status.agent, state: AgentState::Done };
                         current.insert(sid, status);
+                        meta.insert(sid, (session.title(), project.name(&g)));
                         if prev.get(&sid) != Some(&status) {
                             changed.insert(sid, Some(status));
                             per_window.entry(label.clone()).or_default().push((sid, Some(status)));
@@ -260,8 +266,6 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
             }
         }
     }
-
-    shared.agents.lock().statuses = current;
 
     for (label, rows) in per_window {
         let payload = serde_json::json!({
@@ -289,7 +293,23 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
             "event": "agent-status-changed",
             "sessions": sessions,
         }));
+
+        // Global broadcast of the FULL current snapshot (all windows, all
+        // detected agents) so any window's agent mini-bar can render the
+        // complete cross-window picture. The `per-window` emit above is
+        // scoped to a single window; this `app.emit` reaches every window.
+        // Sent only when something changed, so a quiet poll costs nothing.
+        let all_sessions = current
+            .iter()
+            .map(|(id, s)| {
+                let (title, project) = meta.get(id).cloned().unwrap_or_default();
+                serde_json::json!({ "id": id, "agent": s.agent, "state": s.state, "title": title, "project": project })
+            })
+            .collect::<Vec<_>>();
+        let _ = app.emit("all-agent-status", serde_json::json!({ "sessions": all_sessions }));
     }
+
+    shared.agents.lock().statuses = current;
 }
 
 /// Send a system notification when a session turned waiting or finished,

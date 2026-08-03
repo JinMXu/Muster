@@ -285,11 +285,15 @@ export type AgentState = "working" | "waiting" | "done";
 
 /// One row of the `agent-status-changed` event payload. `agent`/`state` are
 /// null for a removal (the session's agent disappeared) — the UI drops the
-/// status dot in that case.
+/// status dot in that case. For the global `all-agent-status` snapshot, each
+/// row additionally carries `title`/`project` so the mini-bar popover can
+/// show "what" and "where" without another IPC round-trip.
 export interface AgentStatusRow {
   id: Uuid;
   agent: AgentKind | null;
   state: AgentState | null;
+  title?: string;
+  project?: string;
 }
 
 /// Payload of the `agent-status-changed` event (Rust AgentStatusEvent).

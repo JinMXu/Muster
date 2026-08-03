@@ -348,6 +348,7 @@ const zh = {
     filesPanel: "文件树面板",
     searchPanel: "搜索项目中的文件",
     terminalSearch: "搜索终端回滚（在终端中）",
+    agentBar: "切换 Agents 总览",
     gitPanel: "Git 面板",
     infoPanel: "信息面板",
     saveFile: "保存文件（编辑器中）",
@@ -386,6 +387,22 @@ const zh = {
     noResults: "无结果",
     noRoot: "打开项目后即可搜索",
     typeToSearch: "输入内容即可在项目中搜索文件",
+  },
+
+  agents: {
+    title: "Agents",
+    tooltipDone: ({ n }: { n: number }) => `${n} 个 agent 已完成，待查看`,
+    tooltipWaiting: ({ n }: { n: number }) => `${n} 个 agent 待输入`,
+    tooltipRunning: ({ n }: { n: number }) => `${n} 个 agent 在运行`,
+    tooltipMixed: ({ done, waiting, working }: { done: number; waiting: number; working: number }) =>
+      `${done} 已完成 · ${waiting} 待输入 · ${working} 运行中`,
+    state: {
+      working: "运行中",
+      waiting: "待输入",
+      done: "已完成",
+    },
+    jumpTo: "跳转到该会话",
+    empty: "没有正在运行的 agent",
   },
 
   commandPalette: {

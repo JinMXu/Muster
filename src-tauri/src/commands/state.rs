@@ -1,6 +1,6 @@
 //! State queries, settings, and theme commands.
 
-use tauri::{State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use uuid::Uuid;
 
 use super::SharedState;
@@ -64,4 +64,26 @@ pub fn file_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<
 #[tauri::command]
 pub fn diff_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<crate::models::diff::DiffTabInfo> {
     state.get_label(window.label()).and_then(|s| s.lock().diff_info(id))
+}
+
+/// Jump the user to the pane hosting `session_id`, even when that pane lives
+/// in another window. Selects its project + tab, focuses its pane, emits
+/// `state-changed` to the owning window, and brings that window to the
+/// foreground. Returns true when the session was found in any window; false
+/// when it no longer exists anywhere (the caller drops the row).
+#[tauri::command]
+pub fn focus_agent_session(app: AppHandle, state: State<SharedState>, session_id: Uuid) -> bool {
+    for (label, s) in state.all() {
+        let mut g = s.lock();
+        if g.focus_session(session_id) {
+            let view = g.view();
+            drop(g);
+            let _ = app.emit_to(&label, "state-changed", view);
+            if let Some(w) = app.get_webview_window(&label) {
+                let _ = w.set_focus();
+            }
+            return true;
+        }
+    }
+    false
 }

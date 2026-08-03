@@ -350,6 +350,7 @@ const en = {
     filesPanel: "Files panel",
     searchPanel: "Search files in project",
     terminalSearch: "Search terminal scrollback (in a terminal)",
+    agentBar: "Toggle Agents overview",
     gitPanel: "Git panel",
     infoPanel: "Info panel",
     saveFile: "Save file (in editor)",
@@ -388,6 +389,23 @@ const en = {
     noResults: "No results",
     noRoot: "Open a project to search",
     typeToSearch: "Type to search files in the project",
+  },
+
+  agents: {
+    title: "Agents",
+    /// Tooltip — counts split by state. Mixed uses {done}, {waiting}, {working}.
+    tooltipDone: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} finished — review`,
+    tooltipWaiting: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} waiting for input`,
+    tooltipRunning: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} running`,
+    tooltipMixed: ({ done, waiting, working }: { done: number; waiting: number; working: number }) =>
+      `${done} done · ${waiting} waiting · ${working} running`,
+    state: {
+      working: "running",
+      waiting: "waiting",
+      done: "done",
+    },
+    jumpTo: "Jump to session",
+    empty: "No agents running",
   },
 
   commandPalette: {

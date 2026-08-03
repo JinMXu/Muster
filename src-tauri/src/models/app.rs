@@ -611,6 +611,30 @@ impl AppState {
             if p.tabs.iter().any(|t| t.id == id) { p.selected_tab_id = Some(id); }
         }
     }
+
+    /// Locate the pane hosting `session_id` across every project/tab, select
+    /// its project and tab, and focus that pane. Returns true when the session
+    /// was found in this AppState. Used by the cross-window agent mini-bar to
+    /// jump the user to the agent's pane (possibly in another window).
+    pub fn focus_session(&mut self, session_id: Uuid) -> bool {
+        for project in &mut self.projects {
+            for tab in &mut project.tabs {
+                for col in &mut tab.columns {
+                    for pane in &col.panes {
+                        if let PaneContent::Session(id) = &pane.content {
+                            if *id == session_id {
+                                self.selected_project_id = Some(project.id);
+                                project.selected_tab_id = Some(tab.id);
+                                tab.focused_pane_id = pane.id;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
     pub fn move_tab(&mut self, from: Uuid, to: Uuid) {
         if from == to { return }
         let Some(p) = self.selected_project_mut() else { return };

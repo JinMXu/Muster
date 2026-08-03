@@ -109,6 +109,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             state::list_all_sessions,
             state::file_info,
             state::diff_info,
+            state::focus_agent_session,
             window::new_window,
             project::new_project,
             project::close_project,

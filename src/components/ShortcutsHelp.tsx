@@ -45,6 +45,7 @@ const GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
       { keys: "Ctrl+Shift+E", labelKey: "shortcuts.filesPanel" },
       { keys: "Ctrl+Shift+F", labelKey: "shortcuts.searchPanel" },
       { keys: "Ctrl+F", labelKey: "shortcuts.terminalSearch" },
+      { keys: "Ctrl+Shift+A", labelKey: "shortcuts.agentBar" },
       { keys: "Ctrl+Shift+G", labelKey: "shortcuts.gitPanel" },
       { keys: "Ctrl+Shift+I", labelKey: "shortcuts.infoPanel" },
       { keys: "Ctrl+S", labelKey: "shortcuts.saveFile" },

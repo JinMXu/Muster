@@ -37,6 +37,7 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [agentBarOpen, setAgentBarOpen] = useState(false);
   const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
   // Resizable sidebar widths (drag handles between the panels and main).
   const leftPanel = usePanelWidth("muster:leftSidebarWidth", 224, "left");
@@ -345,6 +346,7 @@ export default function App() {
       "ctrl+shift+t": reopenClosedTab,
       "ctrl+,": () => setShowSettings(true),
       "ctrl+shift+u": () => setShowUsage(true),
+      "ctrl+shift+a": () => setAgentBarOpen((v) => !v),
     };
     const onKey = (e: KeyboardEvent) => {
       const parts: string[] = [];
@@ -625,6 +627,9 @@ export default function App() {
               onProjectMenu={projectMenu}
               onOpenSettings={() => setShowSettings(true)}
               width={leftPanel.width}
+              agentBarOpen={agentBarOpen}
+              onAgentBarToggle={() => setAgentBarOpen((v) => !v)}
+              onAgentBarClose={() => setAgentBarOpen(false)}
             />
             <ResizeHandle onMouseDown={leftPanel.onHandleMouseDown} />
           </>

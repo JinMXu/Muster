@@ -13,16 +13,20 @@ import Settings from "./components/Settings";
 import ShortcutsHelp from "./components/ShortcutsHelp";
 import ContextMenu from "./components/ContextMenu";
 import UsagePanel from "./components/UsagePanel";
+import SearchPanel from "./components/SearchPanel";
 import PasteWarning, { looksDangerousPaste } from "./components/PasteWarning";
 import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib/terminalRegistry";
 import { getLatestText, clearLatestText } from "./lib/fileEdits";
+import { popClosedTab, pushClosedTab, filePathOf, diffMetaOf } from "./lib/recentFiles";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { usePanelWidth } from "./hooks/usePanelWidth";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
 import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/context";
+import { getFocusedSessionId } from "./lib/sessionUtils";
+import { openTerminalSearch } from "./lib/terminalSearch";
 import type { Lang } from "./lib/i18n/types";
 import type { AppStateView, DirtyFile, ProjectView, TabView, Uuid } from "./lib/types";
 
@@ -32,6 +36,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
   // Resizable sidebar widths (drag handles between the panels and main).
   const leftPanel = usePanelWidth("muster:leftSidebarWidth", 224, "left");
@@ -42,13 +47,11 @@ export default function App() {
   useEffect(() => {
     api.state().then((view) => setStateRaw(view)).catch(() => {});
     initSettings();
-    // Eagerly register pty:data / pty:exit listeners so restored sessions
-    // don't miss initial output. Await the listeners before starting read
-    // pumps to close the race between PTY output and listener setup.
-    ensureListeners();
-    // ensureListeners sets a flag synchronously, but the actual listen()
-    // calls are async. Give them a tick to register before starting pumps.
-    setTimeout(() => invoke('init_read_loops'), 0);
+    // Register the pty:data / pty:exit listeners, then start restored
+    // sessions' read pumps only AFTER the listeners are actually registered
+    // (the IPC round-trip completes). Starting them earlier drops their
+    // initial output — restored sessions would show a blank terminal.
+    ensureListeners().then(() => invoke('init_read_loops'));
   }, [setStateRaw]);
 
   const savedSettings = useSettings();
@@ -78,8 +81,53 @@ export default function App() {
   // Dispose parked terminal instances whose session no longer exists
   // (tab/pane/project closed). Terminals for live sessions stay parked in
   // the registry so their buffers survive tab/zoom/project switches.
+  // Also records tabs that just disappeared (Ctrl+Shift+T reopen stack) and
+  // prunes the switcher subtitle cache. `stateRef.current` still holds the
+  // previous state here because the ref-update effect below runs later.
   useEffect(() => {
     if (!stateView) return;
+    if (stateRef.current) {
+      const nextTabs = new Map<string, TabView>();
+      for (const p of stateView.projects) {
+        for (const t of p.tabs) nextTabs.set(t.id, t);
+      }
+      for (const p of stateRef.current.projects) {
+        // Tabs that vanished because their whole project closed are not
+        // reopenable in a meaningful place — skip them.
+        const projectGone = !stateView.projects.some((np) => np.id === p.id);
+        for (const t of p.tabs) {
+          if (nextTabs.has(t.id)) continue;
+          if (projectGone) continue;
+          const content =
+            t.columns.flatMap((c) => c.panes).find((pn) => pn.id === t.focused_pane_id)?.content ??
+            t.columns[0]?.panes[0]?.content ??
+            null;
+          if (!content) continue;
+          if (content.kind === "file") {
+            const path = filePathOf(content.id);
+            if (path) pushClosedTab({ projectId: p.id, content: { kind: "file", path } });
+          } else if (content.kind === "diff") {
+            const meta = diffMetaOf(content.id);
+            if (meta) {
+              pushClosedTab({
+                projectId: p.id,
+                content: {
+                  kind: "diff",
+                  repoRoot: meta.repoRoot,
+                  path: meta.path,
+                  staged: meta.staged,
+                  oldRev: meta.oldRev ?? undefined,
+                  newRev: meta.newRev ?? undefined,
+                  workdir: meta.workdir,
+                },
+              });
+            }
+          } else if (content.kind === "session") {
+            pushClosedTab({ projectId: p.id, content: { kind: "session" } });
+          }
+        }
+      }
+    }
     const ids = new Set<string>();
     const tabIds = new Set<string>();
     for (const p of stateView.projects) {
@@ -229,6 +277,29 @@ export default function App() {
     api.clearTerminal(sessionId);
   }, []);
 
+  // Ctrl+Shift+T: reopen the last closed tab. Files/diffs reopen their path;
+  // a closed terminal session spawns a fresh one in the project (the old
+  // PTY is gone and can't be revived).
+  const reopenClosedTab = useCallback(() => {
+    const tab = popClosedTab();
+    if (!tab) return;
+    const c = tab.content;
+    if (c.kind === "file") {
+      api.openFile(c.path, false);
+    } else if (c.kind === "diff") {
+      if (c.workdir) {
+        if (c.oldRev) api.openCheckpointDiff(c.repoRoot, c.path, c.oldRev);
+        else api.openWorkdirDiff(c.repoRoot, c.path);
+      } else if (c.oldRev && c.newRev) {
+        api.openCommitDiff(c.repoRoot, c.path, c.oldRev, c.newRev);
+      } else {
+        api.openDiff(c.repoRoot, c.path, c.staged ?? false);
+      }
+    } else {
+      api.spawnSession();
+    }
+  }, []);
+
   // ---- keyboard shortcuts ----------------------------------------------
   useEffect(() => {
     const NAV_MAP: Record<string, () => void> = {
@@ -271,6 +342,7 @@ export default function App() {
       "ctrl+alt+shift+arrowdown": () => api.resizePane("down"),
       "ctrl+s": saveFile,
       "ctrl+k": clearTerminal,
+      "ctrl+shift+t": reopenClosedTab,
       "ctrl+,": () => setShowSettings(true),
       "ctrl+shift+u": () => setShowUsage(true),
     };
@@ -301,7 +373,42 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [newProjectWithDialog, newSession, closeTab, split, saveFile, clearTerminal]);
+  }, [newProjectWithDialog, newSession, closeTab, split, saveFile, clearTerminal, reopenClosedTab]);
+
+  // ---- search shortcuts -----------------------------------------------
+  // Ctrl+Shift+F opens the project search overlay; Ctrl+F opens scrollback
+  // search when a terminal pane is focused (otherwise Monaco keeps its own
+  // find). Both use a dedicated capture listener because the NAV_MAP handler
+  // skips INPUT/TEXTAREA targets — xterm keeps a focused textarea and these
+  // must work from the terminal too.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== "f") return;
+      const target = e.target as HTMLElement | null;
+      // The terminal's hidden textarea is inside [data-terminal-pane]; every
+      // other input (Monaco's textarea, search/rename fields) keeps its own
+      // Ctrl+F. Intercept only inside the terminal.
+      const inTerminal = !!target?.closest("[data-terminal-pane]");
+      if (!e.shiftKey) {
+        if (!inTerminal) return;
+        const sid = getFocusedSessionId(stateRef.current);
+        if (!sid) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openTerminalSearch(sid);
+        return;
+      }
+      // Ctrl+Shift+F works from anywhere (including Monaco/inputs).
+      e.preventDefault();
+      e.stopPropagation();
+      setShowSearch(true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   // ---- global paste interception (paste protection) ---------------------
   // Intercept paste events in terminal panes and warn before sending
@@ -554,6 +661,7 @@ export default function App() {
 
       {showPalette && (
         <CommandPalette
+          state={stateView}
           onClose={() => setShowPalette(false)}
           onAskNewProject={newProjectWithDialog}
           onClearTerminal={clearTerminal}
@@ -561,6 +669,8 @@ export default function App() {
           onOpenSettings={() => setShowSettings(true)}
           onOpenShortcuts={() => setShowShortcuts(true)}
           onOpenUsage={() => setShowUsage(true)}
+          onOpenSearch={() => setShowSearch(true)}
+          onReopenClosed={reopenClosedTab}
         />
       )}
       {switcherView && (
@@ -586,6 +696,7 @@ export default function App() {
       )}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showUsage && <UsagePanel onClose={() => setShowUsage(false)} />}
+      {showSearch && <SearchPanel state={stateView} onClose={() => setShowSearch(false)} />}
       <ContextMenu />
       {closePrompt && (
         <div

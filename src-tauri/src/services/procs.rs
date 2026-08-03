@@ -111,6 +111,16 @@ pub fn process_infos(pids: &[u32]) -> Vec<ProcessInfo> {
         .collect()
 }
 
+/// Image name + full command line of one process, from the shared sysinfo
+/// cache (so it must follow a `session_pids` call in the same poll). Used by
+/// agent detection to recognise node-based CLI launchers whose image name is
+/// just `node.exe`.
+pub fn process_cmdline(pid: u32) -> Option<(String, String)> {
+    let sys = SYSTEM.lock();
+    let p = sys.process(Pid::from_u32(pid))?;
+    Some((p.name().to_string(), p.cmd().join(" ")))
+}
+
 /// The shell itself plus every descendant (BFS over parent/child links), in
 /// display order: shell first, then direct children, then deeper descendants;
 /// by pid within each tier.

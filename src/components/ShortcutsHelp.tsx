@@ -25,6 +25,7 @@ const GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
     items: [
       { keys: "Ctrl+T", labelKey: "shortcuts.newSession" },
       { keys: "Ctrl+W", labelKey: "shortcuts.closeTab" },
+      { keys: "Ctrl+Shift+T", labelKey: "shortcuts.reopenClosedTab" },
       { keys: "Ctrl+Tab", labelKey: "shortcuts.tabSwitcher" },
       { keys: "Ctrl+Shift+[ / ]", labelKey: "shortcuts.prevNextTab" },
       { keys: "Ctrl+D", labelKey: "shortcuts.splitRight" },
@@ -42,6 +43,8 @@ const GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
       { keys: "Ctrl+B", labelKey: "shortcuts.toggleSidebar" },
       { keys: "Ctrl+Shift+B", labelKey: "shortcuts.toggleRightPanel" },
       { keys: "Ctrl+Shift+E", labelKey: "shortcuts.filesPanel" },
+      { keys: "Ctrl+Shift+F", labelKey: "shortcuts.searchPanel" },
+      { keys: "Ctrl+F", labelKey: "shortcuts.terminalSearch" },
       { keys: "Ctrl+Shift+G", labelKey: "shortcuts.gitPanel" },
       { keys: "Ctrl+Shift+I", labelKey: "shortcuts.infoPanel" },
       { keys: "Ctrl+S", labelKey: "shortcuts.saveFile" },

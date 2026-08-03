@@ -104,10 +104,32 @@ export interface DiffTabInfo {
   repo_root: string;
   path: string;
   staged: boolean;
+  /// Non-null when this diff compares two commits (File History).
+  old_rev: string | null;
+  new_rev: string | null;
   old: string;
   new: string;
   error: string | null;
   loading: boolean;
+}
+
+/// One commit that touched a file (mirrors Rust services::git::FileCommit).
+export interface FileCommit {
+  hash: string;
+  short_hash: string;
+  parent: string | null;
+  subject: string;
+  author: string;
+  relative_date: string;
+  date_ms: number;
+}
+
+/// One blame-annotated line (mirrors Rust services::git::BlameLine).
+export interface BlameLine {
+  line: number;
+  short_hash: string;
+  author: string;
+  date: string;
 }
 
 export interface GitStatusEntry {
@@ -164,6 +186,18 @@ export interface DirEntry {
   name: string;
   path: string;
   is_directory: boolean;
+}
+
+/// One matching line of one file (mirrors Rust services::search::SearchMatch).
+/// `match_start` / `match_len` are char indices into `line_text`.
+export interface SearchMatch {
+  path: string;
+  rel_path: string;
+  line: number;
+  column: number;
+  line_text: string;
+  match_start: number;
+  match_len: number;
 }
 
 /// One row of the Info panel's PROCESSES section (mirrors Rust ProcessInfo).
@@ -233,4 +267,32 @@ export interface ToolSummary {
 /// Top-level summary payload (mirrors Rust UsageSummary).
 export interface UsageSummary {
   tools: ToolSummary[];
+}
+
+/// A coding-agent CLI detected in a session's process tree (mirrors Rust
+/// services::agents::AgentKind).
+export type AgentKind =
+  | "opencode"
+  | "claude_code"
+  | "codex"
+  | "kimi_code"
+  | "aider"
+  | "gemini"
+  | "goose";
+
+/// Two-state heuristic: working (output recently) or waiting (quiet).
+export type AgentState = "working" | "waiting";
+
+/// One row of the `agent-status-changed` event payload. `agent`/`state` are
+/// null for a removal (the session's agent disappeared) — the UI drops the
+/// status dot in that case.
+export interface AgentStatusRow {
+  id: Uuid;
+  agent: AgentKind | null;
+  state: AgentState | null;
+}
+
+/// Payload of the `agent-status-changed` event (Rust AgentStatusEvent).
+export interface AgentStatusEvent {
+  sessions: AgentStatusRow[];
 }

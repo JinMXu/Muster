@@ -5,6 +5,7 @@ import WindowControls from "./WindowControls";
 import { IconMaximize2, IconPanelRight, IconPlus, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import { api } from "../lib/invoke";
+import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
 
 /// The session a tab's progress bar should reflect: the focused pane's
 /// session, falling back to the first session pane in the tab.
@@ -51,6 +52,9 @@ export default function Header({
 }) {
   const { t } = useT();
   const [dragging, setDragging] = useState<Uuid | null>(null);
+  // Coding-agent status per session, fed by the backend poller
+  // (`agent-status-changed`). Drives the colored dot on agent tabs.
+  const agents = useAgentStatus();
   // OSC 9;4 progress per session id, fed by the backend's `pty:progress`
   // event (emitted only when a session's progress value changes).
   const [progressBySession, setProgressBySession] = useState<Record<Uuid, PtyProgress>>({});
@@ -127,6 +131,7 @@ export default function Header({
               isSelected={tab.id === project.selected_tab_id}
               isDragging={dragging === tab.id}
               progress={sessionId ? progressBySession[sessionId] ?? null : null}
+              agent={sessionId ? agents[sessionId] ?? null : null}
               onSelect={() => onSelectTab(tab.id)}
               onClose={() => onCloseTab(tab.id)}
               onMove={(to) => onMoveTab(tab.id, to)}
@@ -182,6 +187,7 @@ function TabItem({
   isSelected,
   isDragging,
   progress,
+  agent,
   onSelect,
   onClose,
   onMove,
@@ -196,6 +202,8 @@ function TabItem({
   isDragging: boolean;
   /// OSC 9;4 progress of the tab's session, null when there is none.
   progress: PtyProgress | null;
+  /// Coding agent detected in the tab's session, null when there is none.
+  agent: LiveAgentStatus | null;
   onSelect: () => void;
   onClose: () => void;
   onMove: (to: Uuid) => void;
@@ -287,6 +295,20 @@ function TabItem({
         <>
           <span className={`${isSelected ? "text-muster-accent" : "text-muster-muted/60"} ui-fs-xs`}>•</span>
           <span className="truncate">{tab.custom_name ?? tab.display_title ?? t("header.untitled")}</span>
+          {agent && (
+            <span
+              title={
+                agent.state === "waiting"
+                  ? t("header.agentWaiting", { agent: agentLabel(agent.agent) })
+                  : t("header.agentWorking", { agent: agentLabel(agent.agent) })
+              }
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                agent.state === "waiting"
+                  ? "bg-amber-400 animate-pulse"
+                  : "bg-emerald-400"
+              }`}
+            />
+          )}
           {tab.pane_count > 1 && (
             <span className="ui-fs-2xs text-muster-muted/70">[] {tab.pane_count}</span>
           )}

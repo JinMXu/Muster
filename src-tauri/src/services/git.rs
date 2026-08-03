@@ -293,9 +293,9 @@ pub fn load_unstaged_diff(root: &str, path: &str) -> Result<(String, String), St
     Ok((old, new))
 }
 
-/// `git show <spec>` → UTF-8 text. Returns empty content if the spec resolves
+/// `git show <spec>` — UTF-8 text. Returns empty content if the spec resolves
 /// to nothing, and `Binary file` if the bytes don't decode.
-fn git_show(root: &str, spec: &str) -> Result<String, String> {
+pub fn git_show(root: &str, spec: &str) -> Result<String, String> {
     let output = super::procs::quiet_command("git")
         .args(["show", spec])
         .current_dir(root)
@@ -309,6 +309,221 @@ fn git_show(root: &str, spec: &str) -> Result<String, String> {
         return Err("Binary file".into());
     }
     String::from_utf8(bytes).map_err(|_| "Binary file".to_string())
+}
+
+/// One commit that touched a path, as reported by `git log --follow`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCommit {
+    pub hash: String,
+    pub short_hash: String,
+    /// First parent hash (empty for a root commit), used for "diff vs parent".
+    pub parent: Option<String>,
+    pub subject: String,
+    pub author: String,
+    pub relative_date: String,
+    /// epoch ms
+    pub date_ms: i64,
+}
+
+/// History of `path` (repo-relative), oldest-first, following renames. Shells
+/// out to `git log --follow` — libgit2's revwalk has no path filter, and
+/// renames need `--follow` anyway. Unit-separated format keeps parsing robust.
+pub fn file_history(root: &str, path: &str) -> Vec<FileCommit> {
+    const SEP: char = '\x1f';
+    let format = format!("%H{SEP}%P{SEP}%an{SEP}%at{SEP}%s");
+    let output = super::procs::quiet_command("git")
+        .args(["log", "--follow", &format!("--format={format}"), "--", path])
+        .current_dir(root)
+        .output()
+        .ok();
+    let Some(output) = output else { return Vec::new() };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut commits = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split(SEP);
+        let (hash, parents, author, at, subject) = (
+            parts.next().unwrap_or(""),
+            parts.next().unwrap_or(""),
+            parts.next().unwrap_or(""),
+            parts.next().unwrap_or(""),
+            parts.next().unwrap_or(""),
+        );
+        if hash.is_empty() {
+            continue;
+        }
+        let timestamp: i64 = at.parse().unwrap_or(0);
+        commits.push(FileCommit {
+            hash: hash.to_string(),
+            short_hash: hash.chars().take(7).collect(),
+            parent: parents.split_whitespace().next().filter(|p| !p.is_empty()).map(str::to_owned),
+            subject: subject.to_string(),
+            author: author.to_string(),
+            relative_date: relative_date(now, timestamp),
+            date_ms: timestamp * 1000,
+        });
+    }
+    // Oldest-first (git log prints newest-first).
+    commits.reverse();
+    commits
+}
+
+/// Load the content of `path` at two commits, for an arbitrary two-commit
+/// diff. An empty rev (or a rev where the file didn't exist) yields an empty
+/// side — exactly right for files added or deleted between the two commits.
+pub fn load_commit_diff(root: &str, path: &str, old_rev: &str, new_rev: &str) -> Result<(String, String), String> {
+    let old = if old_rev.is_empty() {
+        String::new()
+    } else {
+        git_show(root, &format!("{old_rev}:{path}"))?
+    };
+    let new = if new_rev.is_empty() {
+        String::new()
+    } else {
+        git_show(root, &format!("{new_rev}:{path}"))?
+    };
+    Ok((old, new))
+}
+
+/// `old_rev:path` vs the current working-tree file (new side read from disk).
+/// An empty new side means the file was deleted from the worktree. Used by
+/// the checkpoint panel and the editor's "Diff vs HEAD" tab.
+pub fn load_workdir_diff(root: &str, path: &str, old_rev: &str) -> Result<(String, String), String> {
+    let old = if old_rev.is_empty() {
+        String::new()
+    } else {
+        git_show(root, &format!("{old_rev}:{path}"))?
+    };
+    let full = std::path::Path::new(root).join(path);
+    let new = match std::fs::read(&full) {
+        Ok(bytes) => {
+            if bytes.contains(&0) {
+                return Err("Binary file".into());
+            }
+            String::from_utf8(bytes).map_err(|_| "Binary file".to_string())?
+        }
+        Err(_) => String::new(), // file deleted from the worktree
+    };
+    Ok((old, new))
+}
+
+/// HEAD content of `path`, or `None` when the repo has no commits yet or the
+/// path isn't tracked there — gates the editor's inline diff (a brand-new
+/// file has nothing to diff against).
+pub fn file_at_head(root: &str, path: &str) -> Result<Option<String>, String> {
+    let repo = repo_at(root)?;
+    let head = match repo.head() {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+    let tree = head.peel_to_tree().map_err(|e| e.message().to_string())?;
+    if tree.get_path(std::path::Path::new(path)).is_err() {
+        return Ok(None);
+    }
+    Ok(Some(git_show(root, &format!("HEAD:{path}"))?))
+}
+
+
+/// One line of a file annotated with the commit that last touched it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlameLine {
+    /// 1-based line number in the current file.
+    pub line: u32,
+    pub short_hash: String,
+    pub author: String,
+    /// Relative age (reuses `relative_date`; no chrono dependency).
+    pub date: String,
+}
+
+/// git-blame for `path` (repo-relative): the last commit per line. Lines in
+/// a commit hunk share the commit's author/summary/date.
+pub fn blame(root: &str, path: &str) -> Result<Vec<BlameLine>, String> {
+    let repo = repo_at(root)?;
+    let mut opts = git2::BlameOptions::new();
+    opts.track_copies_same_file(true);
+    let blame = repo
+        .blame_file(std::path::Path::new(path), Some(&mut opts))
+        .map_err(|e| e.message().to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut out = Vec::new();
+    for hunk in blame.iter() {
+        let commit = match repo.find_commit(hunk.final_commit_id()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let author = commit.author().name().unwrap_or("").to_string();
+        let date = relative_date(now, commit.time().seconds());
+        let short: String = hunk.final_commit_id().to_string().chars().take(7).collect();
+        let start = hunk.final_start_line();
+        for line in start..start + hunk.lines_in_hunk() {
+            out.push(BlameLine {
+                line: u32::try_from(line).unwrap_or(0),
+                short_hash: short.clone(),
+                author: author.clone(),
+                date: date.clone(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Current HEAD oid, or `None` when the repo has no commits yet. Used as the
+/// checkpoint anchor.
+pub fn head_oid(root: &str) -> Option<String> {
+    let repo = repo_at(root).ok()?;
+    let target = repo.head().ok()?.target();
+    target.map(|o| o.to_string())
+}
+
+/// Repo-relative paths that differ between the working tree / index and
+/// `checkpoint` — including commits made after it. Covers both uncommitted
+/// edits and committed work since the user pressed "Set Checkpoint". Returns
+/// paths in sorted order.
+pub fn checkpoint_changed_files(root: &str, checkpoint: &str) -> Vec<String> {
+    let repo = match repo_at(root) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut paths = std::collections::BTreeSet::new();
+
+    // Uncommitted changes (worktree + index, including untracked files).
+    // Untracked files present at checkpoint time also surface — they are
+    // still not committed, which is the point of the panel.
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true);
+    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+        for entry in statuses.iter() {
+            if !entry.status().is_empty() {
+                if let Some(p) = entry.path() {
+                    paths.insert(p.to_string());
+                }
+            }
+        }
+    }
+
+    // Committed changes between checkpoint and HEAD.
+    if let (Ok(ckp), Ok(head)) = (repo.revparse_single(checkpoint), repo.head()) {
+        if let (Ok(ckp_tree), Ok(head_tree)) = (ckp.peel_to_tree(), head.peel_to_tree()) {
+            if let Ok(diff) = repo.diff_tree_to_tree(Some(&ckp_tree), Some(&head_tree), None) {
+                for delta in diff.deltas() {
+                    if let Some(p) = delta.new_file().path().or_else(|| delta.old_file().path()) {
+                        paths.insert(p.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    paths.into_iter().collect()
 }
 
 macro_rules! try_git {
@@ -791,5 +1006,138 @@ mod tests {
         let sig = signature(&repo).unwrap();
         assert_eq!(sig.name(), Some("Muster"));
         assert_eq!(sig.email(), Some("muster@local"));
+    }
+
+    fn commit_file(dir: &std::path::Path, name: &str, content: &str, message: &str) -> String {
+        let repo = Repository::open(dir).unwrap();
+        std::fs::write(dir.join(name), content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new(name)).unwrap();
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let sig = git2::Signature::now("Test", "test@local").unwrap();
+        let head = repo.head().ok();
+        let parent = head.and_then(|h| h.peel_to_commit().ok()).map(|c| c.id());
+        let parent_ref = parent.map(|id| repo.find_commit(id).unwrap());
+        let parent_refs: Vec<&git2::Commit> = parent_ref.iter().collect();
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+            .unwrap();
+        oid.to_string()
+    }
+
+    #[test]
+    fn file_history_lists_commits_oldest_first_with_parent() {
+        let dir = std::env::temp_dir().join(format!("muster-git-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Repository::init(&dir).unwrap();
+        let first = commit_file(&dir, "a.txt", "one", "first");
+        let second = commit_file(&dir, "a.txt", "two", "second");
+        let root = dir.to_string_lossy().to_string();
+
+        let history = file_history(&root, "a.txt");
+        assert_eq!(history.len(), 2, "both commits reported");
+        assert_eq!(history[0].hash, first, "oldest first");
+        assert_eq!(history[0].parent, None, "root commit has no parent");
+        assert_eq!(history[0].subject, "first");
+        assert_eq!(history[1].hash, second);
+        assert_eq!(history[1].parent.as_deref(), Some(first.as_str()));
+        assert_eq!(history[1].subject, "second");
+
+        // A path with no history returns nothing.
+        assert!(file_history(&root, "nope.txt").is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn blame_reports_line_commits() {
+        let dir = std::env::temp_dir().join(format!("muster-git-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Repository::init(&dir).unwrap();
+        commit_file(&dir, "a.txt", "one\ntwo\n", "first");
+        commit_file(&dir, "a.txt", "one\ntwo changed\n", "second");
+        let root = dir.to_string_lossy().to_string();
+
+        let lines = blame(&root, "a.txt").unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].line, 1, "line 1 untouched by the second commit");
+        assert_eq!(lines[1].line, 2);
+        assert_ne!(lines[0].short_hash, lines[1].short_hash);
+        assert_eq!(lines[1].author, "Test");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn head_oid_and_checkpoint_changes() {
+        let dir = std::env::temp_dir().join(format!("muster-git-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Repository::init(&dir).unwrap();
+        let first = commit_file(&dir, "a.txt", "one\n", "first");
+        let root = dir.to_string_lossy().to_string();
+
+        assert_eq!(head_oid(&root).as_deref(), Some(first.as_str()));
+
+        // Nothing changed at the checkpoint itself.
+        assert!(checkpoint_changed_files(&root, &first).is_empty());
+
+        // Uncommitted edit shows up.
+        std::fs::write(dir.join("a.txt"), "one\nedited\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+        let mut changed = checkpoint_changed_files(&root, &first);
+        changed.sort();
+        assert_eq!(changed, vec!["a.txt".to_string(), "b.txt".to_string()]);
+
+        // A commit after the checkpoint shows up via the commit diff.
+        commit_file(&dir, "a.txt", "one\nedited\n", "third");
+        let changed = checkpoint_changed_files(&root, &first);
+        assert!(changed.contains(&"a.txt".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_workdir_diff_reads_disk_for_new_side() {
+        let dir = std::env::temp_dir().join(format!("muster-git-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Repository::init(&dir).unwrap();
+        let first = commit_file(&dir, "a.txt", "one\n", "first");
+        std::fs::write(dir.join("a.txt"), "one\nplus disk\n").unwrap();
+        let root = dir.to_string_lossy().to_string();
+
+        let (old, new) = load_workdir_diff(&root, "a.txt", &first).unwrap();
+        assert_eq!(old, "one\n");
+        assert_eq!(new, "one\nplus disk\n");
+
+        // Deleted worktree file — empty new side.
+        std::fs::remove_file(dir.join("a.txt")).unwrap();
+        let (_old, new) = load_workdir_diff(&root, "a.txt", &first).unwrap();
+        assert_eq!(new, "");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_commit_diff_reads_both_sides_and_missing_is_empty() {
+        let dir = std::env::temp_dir().join(format!("muster-git-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Repository::init(&dir).unwrap();
+        commit_file(&dir, "a.txt", "one", "first");
+        let second = commit_file(&dir, "a.txt", "two", "second");
+        let third = commit_file(&dir, "a.txt", "three", "third");
+        let root = dir.to_string_lossy().to_string();
+
+        let (old, new) = load_commit_diff(&root, "a.txt", &second, &third).unwrap();
+        assert_eq!(old, "two");
+        assert_eq!(new, "three");
+
+        // Empty rev = the file didn't exist on that side (here: root commit ^).
+        let (old, new) = load_commit_diff(&root, "a.txt", "", &second).unwrap();
+        assert_eq!(old, "");
+        assert_eq!(new, "two");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

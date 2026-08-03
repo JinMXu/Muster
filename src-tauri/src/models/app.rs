@@ -146,8 +146,27 @@ impl AppState {
                                 self.files.insert(fid, file);
                                 PaneContent::File(fid)
                             }
-                            PaneContentSnapshot::Diff { repo_root, path, staged } => {
-                                let diff = Arc::new(DiffTab::new(repo_root.clone(), path.clone(), *staged));
+                            PaneContentSnapshot::Diff { repo_root, path, staged, old_rev, new_rev, workdir } => {
+                                let diff = if *workdir {
+                                    match old_rev {
+                                        Some(old) => Arc::new(DiffTab::new_checkpoint(
+                                            repo_root.clone(),
+                                            path.clone(),
+                                            old.clone(),
+                                        )),
+                                        None => Arc::new(DiffTab::new_workdir(repo_root.clone(), path.clone())),
+                                    }
+                                } else {
+                                    match (old_rev, new_rev) {
+                                        (Some(old), Some(new)) => Arc::new(DiffTab::with_revs(
+                                            repo_root.clone(),
+                                            path.clone(),
+                                            old.clone(),
+                                            new.clone(),
+                                        )),
+                                        _ => Arc::new(DiffTab::new(repo_root.clone(), path.clone(), *staged)),
+                                    }
+                                };
                                 let did = diff.id;
                                 self.diffs.insert(did, diff);
                                 PaneContent::Diff(did)
@@ -457,10 +476,20 @@ impl AppState {
     }
 
     pub fn split(&mut self, edge: PaneDropEdge) {
+        self.split_with_dir(edge, None);
+    }
+
+    /// Split the selected tab's focused pane with a fresh terminal session.
+    /// The new session starts in `dir` when given, otherwise in the focused
+    /// pane's current directory (see `compute_session_dir`). Returns the new
+    /// session's id (None when the tab can't be split).
+    pub fn split_with_dir(&mut self, edge: PaneDropEdge, dir: Option<String>) -> Option<Uuid> {
         let can_split = self.selected_tab().map(|t| t.can_split()).unwrap_or(false);
-        if !can_split { return }
-        let Some(project_id) = self.selected_project_id else { return };
-        let dir = self.compute_session_dir().unwrap_or_else(|| {
+        if !can_split {
+            return None;
+        }
+        let project_id = self.selected_project_id?;
+        let dir = dir.or_else(|| self.compute_session_dir()).unwrap_or_else(|| {
             dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| ".".into())
         });
         let session = Arc::new(TerminalSession::new(project_id, dir));
@@ -472,6 +501,7 @@ impl AppState {
             }
         }
         self.sessions.insert(session_id, session);
+        Some(session_id)
     }
 
     // ---- Pane navigation ---------------------------------------------------
@@ -719,6 +749,39 @@ impl AppState {
         Some(id)
     }
 
+    /// Open a diff of `path` between two arbitrary commits (empty rev = the
+    /// file didn't exist on that side). Appended as a new pane/tab like the
+    /// working-tree diffs.
+    pub fn open_commit_diff(&mut self, repo_root: &str, path: &str, old_rev: &str, new_rev: &str) -> Option<Uuid> {
+        let diff = Arc::new(DiffTab::with_revs(repo_root.to_string(), path.to_string(), old_rev.to_string(), new_rev.to_string()));
+        let id = diff.id;
+        let project_id = self.selected_project_id?;
+        self.append_tab(project_id, PaneContent::Diff(id));
+        self.diffs.insert(id, diff);
+        Some(id)
+    }
+
+    /// Open a diff of `path` against its HEAD version (new side = worktree).
+    pub fn open_workdir_diff(&mut self, repo_root: &str, path: &str) -> Option<Uuid> {
+        let diff = Arc::new(DiffTab::new_workdir(repo_root.to_string(), path.to_string()));
+        let id = diff.id;
+        let project_id = self.selected_project_id?;
+        self.append_tab(project_id, PaneContent::Diff(id));
+        self.diffs.insert(id, diff);
+        Some(id)
+    }
+
+    /// Open a diff of `path` between `old_rev` and the current worktree
+    /// (the checkpoint panel's "changes since checkpoint" view).
+    pub fn open_checkpoint_diff(&mut self, repo_root: &str, path: &str, old_rev: &str) -> Option<Uuid> {
+        let diff = Arc::new(DiffTab::new_checkpoint(repo_root.to_string(), path.to_string(), old_rev.to_string()));
+        let id = diff.id;
+        let project_id = self.selected_project_id?;
+        self.append_tab(project_id, PaneContent::Diff(id));
+        self.diffs.insert(id, diff);
+        Some(id)
+    }
+
     // ---- Info payloads for the frontend ----------------------------------
 
     pub fn session_info(&self, id: Uuid) -> Option<SessionInfo> { self.sessions.get(&id).map(|s| SessionInfo::from(s.as_ref())) }
@@ -884,6 +947,9 @@ mod tests {
                                     repo_root: "C:\\definitely-not-a-repo".into(),
                                     path: "x.rs".into(),
                                     staged: true,
+                                    old_rev: None,
+                                    new_rev: None,
+                                    workdir: false,
                                 },
                                 weight: 1.0,
                             }],
@@ -1046,5 +1112,22 @@ mod tests {
         assert!(state.projects.is_empty());
         assert_eq!(state.selected_project_id, None);
         assert!(state.sessions.is_empty());
+    }
+
+    #[test]
+    fn right_panel_unknown_value_falls_back_to_files() {
+        // Snapshots written by builds with more tabs (e.g. an early Search
+        // panel) must not fail restore — unknown panel tabs map to Files.
+        let json = r#"{"projects":[],"right_panel_tab":"search"}"#;
+        let snapshot: SessionSnapshot = serde_json::from_str(json).expect("snapshot parses");
+        assert_eq!(snapshot.right_panel_tab, Some(RightPanel::Files));
+
+        // Known values still deserialize correctly.
+        assert_eq!(
+            serde_json::from_str::<SessionSnapshot>(r#"{"projects":[],"right_panel_tab":"git"}"#)
+                .unwrap()
+                .right_panel_tab,
+            Some(RightPanel::Git)
+        );
     }
 }

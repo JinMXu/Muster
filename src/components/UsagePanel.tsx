@@ -4,6 +4,7 @@ import { api } from "../lib/invoke";
 import { formatTokens } from "../lib/format";
 import type { ToolKind, ToolSummary, UsageSession, UsageSummary } from "../lib/types";
 import { useT } from "../lib/i18n/context";
+import UsageChart from "./UsageChart";
 
 type TimeRange = "today" | "week" | "month" | "all";
 
@@ -199,9 +200,10 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
               );
             })}
           </div>
+          <UsageChart sessions={filteredSessions} />
 
           {/* Sessions table */}
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 mt-4">
             <span className="ui-fs-sm font-medium text-muster-muted uppercase tracking-wide">
               {t("usage.sessions")}
             </span>

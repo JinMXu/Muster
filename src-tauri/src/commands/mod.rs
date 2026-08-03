@@ -16,6 +16,7 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Window};
 
 use crate::models::app::AppState;
+use crate::services::agents::AgentCache;
 use crate::services::config::Settings;
 use crate::services::usage::UsageCache;
 
@@ -37,6 +38,7 @@ pub struct SharedState {
     states: Mutex<HashMap<String, Arc<Mutex<AppState>>>>,
     settings: Arc<Mutex<Settings>>,
     pub usage: Arc<Mutex<UsageCache>>,
+    pub agents: Arc<Mutex<AgentCache>>,
 }
 
 impl SharedState {
@@ -45,6 +47,7 @@ impl SharedState {
             states: Mutex::new(HashMap::new()),
             settings: Arc::new(Mutex::new(settings)),
             usage: Arc::new(Mutex::new(UsageCache::default())),
+            agents: Arc::new(Mutex::new(AgentCache::default())),
         }
     }
 
@@ -148,18 +151,24 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             panes::toggle_right_panel,
             panes::toggle_panel,
             editor::open_file,
+            editor::open_file_at,
             editor::file_text_changed,
             editor::save_selected_file,
             editor::save_file,
             editor::tab_dirty_files,
             editor::project_dirty_files,
             editor::open_diff,
+            editor::open_commit_diff,
+            editor::open_workdir_diff,
+            editor::open_checkpoint_diff,
             editor::reload_diff,
             fs::list_directory,
             fs::trash_file,
             fs::create_file,
             fs::rename_path,
             fs::watch_directories,
+            fs::search_files,
+            fs::list_project_files,
             git::git_status,
             git::resolve_project_root,
             git::git_stage,
@@ -178,6 +187,11 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             git::git_stash_all,
             git::git_stash_pop,
             git::git_init,
+            git::git_file_history,
+            git::git_head_content,
+            git::git_blame,
+            git::git_head_oid,
+            git::git_checkpoint_changes,
             fs::install_explorer_context_menu,
             fs::add_to_path,
             fs::remove_from_path,

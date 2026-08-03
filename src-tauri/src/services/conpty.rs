@@ -212,7 +212,7 @@ impl ConPty {
                 PROCESS_CREATION_FLAGS(EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT),
                 Some(env_block.as_ptr() as *const c_void),
                 PCWSTR::from_raw(cwd_wide.as_ptr()),
-                &si.StartupInfo as *const _ as *const STARTUPINFOW,
+                &si.StartupInfo,
                 &mut pi,
             )
         };
@@ -414,7 +414,7 @@ fn spawn_openconsole(
             PROCESS_CREATION_FLAGS(EXTENDED_STARTUPINFO_PRESENT),
             None,
             PCWSTR::null(),
-            &si.StartupInfo as *const _ as *const STARTUPINFOW,
+            &si.StartupInfo,
             &mut pi,
         )
     };

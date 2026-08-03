@@ -110,8 +110,16 @@ pub fn list_secondary_labels() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    // The tests below all operate on the real app data directory and prune /
+    // write / delete overlapping snapshot filenames. Serialize them so they
+    // can't race each other (previously win-3 flaked: one test deleted the
+    // other's file mid-run).
+    static DIR_LOCK: once_cell::sync::Lazy<parking_lot::Mutex<()>> =
+        once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(()));
+
     #[test]
     fn delete_snapshot_removes_file_and_is_idempotent() {
+        let _guard = DIR_LOCK.lock();
         // No "win-" prefix: the prune test runs in parallel and would
         // delete a matching file out from under this test.
         let label = "testdelete";
@@ -127,6 +135,7 @@ mod tests {
 
     #[test]
     fn prune_removes_secondary_but_keeps_main() {
+        let _guard = DIR_LOCK.lock();
         let dir = super::app_data_dir();
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -152,6 +161,7 @@ mod tests {
 
     #[test]
     fn prune_keeps_numeric_secondary_snapshots() {
+        let _guard = DIR_LOCK.lock();
         let dir = super::app_data_dir();
         std::fs::create_dir_all(&dir).unwrap();
         // Numeric-label snapshots (win-1, win-2, …) are restorable and must
@@ -172,6 +182,7 @@ mod tests {
 
     #[test]
     fn list_secondary_labels_sorted() {
+        let _guard = DIR_LOCK.lock();
         let dir = super::app_data_dir();
         std::fs::create_dir_all(&dir).unwrap();
         for n in [3, 1, 12] {

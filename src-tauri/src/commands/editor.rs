@@ -13,6 +13,24 @@ pub fn open_file(window: Window, state: State<SharedState>, path: String, to_sid
     id
 }
 
+/// Open a file at a specific line (terminal error-path click, quick-open,
+/// search results). Refuses to open a path that doesn't exist on disk, and
+/// emits `file-reveal` so the hosting editor scrolls to the line. Returns the
+/// file tab id (or `None` when the path is missing / no project selected).
+#[tauri::command]
+pub fn open_file_at(window: Window, state: State<SharedState>, path: String, line: u32) -> Option<Uuid> {
+    if !std::path::Path::new(&path).is_file() {
+        return None;
+    }
+    let s = state.get_label(window.label())?;
+    let id = s.lock().open_file(&path, false);
+    emit_state(&window, &s.lock());
+    if let Some(id) = id {
+        let _ = window.emit("file-reveal", serde_json::json!({ "id": id, "line": line }));
+    }
+    id
+}
+
 #[tauri::command]
 pub fn file_text_changed(window: Window, state: State<SharedState>, id: Uuid, text: String) {
     let Some(s) = state.get_label(window.label()) else { return };
@@ -90,8 +108,34 @@ pub fn open_diff(window: Window, state: State<SharedState>, repo_root: String, p
 }
 
 #[tauri::command]
+pub fn open_commit_diff(window: Window, state: State<SharedState>, repo_root: String, path: String, old_rev: String, new_rev: String) -> Option<Uuid> {
+    let s = state.get_label(window.label())?;
+    let id = s.lock().open_commit_diff(&repo_root, &path, &old_rev, &new_rev);
+    emit_state(&window, &s.lock());
+    id
+}
+
+#[tauri::command]
 pub fn reload_diff(window: Window, state: State<SharedState>, id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     let g = s.lock();
     if let Some(d) = g.diffs.get(&id) { d.reload(); }
+}
+
+/// Diff of `path` against its HEAD version (new side = the live worktree).
+#[tauri::command]
+pub fn open_workdir_diff(window: Window, state: State<SharedState>, repo_root: String, path: String) -> Option<Uuid> {
+    let s = state.get_label(window.label())?;
+    let id = s.lock().open_workdir_diff(&repo_root, &path);
+    emit_state(&window, &s.lock());
+    id
+}
+
+/// Diff of `path` between `old_rev` (a checkpoint oid) and the live worktree.
+#[tauri::command]
+pub fn open_checkpoint_diff(window: Window, state: State<SharedState>, repo_root: String, path: String, old_rev: String) -> Option<Uuid> {
+    let s = state.get_label(window.label())?;
+    let id = s.lock().open_checkpoint_diff(&repo_root, &path, &old_rev);
+    emit_state(&window, &s.lock());
+    id
 }

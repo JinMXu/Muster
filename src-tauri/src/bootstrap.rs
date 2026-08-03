@@ -226,6 +226,14 @@ pub fn run() {
                 crate::services::usage::spawn_scan_loop(handle, usage_cache);
             }
 
+            // Agent awareness: background poll loop + the local IPC bridge
+            // that the `muster` CLI (and AI agents) talks to.
+            {
+                let handle = app.handle().clone();
+                crate::services::agents::spawn_poll_loop(handle.clone());
+                crate::services::ipc::start(handle);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -531,6 +539,9 @@ fn build_snapshot(state: &AppState) -> crate::models::project::SessionSnapshot {
                                                         repo_root: d.map(|x| x.repo_root.clone()).unwrap_or_default(),
                                                         path: d.map(|x| x.path.clone()).unwrap_or_default(),
                                                         staged: d.map(|x| x.staged).unwrap_or(false),
+                                                        old_rev: d.and_then(|x| x.rev.clone()).map(|(o, _)| o),
+                                                        new_rev: d.and_then(|x| x.rev.clone()).map(|(_, n)| n),
+                                                        workdir: d.map(|x| x.workdir).unwrap_or(false),
                                                     }
                                                 }
                                             },

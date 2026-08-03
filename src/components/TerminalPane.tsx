@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { acquire } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
 import { shellQuotePath } from "../lib/shellEscape";
 import { openMenu } from "../lib/menuStore";
 import { useT } from "../lib/i18n/context";
+import { getTerminalSearchState, subscribeTerminalSearch } from "../lib/terminalSearch";
 import PasteWarning, { looksDangerousPaste } from "./PasteWarning";
+import TerminalSearchBar from "./TerminalSearchBar";
 
 /// One terminal pane: attaches the parked xterm instance for `sessionId`
 /// (owned by `terminalRegistry`) into its container div. The instance
@@ -27,6 +29,9 @@ export default function TerminalPane({
   const dragDepth = useRef(0);
   const [pasteWarning, setPasteWarning] = useState<string | null>(null);
   const { t } = useT();
+  // Whether the scrollback search bar is open for THIS pane's session.
+  const searchState = useSyncExternalStore(subscribeTerminalSearch, getTerminalSearchState);
+  const searchOpen = searchState.sessionId === sessionId;
 
   const doPaste = async () => {
     const text = await navigator.clipboard.readText().catch(() => "");
@@ -90,7 +95,7 @@ export default function TerminalPane({
     <div
       ref={containerRef}
       data-terminal-pane={sessionId}
-      className={`w-full h-full overflow-hidden bg-muster-bg ${
+      className={`relative w-full h-full overflow-hidden bg-muster-bg ${
         dropActive ? "ring-1 ring-inset ring-muster-accent" : ""
       }`}
       onDragEnter={(e) => {
@@ -147,6 +152,7 @@ export default function TerminalPane({
         });
       }}
     />
+    {searchOpen && <TerminalSearchBar sessionId={sessionId} nonce={searchState.nonce} />}
     {pasteWarning && (
       <PasteWarning
         text={pasteWarning}

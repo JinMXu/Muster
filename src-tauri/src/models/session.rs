@@ -1,6 +1,7 @@
 ﻿use parking_lot::Mutex;
 use crate::services::conpty::ConPty;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,6 +13,11 @@ use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 use crate::base64_encode;
+
+/// How many ANSI-stripped scrollback lines a session keeps for the `muster
+/// capture` CLI (and other backend consumers). Kept small: the full terminal
+/// buffer lives in xterm.js on the frontend.
+const MAX_SCROLLBACK_LINES: usize = 400;
 
 /// One login shell owned by a terminal pane. The PTY is spawned via
 /// `spawn()`, after which the master is held for `resize`, the writer for
@@ -34,6 +40,19 @@ pub struct TerminalSession {
     last_bell_notify: Mutex<Option<Instant>>,
     /// Last OSC 9;4 progress value seen, so we only emit on change.
     progress: Mutex<Option<(u8, u8)>>,
+    /// When the last chunk of PTY output was read. Drives agent idle
+    /// detection ("the coding agent is waiting for input").
+    last_output_at: Mutex<Instant>,
+    /// Last time an agent "waiting for input" notification was sent, for
+    /// rate limiting.
+    last_agent_notify: Mutex<Option<Instant>>,
+    /// Ring buffer of ANSI-stripped output lines (for `muster capture`).
+    scrollback: Mutex<VecDeque<String>>,
+    /// Partial line not yet terminated by `\n`, accumulated across chunks.
+    scrollback_pending: Mutex<String>,
+    /// Escape-sequence state carried across chunk boundaries, so a sequence
+    /// split by a read is still stripped.
+    ansi: Mutex<AnsiStripper>,
 
     conpty: Mutex<Option<ConPty>>,
     writer: Mutex<Option<Box<dyn Write + Send>>>,
@@ -53,6 +72,11 @@ impl TerminalSession {
             read_loop_started: Mutex::new(false),
             last_bell_notify: Mutex::new(None),
             progress: Mutex::new(None),
+            last_output_at: Mutex::new(Instant::now()),
+            last_agent_notify: Mutex::new(None),
+            scrollback: Mutex::new(VecDeque::new()),
+            scrollback_pending: Mutex::new(String::new()),
+            ansi: Mutex::new(AnsiStripper::default()),
             conpty: Mutex::new(None),
             writer: Mutex::new(None),
         }
@@ -114,6 +138,7 @@ impl TerminalSession {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        inner.record_output(&buf[..n]);
                         let payload = serde_json::json!({
                             "id": session_id,
                             "data": base64_encode(&buf[..n]),
@@ -163,6 +188,79 @@ impl TerminalSession {
     pub fn set_title(&self, t: String) { *self.title.lock() = t; }
     pub fn current_directory(&self) -> String {
         self.working_directory.lock().clone().unwrap_or_else(|| self.launch_directory.clone())
+    }
+
+    /// The PTY child's pid (the login shell), if the session is spawned.
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.conpty.lock().as_ref().and_then(|c| c.process_id())
+    }
+
+    /// How long since the last chunk of PTY output was read. Used by the
+    /// agent poller to decide whether a coding agent is working or has
+    /// stopped to wait for input.
+    pub fn idle_for(&self) -> Duration {
+        self.last_output_at.lock().elapsed()
+    }
+
+    /// Feed one chunk of raw PTY output into the capture ring buffer:
+    /// updates `last_output_at` and appends ANSI-stripped lines. Called by
+    /// the read pump on every chunk.
+    pub fn record_output(&self, bytes: &[u8]) {
+        *self.last_output_at.lock() = Instant::now();
+        let mut stripped = String::new();
+        self.ansi.lock().feed(bytes, &mut stripped);
+        if stripped.is_empty() {
+            return;
+        }
+        let mut pending = self.scrollback_pending.lock();
+        pending.push_str(&stripped);
+        while let Some(pos) = pending.find('\n') {
+            let line: String = pending.drain(..=pos).collect();
+            let mut sb = self.scrollback.lock();
+            // Line-overwrite dedup: PSReadLine-style UIs redraw the current
+            // line with `\r` while the user types, and progress bars redraw
+            // themselves. Each redraw arrives as a full line that extends
+            // the previous one — replace instead of stacking, so the ring
+            // keeps the final rendering rather than every keystroke frame.
+            if let Some(prev) = sb.back_mut() {
+                let prev_t = prev.trim_end_matches('\n');
+                let line_t = line.trim_end_matches('\n');
+                if line_t.starts_with(prev_t) && line_t.len() > prev_t.len() {
+                    *prev = line;
+                    continue;
+                }
+            }
+            sb.push_back(line);
+            while sb.len() > MAX_SCROLLBACK_LINES {
+                sb.pop_front();
+            }
+        }
+    }
+
+    /// The last `max` scrollback lines (with newlines), plus any partial
+    /// unterminated tail. For `muster capture`. Lock order matches
+    /// `record_output` (pending, then ring) to avoid deadlock.
+    pub fn scrollback_lines(&self, max: usize) -> Vec<String> {
+        let tail = self.scrollback_pending.lock().clone();
+        let mut lines: Vec<String> = self.scrollback.lock().iter().cloned().collect();
+        if !tail.is_empty() {
+            lines.push(tail);
+        }
+        let skip = lines.len().saturating_sub(max);
+        lines.split_off(skip)
+    }
+
+    /// Whether a "waiting for input" notification was sent within the last
+    /// `cooldown`; if not, records the send and returns true (caller should
+    /// notify).
+    pub fn try_mark_agent_notify(&self, cooldown: Duration) -> bool {
+        let mut last = self.last_agent_notify.lock();
+        let now = Instant::now();
+        if last.is_some_and(|t| now.duration_since(t) < cooldown) {
+            return false;
+        }
+        *last = Some(now);
+        true
     }
 
     pub fn send_text(&self, text: &str) {
@@ -417,6 +515,106 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
+/// Strip ANSI/VT escape sequences from PTY output, approximating what a
+/// human would read: CSI (`ESC [ ... letter`), OSC (`ESC ] ... BEL/ST`) and
+/// other single-byte escapes are removed. `\r` becomes a line break
+/// (progress bars rewrite the line with `\r`), `\n` and `\t` survive, all
+/// other C0 controls are dropped. The stripper is stateful across chunks so
+/// a sequence split by a read boundary is still stripped (the previous
+/// stateless version leaked the tail half as literal text).
+#[derive(Default)]
+struct AnsiStripper {
+    state: StripState,
+}
+
+#[derive(Default, Clone, Copy, PartialEq)]
+enum StripState {
+    #[default]
+    Normal,
+    /// Last byte was ESC.
+    AfterEsc,
+    /// Inside `ESC [ ... final byte`.
+    InCsi,
+    /// Inside `ESC ] ... terminator`.
+    InOsc,
+    /// Inside an OSC and the last byte was ESC (waiting for `\` = ST).
+    InOscEsc,
+}
+
+impl AnsiStripper {
+    fn feed(&mut self, bytes: &[u8], out: &mut String) {
+        for i in 0..bytes.len() {
+            let b = bytes[i];
+            match self.state {
+                StripState::Normal => match b {
+                    0x1b => self.state = StripState::AfterEsc,
+                    0x0a | 0x0d => out.push('\n'),
+                    0x09 => out.push('\t'),
+                    b if b < 0x20 => {}
+                    _ => push_utf8(bytes, i, out),
+                },
+                StripState::AfterEsc => match b {
+                    b'[' => self.state = StripState::InCsi,
+                    b']' => self.state = StripState::InOsc,
+                    // ESC ESC: still escaped (next byte decides).
+                    0x1b => {}
+                    _ => self.state = StripState::Normal,
+                },
+                StripState::InCsi => match b {
+                    0x1b => self.state = StripState::AfterEsc, // abort CSI
+                    0x40..=0x7e => self.state = StripState::Normal, // final byte
+                    _ => {}
+                },
+                StripState::InOsc => match b {
+                    0x07 => self.state = StripState::Normal, // BEL terminates
+                    0x1b => self.state = StripState::InOscEsc,
+                    _ => {}
+                },
+                StripState::InOscEsc => {
+                    if b == b'\\' {
+                        self.state = StripState::Normal; // ST terminates
+                    } else {
+                        self.state = StripState::InOsc;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Push one UTF-8 character (which starts at `bytes[i]`) into `out`, when
+/// the full sequence is present in this chunk; incomplete tails are dropped.
+fn push_utf8(bytes: &[u8], i: usize, out: &mut String) {
+    let rest = &bytes[i..];
+    let width = if rest[0] < 0x80 {
+        1
+    } else if rest[0] >> 5 == 0b110 {
+        2
+    } else if rest[0] >> 4 == 0b1110 {
+        3
+    } else if rest[0] >> 3 == 0b11110 {
+        4
+    } else {
+        1
+    };
+    if width > rest.len() {
+        return; // truncated multibyte tail at the chunk boundary
+    }
+    if let Ok(s) = std::str::from_utf8(&rest[..width]) {
+        out.push_str(s);
+    }
+}
+
+/// One-shot strip of a complete buffer (stateless convenience wrapper, used
+/// by tests; the read loop uses the stateful `AnsiStripper`).
+#[cfg(test)]
+fn strip_ansi(bytes: &[u8]) -> String {
+    let mut s = AnsiStripper::default();
+    let mut out = String::new();
+    s.feed(bytes, &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,5 +671,101 @@ mod tests {
         assert_eq!(out.bells, 2);
         assert_eq!(out.cwd, None);
         assert_eq!(out.progress, None);
+    }
+
+    #[test]
+    fn strip_ansi_removes_csi_osc_and_controls() {
+        // CSI color codes, OSC title, BEL, \r\n -> \n, tab preserved.
+        let input = b"\x1b[31mred\x1b[0m\x1b]0;title\x07\n\rline2\t\x07\x08";
+        assert_eq!(strip_ansi(input), "red\n\nline2\t");
+    }
+
+    #[test]
+    fn strip_ansi_cr_becomes_newline() {
+        // A progress bar that rewrites the line with \r: the final state is
+        // the last line.
+        assert_eq!(strip_ansi(b"10%\r20%\r100%"), "10%\n20%\n100%");
+    }
+
+    #[test]
+    fn strip_ansi_handles_utf8_and_split_escapes() {
+        // CJK text passes through untouched.
+        assert_eq!(strip_ansi("你好世界".as_bytes()), "你好世界");
+        // A multibyte char split across the chunk boundary is dropped (the
+        // terminal display is unaffected; only the capture ring loses it).
+        let cjk = "你".as_bytes();
+        assert_eq!(cjk.len(), 3);
+        assert_eq!(strip_ansi(&cjk[..2]), "");
+        assert_eq!(strip_ansi(&cjk[2..]), "");
+        assert_eq!(strip_ansi(cjk), "你");
+    }
+
+    #[test]
+    fn strip_ansi_state_carries_across_chunks() {
+        // ESC at the end of one chunk, CSI in the next: both halves are
+        // stripped (the stateful stripper, unlike a per-chunk one-shot,
+        // doesn't leak the literal "[31m").
+        let mut s = AnsiStripper::default();
+        let mut out = String::new();
+        s.feed(b"\x1b", &mut out);
+        s.feed(b"[31mred\x1b[0m", &mut out);
+        assert_eq!(out, "red");
+
+        // OSC split across three chunks, terminated by BEL.
+        let mut s = AnsiStripper::default();
+        let mut out = String::new();
+        s.feed(b"\x1b]0;", &mut out);
+        s.feed(b"my title", &mut out);
+        s.feed(b"\x07ok", &mut out);
+        assert_eq!(out, "ok");
+
+        // OSC terminated by ST (ESC \) split across chunks.
+        let mut s = AnsiStripper::default();
+        let mut out = String::new();
+        s.feed(b"\x1b]9;4;1;50", &mut out);
+        s.feed(b"\x1b\\", &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn scrollback_ring_keeps_last_lines_and_pending_tail() {
+        let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        for _ in 0..10 {
+            s.record_output(b"line\n");
+        }
+        let lines = s.scrollback_lines(5);
+        assert_eq!(lines, vec!["line\n"; 5]);
+        // Unterminated tail is included as the final line.
+        s.record_output(b"tail-");
+        let lines = s.scrollback_lines(100);
+        assert_eq!(lines.last().map(String::as_str), Some("tail-"));
+        // ...and completes when the next chunk arrives.
+        s.record_output(b"done\n");
+        let lines = s.scrollback_lines(100);
+        assert_eq!(lines.last().map(String::as_str), Some("tail-done\n"));
+    }
+
+    #[test]
+    fn scrollback_dedups_line_redraws() {
+        let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        // Per-keystroke line redraws (`\r`-rewritten): each extends the last.
+        for i in 0.."echo HI".len() {
+            let prefix: String = "echo HI".chars().take(i + 1).collect();
+            s.record_output(format!("{prefix}\r").as_bytes());
+        }
+        // Only the final rendering survives.
+        assert_eq!(s.scrollback_lines(100), vec!["echo HI\n"]);
+
+        // A line that is NOT an extension (e.g. a new prompt) still stacks.
+        s.record_output(b"\n");
+        assert_eq!(s.scrollback_lines(100), vec!["echo HI\n", "\n"]);
+    }
+
+    #[test]
+    fn record_output_updates_last_output_at() {
+        let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        s.record_output(b"x");
+        // The elapsed time since the write is near zero.
+        assert!(s.idle_for() < Duration::from_secs(1));
     }
 }

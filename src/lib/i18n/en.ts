@@ -49,6 +49,10 @@ const en = {
     pasteWarningBody: "Are you sure you want to paste this text? It looks like it may contain executable commands. Pasted commands can execute immediately in the terminal.",
     pasteAnyway: "Paste Anyway",
     cancel: "Cancel",
+    searchPlaceholder: "Search terminal output\u2026",
+    searchPrevious: "Previous match (Shift+Enter)",
+    searchNext: "Next match (Enter)",
+    searchCaseSensitive: "Match case",
   },
 
   sidebar: {
@@ -150,6 +154,8 @@ const en = {
     exitZoomTooltip: "Exit Pane Zoom (Ctrl+Shift+Enter)",
     toggleRightSidebarTooltip: "Toggle Right Sidebar (Ctrl+Shift+B)",
     untitled: "untitled",
+    agentWorking: ({ agent }: { agent: string }) => `${agent} is working`,
+    agentWaiting: ({ agent }: { agent: string }) => `${agent} is waiting for input`,
   },
 
   git: {
@@ -185,6 +191,7 @@ const en = {
     openChanges: "Open Changes",
     openFile: "Open File",
     openFileToSide: "Open File to the Side",
+    fileHistory: "File History",
     unstage: "Unstage",
     markResolved: "Mark Resolved",
     markResolvedVerb: "Mark resolved",
@@ -249,6 +256,12 @@ const en = {
       `${title} (${count})`,
     discardRowTitle: "Discard changes",
     commitNStaged: ({ n }: { n: number }) => `Commit ${n} staged`,
+    setCheckpoint: "Set Checkpoint",
+    sinceCheckpoint: ({ hash }: { hash: string }) => `Changes since ${hash}\u2026`,
+    clearCheckpoint: "Clear checkpoint",
+    checkpointComputing: "Computing changes\u2026",
+    checkpointClean: "No changes since the checkpoint",
+    openCheckpointDiff: ({ path }: { path: string }) => `Diff ${path} since the checkpoint`,
   },
 
   fileTree: {
@@ -277,6 +290,14 @@ const en = {
   filePane: {
     loading: "Loading\u2026",
     modified: ({ name }: { name: string }) => `${name} (modified)`,
+    inlineDiffToggle: "Inline diff vs HEAD (gutter markers)",
+    inlineDiffUnavailable: "File is not tracked at HEAD",
+    diffVsHead: "Open diff vs HEAD",
+    blameToggle: "Blame: show the commit that last changed each line",
+    blameOpenHistory: "Open file history",
+    history: "File history",
+    inlineDiffCount: ({ n }: { n: number }) => `${n} changed lines`,
+    inlineDiffClean: "No changes vs HEAD",
   },
 
   diffPane: {
@@ -288,6 +309,16 @@ const en = {
     reloadHint: "Reload diff from disk",
     reload: "Reload",
     stagedSuffix: " (staged)",
+  },
+
+  fileHistory: {
+    loading: "Loading\u2026",
+    noCommits: "This file has no commits yet",
+    comparing: ({ hash }: { hash: string }) => `Comparing against ${hash}\u2026`,
+    clearBase: "Clear base",
+    compareWith: ({ hash }: { hash: string }) => `Compare with ${hash}`,
+    setBase: "Set as compare base",
+    vsParent: "Diff against its parent commit",
   },
 
   shortcuts: {
@@ -303,6 +334,7 @@ const en = {
     showShortcuts: "Keyboard shortcuts (this window)",
     newSession: "New terminal tab",
     closeTab: "Close current tab",
+    reopenClosedTab: "Reopen last closed tab",
     tabSwitcher: "Tab switcher",
     prevNextTab: "Previous / next tab",
     splitRight: "Split right",
@@ -315,6 +347,8 @@ const en = {
     toggleSidebar: "Toggle left sidebar",
     toggleRightPanel: "Toggle right panel",
     filesPanel: "Files panel",
+    searchPanel: "Search files in project",
+    terminalSearch: "Search terminal scrollback (in a terminal)",
     gitPanel: "Git panel",
     infoPanel: "Info panel",
     saveFile: "Save file (in editor)",
@@ -342,11 +376,23 @@ const en = {
     sortByTime: "By Time",
     sortByTokens: "By Tokens",
     allTools: "All Tools",
+    dailyTokens: "Daily tokens",
+  },
+
+  search: {
+    placeholder: "Search files in project\u2026",
+    caseSensitive: "Match case",
+    searching: "Searching\u2026",
+    results: ({ n }: { n: number }) => `${n} results`,
+    noResults: "No results",
+    noRoot: "Open a project to search",
+    typeToSearch: "Type to search files in the project",
   },
 
   commandPalette: {
-    searchPlaceholder: "Search commands and sessions\u2026",
+    searchPlaceholder: "Search files, commands and sessions\u2026",
     noMatches: "No matches",
+    reopenClosedTab: "Reopen Closed Tab",
     splitLeft: "Split Left",
     splitUp: "Split Up",
     focusPaneLeft: "Focus Pane Left",
@@ -367,6 +413,7 @@ const en = {
     toggleLeftSidebar: "Toggle Left Sidebar",
     toggleRightSidebar: "Toggle Right Sidebar",
     toggleFilesPanel: "Toggle Files Panel",
+    toggleSearchPanel: "Search Files",
     toggleGitPanel: "Toggle Git Panel",
     toggleInfoPanel: "Toggle Info Panel",
     nextTab: "Next Tab",

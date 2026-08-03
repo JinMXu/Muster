@@ -52,6 +52,12 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
         <span className="flex-1 truncate">
           {diff.path}
           {diff.staged ? t("diffPane.stagedSuffix") : ""}
+          {diff.old_rev && diff.new_rev ? (
+            <span className="text-muster-muted/80 font-mono ui-fs-sm">
+              {" "}
+              ({diff.old_rev.slice(0, 7)}..{diff.new_rev.slice(0, 7)})
+            </span>
+          ) : null}
         </span>
         <button
           onClick={() => setSideBySide((v) => !v)}

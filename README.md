@@ -22,6 +22,8 @@
 - **主题**：内置 GitHub 风格默认主题 + 完整 Ghostty 主题目录（数百款），深色/浅色独立设置，支持跟随系统；Monaco 编辑器与差异视图同步跟随
 - **国际化**：中文 / English 界面，可跟随系统语言
 - **会话持久化**：标签、分屏布局、项目与选中状态定时自动快照（每 5 秒），主窗口与次窗口重启后均完整恢复
+- **Agent 感知**：识别会话进程树中的 coding agent（opencode / Claude Code / Codex / Kimi Code / aider / Gemini CLI / Goose），标签上显示状态点（绿=运行中，黄=等待输入，等待时发系统通知）；检测原理是进程名 + 命令行匹配，无需 agent 配合
+- **Agent CLI 桥**：`muster` 命令支持 agent 驱动的工作流——`muster split` 开分屏、`muster send <id> <text>` 发送按键、`muster capture <id>` 读取终端输出（后端维护 400 行 ANSI 剥离的滚动回滚）、`muster run -- <cmd>` 在新标签真实 PTY 中执行并等待完成返回退出码、`muster procs <id>` 查看进程树与监听端口、`muster agents` 查看各会话 agent 状态；自带 `skills/muster/SKILL.md` 供 AI 代理使用
 - **CLI 工具**：可将 Muster 添加到系统 PATH，支持从任意终端使用 `muster <path>` 直接打开项目，或 `muster --cmd "vim foo.js" <path>` 在终端会话中执行命令
 - **剪贴板安全保护**：当粘贴内容疑似可执行命令（多行命令、`sudo` / `curl` / `rm -rf` 等）时弹窗确认，防止意外执行恶意指令
 - **自动更新**：内置更新检查器，支持从 GitHub Release 频道获取最新版本与一键安装
@@ -40,7 +42,7 @@
 | Git | git2（libgit2，含 SSH） |
 | 自动更新 | tauri-plugin-updater（NSIS passive 模式） |
 | 剪贴板安全 | 前端粘贴拦截 + 危险内容检测 |
-| 其他 | notify（文件监听）、sysinfo（进程/端口）、rusqlite（用量统计，只读）、toml（配置）、winreg（PATH 注册表） |
+| 其他 | notify（文件监听）、sysinfo（进程/端口/agent 检测）、rusqlite（用量统计，只读）、toml（配置）、winreg（PATH 注册表）、本地 TCP JSON IPC（`muster` CLI 桥） |
 
 ## 目录结构
 
@@ -142,6 +144,26 @@ muster --cmd "python hello.py"
 ```
 
 快捷键 `-c` 和 `-d` 可分别替代 `--cmd` 和 `--cwd`。
+
+### Agent 驱动的 CLI 桥
+
+`muster <verb>` 通过本地 IPC 与正在运行的 Muster 通信（未运行时自动启动），
+每步即进即出，供 AI 编码代理和其他脚本驱动终端：
+
+```sh
+muster doctor                 # 检查桥接状态
+muster new C:\projects\myapp  # 打开项目，打印首个终端会话 id
+muster split --v              # 向下分屏，打印新会话 id（--h 向右，默认）
+muster send <id> "npm run dev" --enter   # 向会话发送按键
+muster capture <id> --lines 200          # 读取会话最近输出（ANSI 已剥离）
+muster procs <id>             # 会话进程树 + 监听端口
+muster agents                 # 各会话的 coding agent 状态
+muster run -- cargo test      # 新标签真实 PTY 运行命令，等待完成后输出+退出码
+```
+
+- `run` 默认 600s 超时（`--timeout N`）；`--` 之后的内容原样作为命令
+- 任何 verb 加 `--json` 输出结构化结果
+- 为 AI 代理准备的完整使用说明见 `skills/muster/SKILL.md`
 
 ## 快捷键
 

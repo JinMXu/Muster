@@ -72,11 +72,7 @@ fn read_user_path() -> Result<String, String> {
             let trimmed = line.trim();
             if let Some(idx) = trimmed.find("REG_") {
                 let after = trimmed[idx..].trim();
-                if let Some(val_idx) = after.find("    ") {
-                    Some(after[val_idx..].trim().to_string())
-                } else {
-                    None
-                }
+                after.find("    ").map(|val_idx| after[val_idx..].trim().to_string())
             } else {
                 None
             }

@@ -114,6 +114,25 @@ select option {
   animation: muster-pop var(--muster-motion);
 }
 
+/* Editor inline diff gutter (FilePane): green/red hairline + tinted line
+   numbers for lines added vs HEAD / anchoring a deletion. */
+.muster-diff-added {
+  border-left: 2px solid #2ea043;
+}
+.muster-diff-added-ln {
+  background: rgba(46, 160, 67, 0.15);
+  color: #3fb950 !important;
+  font-weight: 600;
+}
+.muster-diff-removed {
+  border-left: 2px solid #f85149;
+}
+.muster-diff-removed-ln {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149 !important;
+  font-weight: 600;
+}
+
 /* Respect the OS "reduce motion" accessibility setting: kill every
    transition and animation in the app. Buttons and popups snap instantly,
    the spinner stops spinning, and the progress pulse stops pulsing. */

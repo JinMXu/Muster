@@ -1,15 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppStateView,
+  BlameLine,
   DirEntry,
   DiffTabInfo,
   DirtyFile,
+  FileCommit,
   FileTabInfo,
   GitStatusInfo,
   GitGuard,
   ListenPort,
   ProcessInfo,
   RightPanel,
+  SearchMatch,
   SessionInfo,
   Settings,
   ThemeColors,
@@ -18,6 +21,7 @@ import type {
   UsageSummary,
   Uuid,
 } from "./types";
+import { setPendingReveal, trackDiffTab, trackFileTab } from "./recentFiles";
 
 // Import the pane enums' string forms directly (Rust side listens for the
 // serde-converted lowercase form).
@@ -94,14 +98,42 @@ export const api = {
   toggleRightPanel: () => c<void>("toggle_right_panel"),
   togglePanel: (panel: RightPanel) => c<void>("toggle_panel", { panel }),
 
-  openFile: (path: string, toSide: boolean) => c<Uuid | null>("open_file", { path, toSide }),
+  openFile: (path: string, toSide: boolean) =>
+    c<Uuid | null>("open_file", { path, toSide }).then((id) => {
+      trackFileTab(id, path);
+      return id;
+    }),
+  openFileAt: (path: string, line: number) =>
+    c<Uuid | null>("open_file_at", { path, line }).then((id) => {
+      trackFileTab(id, path);
+      if (id) setPendingReveal(id, line);
+      return id;
+    }),
   fileTextChanged: (id: Uuid, text: string) => c<void>("file_text_changed", { id, text }),
   saveSelectedFile: () => c<void>("save_selected_file"),
   saveFile: (id: Uuid, text?: string) => c<void>("save_file", { id, text: text ?? null }),
   tabDirtyFiles: (tabId: Uuid) => c<DirtyFile[]>("tab_dirty_files", { tabId }),
   projectDirtyFiles: (projectId: Uuid) => c<DirtyFile[]>("project_dirty_files", { projectId }),
   openDiff: (repoRoot: string, path: string, staged: boolean) =>
-    c<Uuid | null>("open_diff", { repoRoot, path, staged }),
+    c<Uuid | null>("open_diff", { repoRoot, path, staged }).then((id) => {
+      trackDiffTab(id, { repoRoot, path, staged, oldRev: null, newRev: null, workdir: false });
+      return id;
+    }),
+  openCommitDiff: (repoRoot: string, path: string, oldRev: string, newRev: string) =>
+    c<Uuid | null>("open_commit_diff", { repoRoot, path, oldRev, newRev }).then((id) => {
+      trackDiffTab(id, { repoRoot, path, staged: false, oldRev, newRev, workdir: false });
+      return id;
+    }),
+  openWorkdirDiff: (repoRoot: string, path: string) =>
+    c<Uuid | null>("open_workdir_diff", { repoRoot, path }).then((id) => {
+      trackDiffTab(id, { repoRoot, path, staged: false, oldRev: null, newRev: null, workdir: true });
+      return id;
+    }),
+  openCheckpointDiff: (repoRoot: string, path: string, oldRev: string) =>
+    c<Uuid | null>("open_checkpoint_diff", { repoRoot, path, oldRev }).then((id) => {
+      trackDiffTab(id, { repoRoot, path, staged: false, oldRev, newRev: null, workdir: true });
+      return id;
+    }),
   reloadDiff: (id: Uuid) => c<void>("reload_diff", { id }),
 
   listDirectory: (path: string) => c<DirEntry[]>("list_directory", { path }),
@@ -110,6 +142,9 @@ export const api = {
     c<string>("create_file", { parentDir, name, isDirectory }),
   renamePath: (from: string, to: string) => c<string>("rename_path", { from, to }),
   watchDirectories: (paths: string[]) => c<void>("watch_directories", { paths }),
+  searchFiles: (root: string, query: string, caseSensitive: boolean) =>
+    c<SearchMatch[]>("search_files", { root, query, caseSensitive }),
+  listProjectFiles: (root: string) => c<string[]>("list_project_files", { root }),
 
   gitStatus: (repoRoot: string) => c<GitStatusInfo>("git_status", { repoRoot }),
   gitGuard: (repoRoot: string, paths: string[]) => c<GitGuard>("git_guard", { repoRoot, paths }),
@@ -133,6 +168,15 @@ export const api = {
     stashAll: (repoRoot: string) => c<void>("git_stash_all", { repoRoot }),
     stashPop: (repoRoot: string) => c<void>("git_stash_pop", { repoRoot }),
     init: (repoRoot: string) => c<void>("git_init", { repoRoot }),
+    fileHistory: (repoRoot: string, path: string) =>
+      c<FileCommit[]>("git_file_history", { repoRoot, path }),
+    headContent: (repoRoot: string, path: string) =>
+      c<string | null>("git_head_content", { repoRoot, path }),
+    blame: (repoRoot: string, path: string) =>
+      c<BlameLine[]>("git_blame", { repoRoot, path }),
+    headOid: (repoRoot: string) => c<string | null>("git_head_oid", { repoRoot }),
+    checkpointChanges: (repoRoot: string, checkpoint: string) =>
+      c<string[]>("git_checkpoint_changes", { repoRoot, checkpoint }),
   },
   usage: {
     summary: () => c<UsageSummary>("usage_summary"),

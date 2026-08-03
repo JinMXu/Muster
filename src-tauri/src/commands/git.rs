@@ -136,3 +136,47 @@ pub async fn git_init(repo_root: String) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub async fn git_file_history(repo_root: String, path: String) -> Vec<crate::services::git::FileCommit> {
+    tokio::task::spawn_blocking(move || crate::services::git::file_history(&repo_root, &path))
+        .await
+        .unwrap_or_default()
+}
+
+/// HEAD content of one file, or `None` when it isn't tracked at HEAD — used
+/// by the editor's inline diff gutter (old side vs the live buffer).
+#[tauri::command]
+pub async fn git_head_content(repo_root: String, path: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || crate::services::git::file_at_head(&repo_root, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_blame(
+    repo_root: String,
+    path: String,
+) -> Result<Vec<crate::services::git::BlameLine>, String> {
+    tokio::task::spawn_blocking(move || crate::services::git::blame(&repo_root, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Current HEAD oid — the anchor for a "checkpoint".
+#[tauri::command]
+pub async fn git_head_oid(repo_root: String) -> Option<String> {
+    tokio::task::spawn_blocking(move || crate::services::git::head_oid(&repo_root))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Repo-relative paths changed since `checkpoint` (worktree + index + commits
+/// made after it).
+#[tauri::command]
+pub async fn git_checkpoint_changes(repo_root: String, checkpoint: String) -> Vec<String> {
+    tokio::task::spawn_blocking(move || crate::services::git::checkpoint_changed_files(&repo_root, &checkpoint))
+        .await
+        .unwrap_or_default()
+}

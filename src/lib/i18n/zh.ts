@@ -49,6 +49,10 @@ const zh = {
     pasteWarningBody: "确定要粘贴此文本吗？它看起来可能包含可执行命令，粘贴后可能立即在终端中运行。",
     pasteAnyway: "仍然粘贴",
     cancel: "取消",
+    searchPlaceholder: "搜索终端输出…",
+    searchPrevious: "上一个匹配 (Shift+Enter)",
+    searchNext: "下一个匹配 (Enter)",
+    searchCaseSensitive: "区分大小写",
   },
 
   sidebar: {
@@ -150,6 +154,8 @@ const zh = {
     exitZoomTooltip: "退出窗格缩放 (Ctrl+Shift+Enter)",
     toggleRightSidebarTooltip: "切换右侧边栏 (Ctrl+Shift+B)",
     untitled: "未命名",
+    agentWorking: ({ agent }: { agent: string }) => `${agent} 正在运行`,
+    agentWaiting: ({ agent }: { agent: string }) => `${agent} 等待输入`,
   },
 
   git: {
@@ -185,6 +191,7 @@ const zh = {
     openChanges: "打开更改",
     openFile: "打开文件",
     openFileToSide: "在侧边打开文件",
+    fileHistory: "文件历史",
     unstage: "取消暂存",
     markResolved: "标记为已解决",
     markResolvedVerb: "标记为已解决",
@@ -245,8 +252,14 @@ const zh = {
     dismiss: "关闭",
     sectionCount: ({ title, count }: { title: string; count: number }) =>
       `${title}（${count}）`,
-    discardRowTitle: "丢弃更改",
-    commitNStaged: ({ n }: { n: number }) => `提交 ${n} 个已暂存`,
+    discardRowTitle: "放弃更改",
+    commitNStaged: ({ n }: { n: number }) => `提交 ${n} 个已暂存更改`,
+    setCheckpoint: "设置检查点",
+    sinceCheckpoint: ({ hash }: { hash: string }) => `自 ${hash} 以来的更改…`,
+    clearCheckpoint: "清除检查点",
+    checkpointComputing: "正在计算更改…",
+    checkpointClean: "检查点之后无更改",
+    openCheckpointDiff: ({ path }: { path: string }) => `查看 ${path} 自检查点以来的差异`,
   },
 
   fileTree: {
@@ -275,6 +288,14 @@ const zh = {
   filePane: {
     loading: "加载中…",
     modified: ({ name }: { name: string }) => `${name}（已修改）`,
+    inlineDiffToggle: "内联 diff vs HEAD（行号侧标记）",
+    inlineDiffUnavailable: "文件未被 HEAD 跟踪",
+    diffVsHead: "打开与 HEAD 的差异",
+    blameToggle: "Blame：显示最后修改每一行的提交",
+    blameOpenHistory: "打开文件历史",
+    history: "文件历史",
+    inlineDiffCount: ({ n }: { n: number }) => `${n} 处更改`,
+    inlineDiffClean: "与 HEAD 无差异",
   },
 
   diffPane: {
@@ -286,6 +307,16 @@ const zh = {
     reloadHint: "从磁盘重新加载差异",
     reload: "重新加载",
     stagedSuffix: "（已暂存）",
+  },
+
+  fileHistory: {
+    loading: "加载中…",
+    noCommits: "此文件暂无提交记录",
+    comparing: ({ hash }: { hash: string }) => `正在与 ${hash} 比较…`,
+    clearBase: "清除基准",
+    compareWith: ({ hash }: { hash: string }) => `与 ${hash} 对比`,
+    setBase: "设为比较基准",
+    vsParent: "与父提交对比",
   },
 
   shortcuts: {
@@ -301,6 +332,7 @@ const zh = {
     showShortcuts: "键盘快捷键（本窗口）",
     newSession: "新建终端标签",
     closeTab: "关闭当前标签",
+    reopenClosedTab: "重新打开最近关闭的标签",
     tabSwitcher: "标签切换器",
     prevNextTab: "上一个 / 下一个标签",
     splitRight: "向右分屏",
@@ -313,6 +345,8 @@ const zh = {
     toggleSidebar: "切换左侧项目栏",
     toggleRightPanel: "切换右侧边栏",
     filesPanel: "文件树面板",
+    searchPanel: "搜索项目中的文件",
+    terminalSearch: "搜索终端回滚（在终端中）",
     gitPanel: "Git 面板",
     infoPanel: "信息面板",
     saveFile: "保存文件（编辑器中）",
@@ -340,11 +374,23 @@ const zh = {
     sortByTime: "按时间",
     sortByTokens: "按 Token",
     allTools: "全部工具",
+    dailyTokens: "每日 tokens",
+  },
+
+  search: {
+    placeholder: "搜索项目中的文件…",
+    caseSensitive: "区分大小写",
+    searching: "正在搜索…",
+    results: ({ n }: { n: number }) => `${n} 个结果`,
+    noResults: "无结果",
+    noRoot: "打开项目后即可搜索",
+    typeToSearch: "输入内容即可在项目中搜索文件",
   },
 
   commandPalette: {
-    searchPlaceholder: "搜索命令和会话…",
+    searchPlaceholder: "搜索文件、命令和会话…",
     noMatches: "无匹配项",
+    reopenClosedTab: "重新打开关闭的标签",
     splitLeft: "向左拆分",
     splitUp: "向上拆分",
     focusPaneLeft: "聚焦左侧窗格",
@@ -365,6 +411,7 @@ const zh = {
     toggleLeftSidebar: "切换左侧边栏",
     toggleRightSidebar: "切换右侧边栏",
     toggleFilesPanel: "切换文件面板",
+    toggleSearchPanel: "搜索文件",
     toggleGitPanel: "切换 Git 面板",
     toggleInfoPanel: "切换信息面板",
     nextTab: "下一个标签页",

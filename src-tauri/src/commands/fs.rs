@@ -50,6 +50,24 @@ pub fn watch_directories(window: Window, paths: Vec<String>) {
     crate::services::watch::set_watched_directories(window.app_handle(), window.label(), paths);
 }
 
+/// Full-text search under `root` for the Search panel. Runs on the blocking
+/// pool so a big repository can't starve Tauri's async runtime.
+#[tauri::command]
+pub async fn search_files(root: String, query: String, case_sensitive: bool) -> Result<Vec<crate::services::search::SearchMatch>, String> {
+    tokio::task::spawn_blocking(move || crate::services::search::search_in_project(&root, &query, case_sensitive))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// List every file under `root` (relative paths, gitignore-aware) for the
+/// Ctrl+P quick-open list. Runs on the blocking pool like `search_files`.
+#[tauri::command]
+pub async fn list_project_files(root: String) -> Vec<String> {
+    tokio::task::spawn_blocking(move || crate::services::search::list_project_files(&root))
+        .await
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn install_explorer_context_menu() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;

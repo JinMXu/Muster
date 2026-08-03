@@ -7,6 +7,7 @@ import { shellQuotePath } from "../lib/shellEscape";
 import { getFocusedSessionId } from "../lib/sessionUtils";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconChevronDown, IconGitBranch, IconSearch } from "./icons";
+import FileHistory from "./FileHistory";
 import { useT } from "../lib/i18n/context";
 
 /// One entry in the operation banner: a git mutation with running/ok/failed
@@ -42,6 +43,12 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   const [discardTarget, setDiscardTarget] = useState<DiscardTarget | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  // File history overlay target: the row's repo + repo-relative path.
+  const [history, setHistory] = useState<{ repoRoot: string; path: string } | null>(null);
+  // Change checkpoint: the HEAD oid captured when the user pressed "Set", so
+  // the panel can list everything changed since (including later commits).
+  const [checkpoint, setCheckpoint] = useState<{ root: string; oid: string; time: number } | null>(null);
+  const [cpFiles, setCpFiles] = useState<string[] | null>(null);
   const opSeq = useRef(0);
   const { t } = useT();
 
@@ -87,6 +94,27 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
     />
   );
 
+  // Refresh the "changes since checkpoint" list while a checkpoint is set
+  // (polls so new commits/edits by an agent show up without a manual reload).
+  useEffect(() => {
+    if (!checkpoint || checkpoint.root !== info?.repo_root) {
+      setCpFiles(null);
+      return;
+    }
+    let alive = true;
+    const tick = () =>
+      api.git.checkpointChanges(checkpoint.root, checkpoint.oid).then(
+        (files) => alive && setCpFiles(files),
+        () => alive && setCpFiles([])
+      );
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, [checkpoint, info?.repo_root]);
+
   // Path filter (case-insensitive substring) applied to all three sections.
   // Must be before the early returns to comply with the Rules of Hooks.
   const q = filter.trim().toLowerCase();
@@ -119,9 +147,9 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
         >
           {t("git.initializeRepo")}
         </button>
-      </div>
-    );
-  }
+    </div>
+  );
+}
 
   // Focused terminal session (selected tab -> focused pane), used by the row
   // menu's "Insert Absolute Path in Terminal" item. Omitted when no terminal
@@ -241,6 +269,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
       { label: t("git.openChanges"), action: () => api.openDiff(info.repo_root, e.path, kind === "staged") },
       { label: t("git.openFile"), action: () => api.openFile(abs, false) },
       { label: t("git.openFileToSide"), action: () => api.openFile(abs, true) },
+      { label: t("git.fileHistory"), action: () => setHistory({ repoRoot: info.repo_root, path: e.path }) },
       "sep",
     ];
     if (kind === "staged") {
@@ -340,6 +369,62 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
       </div>
 
       {banner}
+
+      {checkpoint && checkpoint.root === info.repo_root ? (
+        <div className="flex-shrink-0 px-3 py-1.5 border-b border-white/[0.08]">
+          <div className="flex items-center gap-2 ui-fs-xs text-muster-muted">
+            <span className="text-muster-accent flex items-center">
+              <IconGitBranch size={11} />
+            </span>
+            <span className="flex-1 truncate">
+              {t("git.sinceCheckpoint", { hash: checkpoint.oid.slice(0, 7) })}
+            </span>
+            <button
+              onClick={() => setCheckpoint(null)}
+              title={t("git.clearCheckpoint")}
+              className="px-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+            >
+              ✕
+            </button>
+          </div>
+          {cpFiles === null ? (
+            <div className="ui-fs-xs text-muster-muted/70 px-2 py-1">{t("git.checkpointComputing")}</div>
+          ) : cpFiles.length === 0 ? (
+            <div className="ui-fs-xs text-muster-muted/70 px-2 py-1">{t("git.checkpointClean")}</div>
+          ) : (
+            <div className="max-h-40 overflow-y-auto mt-1 space-y-0.5">
+              {cpFiles.map((p) => (
+                <div
+                  key={p}
+                  onClick={() => api.openCheckpointDiff(info.repo_root, p, checkpoint.oid)}
+                  title={t("git.openCheckpointDiff", { path: p })}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-muster-hover cursor-pointer ui-fs-xs text-muster-fg/80 truncate"
+                >
+                  <span className="text-muster-accent flex-shrink-0">Δ</span>
+                  <span className="truncate">{p}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : info.is_repo && info.repo_root ? (
+        <div className="flex-shrink-0 px-3 py-1.5 border-b border-white/[0.08] flex items-center">
+          <button
+            onClick={() =>
+              api.git.headOid(info.repo_root).then((oid) => {
+                if (oid) setCheckpoint({ root: info.repo_root, oid, time: Date.now() });
+              })
+            }
+            title={t("git.setCheckpoint")}
+            className="flex items-center gap-1 ui-fs-xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-1.5 py-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
+          >
+            <span className="text-muster-accent flex items-center">
+              <IconGitBranch size={11} />
+            </span>
+            {t("git.setCheckpoint")}
+          </button>
+        </div>
+      ) : null}
 
       {filterOpen && (
         <div className="px-3 pb-1 flex items-center gap-1.5">
@@ -546,6 +631,10 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             </div>
           </div>
         </div>
+      )}
+
+      {history && (
+        <FileHistory repoRoot={history.repoRoot} path={history.path} onClose={() => setHistory(null)} />
       )}
     </div>
   );

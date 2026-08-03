@@ -1,11 +1,14 @@
+pub mod agents;
 pub mod cli;
 pub mod config;
 pub mod conpty;
 pub mod explorer;
 pub mod git;
 pub mod i18n;
+pub mod ipc;
 pub mod persist;
 pub mod procs;
+pub mod search;
 pub mod shell;
 pub mod usage;
 pub mod watch;

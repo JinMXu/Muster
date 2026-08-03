@@ -1,20 +1,66 @@
 # Kero Windows — 开发进度
 
-**最后更新**: 2026-07-29（第十二轮）
+**最后更新**: 2026-08-03（第十三轮：Agent 感知 + CLI 桥）
 
 ---
 
-## 整体状态：Rust 后端 ✅ | React 前端 ✅ | 单测 77 ✅ | clippy 0 警告 ✅ | i18n 中英文 ✅ | 界面字号设置 ✅（待实机验收）
+## 整体状态：Rust 后端 ✅ | React 前端 ✅ | 单测 109 ✅ | clippy 0 警告 ✅ | i18n 中英文 ✅
 
 ### 构建状态
 | 目标 | 状态 | 备注 |
 |------|------|------|
 | `cargo check` / `cargo build` | ✅ 通过 | 无需 vcvars |
-| `cargo test --lib` | ✅ 77 个测试全过 | 含 procs 路径匹配 + 2 个实进程 ignored 测试手动通过 |
+| `cargo test --lib` | ✅ 109 个测试全过 | 含 2 个实进程 ignored 测试手动通过 |
 | `cargo clippy --all-targets` | ✅ 零警告 | |
 | `npm run build` | ✅ 通过 | `tsc && vite build` 零 TS 错误 |
-| `npm audit` | ✅ 0 漏洞 | dompurify 经 overrides 升到 3.4.12 |
-| 实机验证 | ⚠️ 部分 | 第 0-1 批 + UI 重设计已目检；界面字号滑块、CSP 启用后实机验收待做 |
+| 实机验证 | ⚠️ 未做 | CLI 桥与状态点需实机验收 |
+
+---
+
+## 本轮已实现（2026-08-03 第十三轮：Agent 感知 + Agent CLI 桥）
+
+借鉴 tty7（l0ng-ai/tty7）的 agent-aware 与 CLI+Skills 设计，落地两项：
+
+### 1. Agent 感知（`services/agents.rs` + 前端状态点）
+
+- **检测**：每 3s 轮询各窗口会话的进程树（复用 procs.rs Job Object），按
+  进程名 + 命令行匹配 7 种 agent：opencode / claude(-code) / codex /
+  kimi(-code) / aider / gemini / goose；node 类启动器（`node ...\cli.js`）
+  走命令行 token/路径段匹配，`codex-app` 这类目录名不会误报（含单测）
+- **状态**：Working（有输出）/ Waiting（静默 ≥10s，启发式判断"等待输入"）；
+  会话 read loop 新增 `last_output_at` 跟踪
+- **前端**：新 `useAgentStatus` hook 订阅 `agent-status-changed` 事件；
+  Header 标签标题旁显示状态点（绿=working、黄=waiting 带脉冲），
+  tooltip 显示 agent 名 + 状态（i18n 中英）
+- **通知**：agent 转入 Waiting 且窗口失焦时发系统通知，每会话 60s 节流
+  （复用 notify_bell 的模式）；agent 消失/会话关闭时事件带 `null` 移除状态点
+
+### 2. Agent CLI 桥（`services/ipc.rs` + main.rs 分发）
+
+- **IPC server**：GUI 启动时绑定 127.0.0.1 随机端口，token（uuid）+ 端口写入
+  `<app data>/ipc.json`；行式 JSON 协议，每连接一个请求
+- **CLI 客户端**：`muster <verb>` 在 Tauri 启动前分发（main.rs），读 ipc.json
+  连本地服务；Muster 未运行时自动拉起并等待桥就绪（20s 超时）
+- **verb**：`doctor` / `ls` / `agents` / `new [dir]` / `split [--v|--h] [--dir]` /
+  `send <id> <text> [--enter]` / `capture <id> [--lines N]` / `procs <id>` /
+  `run -- <cmd> [--dir] [--timeout N]`；全部支持 `--json`
+- **滚动回滚**：session 新增 400 行 ANSI 剥离环形缓冲（`AnsiStripper` 跨 chunk
+  状态机，处理 CSI/OSC/UTF-8 截断，6 个单测）+ `last_output_at`
+- **run 语义**：新标签真实 PTY 执行，轮询进程树直到只剩 shell，返回捕获输出；
+  附尾 `__MUSTER_RC=$LASTEXITCODE`（按 shell 区分）提取退出码；600s 默认超时
+- **文档**：`skills/muster/SKILL.md`（面向 AI 代理，含使用规则与命令参考）、
+  README 新增「Agent 驱动的 CLI 桥」章节
+
+### 已知限制（记录在案）
+- agent 状态是启发式（进程存在 + 静默时长），非 agent 主动上报；纯 cmdlet
+  命令的 `$LASTEXITCODE` 不可靠（run 的退出码）
+- 后端滚动回滚只留 400 行（完整缓冲在前端 xterm）；跨 chunk 边界的多字节
+  字符会从 capture 中丢失（终端显示不受影响）
+- CLI 拉起 Muster 会打开 GUI 窗口（无 headless 模式）
+
+验证：`cargo test` 109 ✅（新增 15 个）、`clippy` 0 警告 ✅、`npm run build` ✅。
+实机验收待做：终端里跑 opencode 看标签状态点/通知、`muster run/send/capture`
+回路。
 
 ---
 

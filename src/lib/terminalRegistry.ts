@@ -1,4 +1,4 @@
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal, type ITheme, type ILinkProvider } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -18,6 +18,8 @@ interface PtyExitPayload {
 interface Entry {
   term: Terminal;
   fit: FitAddon;
+  /// Scrollback search, installed per terminal (used by the search bar).
+  search: SearchAddon;
 }
 
 /// Terminal instance registry — the "parking lot" for xterm instances.
@@ -42,32 +44,43 @@ const pendingBuffers = new Map<string, string[]>();
 /// dispatch cost grow with the number of historical sessions. The unlisten
 /// handles returned here are intentionally ignored: the listeners live as
 /// long as the app itself.
-let listenersReady = false;
-export function ensureListeners(): void {
-  if (listenersReady) return;
-  listenersReady = true;
-  listen<PtyDataPayload>("pty:data", (event) => {
-    const entry = registry.get(event.payload.id);
-    if (!entry) {
-      // Terminal not yet created — buffer output so it renders when the pane mounts.
-      const buf = pendingBuffers.get(event.payload.id);
-      if (buf) {
-        buf.push(event.payload.data);
-      } else {
-        pendingBuffers.set(event.payload.id, [event.payload.data]);
-      }
-      return;
-    }
-    entry.term.write(base64ToBytes(event.payload.data));
-  });
-  listen<PtyExitPayload>("pty:exit", (event) => {
-    const entry = registry.get(event.payload.id);
-    if (!entry) {
-      pendingBuffers.delete(event.payload.id); // cleanup pending buffer
-      return;
-    }
-    entry.term.write("\r\n\x1b[2m[session exited]\x1b[0m\r\n");
-  });
+///
+/// Returns a promise that resolves once BOTH listeners are actually
+/// registered (the IPC round-trip completes). Callers that start PTY read
+/// pumps must await it: output emitted before the listeners are registered
+/// is dropped by Tauri, and restored sessions would boot into a blank
+/// terminal (a lone blinking cursor) with their initial prompt lost.
+let listenersReady: Promise<void> | null = null;
+export function ensureListeners(): Promise<void> {
+  if (!listenersReady) {
+    listenersReady = Promise.all([
+      listen<PtyDataPayload>("pty:data", (event) => {
+        const entry = registry.get(event.payload.id);
+        if (!entry) {
+          // Terminal not yet created — buffer output so it renders when the pane mounts.
+          const buf = pendingBuffers.get(event.payload.id);
+          if (buf) {
+            buf.push(event.payload.data);
+          } else {
+            pendingBuffers.set(event.payload.id, [event.payload.data]);
+          }
+          return;
+        }
+        entry.term.write(base64ToBytes(event.payload.data));
+      }),
+      listen<PtyExitPayload>("pty:exit", (event) => {
+        const entry = registry.get(event.payload.id);
+        if (!entry) {
+          pendingBuffers.delete(event.payload.id); // cleanup pending buffer
+          return;
+        }
+        entry.term.write("\r\n\x1b[2m[session exited]\x1b[0m\r\n");
+      }),
+    ]).then(() => {}).catch(() => {
+      // A failed listen must not break startup; pumps just start immediately.
+    });
+  }
+  return listenersReady;
 }
 
 /// The theme applied to every parked terminal — and to terminals created
@@ -155,13 +168,17 @@ function create(sessionId: string): Entry {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new SearchAddon());
+  const search = new SearchAddon();
+  term.loadAddon(search);
   // Clickable http(s) links (dev-server URLs etc.) open in the system browser.
   term.loadAddon(
     new WebLinksAddon((_event, uri) => {
       openUrl(uri).catch(() => {});
     })
   );
+  // Clickable `path:line[:col]` links (tsc / cargo / git errors) open the
+  // file at that line in the editor.
+  installPathLinkProvider(term, sessionId);
 
   // Input → PTY. Registered once per terminal, not per pane mount.
   term.onData((data) => api.sendText(sessionId, data));
@@ -209,7 +226,81 @@ function create(sessionId: string): Entry {
     pendingBuffers.delete(sessionId);
   }
 
-  return { term, fit };
+  return { term, fit, search };
+}
+
+// ---- path:line link provider (click compiler errors to jump to the file) --
+
+/// Any run of non-whitespace ending in `:<digits>(:<digits>)` is a candidate;
+/// `parsePathLine` + the existence check in the backend reject the rest.
+const PATH_LINE_RE = /[^\s]+:\d+(?::\d+)?/;
+
+/// Split a `path:line` / `path:line:col` candidate into its parts. Rejects
+/// URLs and strings that don't look like a filesystem path (`12:34`, words).
+function parsePathLine(text: string): { path: string; line: number } | null {
+  const trimmed = text.trim();
+  const m = /^(.+):(\d+)(?::\d+)?$/.exec(trimmed);
+  if (!m) return null;
+  const pathPart = m[1];
+  if (pathPart.includes("://")) return null; // a URL, handled by the web-links addon
+  // Must look like a path: contain a directory separator or a file extension.
+  if (!/[\\/.]/.test(pathPart)) return null;
+  const line = Number(m[2]);
+  if (!Number.isInteger(line) || line < 1 || line > 1_000_000) return null;
+  return { path: pathPart, line };
+}
+
+function isAbsolutePath(p: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\") || p.startsWith("/");
+}
+
+/// Resolve a (possibly relative) path from terminal output against the
+/// session's cwd and open it at the given line. The backend refuses to open
+/// paths that don't exist, so false positives are silently ignored.
+async function handlePathLink(sessionId: string, uri: string): Promise<void> {
+  const parsed = parsePathLine(uri);
+  if (!parsed) return;
+  const info = await api.sessionInfo(sessionId);
+  const cwd = info?.working_directory;
+  if (!cwd) return;
+  const candidate = isAbsolutePath(parsed.path)
+    ? parsed.path
+    : `${cwd}\\${parsed.path.replace(/\//g, "\\")}`;
+  api.openFileAt(candidate, parsed.line);
+}
+
+/// Register an xterm link provider that highlights `path:line[:col]` in
+/// terminal output. Runs once per terminal (in `create`).
+function installPathLinkProvider(term: Terminal, sessionId: string): void {
+  const provider: ILinkProvider = {
+    provideLinks(lineNumber, callback) {
+      const line = term.buffer.active.getLine(lineNumber - 1);
+      if (!line) {
+        callback(undefined);
+        return;
+      }
+      const text = line.translateToString(true);
+      const rex = new RegExp(PATH_LINE_RE.source, "g");
+      const links = [];
+      let match: RegExpExecArray | null;
+      while ((match = rex.exec(text))) {
+        const startX = match.index;
+        const uri = match[0];
+        links.push({
+          range: {
+            start: { x: startX + 1, y: lineNumber },
+            end: { x: startX + uri.length, y: lineNumber },
+          },
+          text: uri,
+          activate: (_event: MouseEvent) => {
+            handlePathLink(sessionId, uri);
+          },
+        });
+      }
+      callback(links);
+    },
+  };
+  term.registerLinkProvider(provider);
 }
 
 /// Get (or lazily create) the terminal for a session.
@@ -220,6 +311,12 @@ export function acquire(sessionId: string): Entry {
     registry.set(sessionId, entry);
   }
   return entry;
+}
+
+/// The scrollback-search addon for a session's terminal, or null when the
+/// terminal was never created (e.g. a session that never had a pane).
+export function getSearchAddon(sessionId: string): SearchAddon | null {
+  return registry.get(sessionId)?.search ?? null;
 }
 
 /// Dispose the terminal for a session and drop it from the registry.

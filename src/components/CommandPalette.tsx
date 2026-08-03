@@ -1,20 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "../lib/invoke";
 import { fuzzyFilter } from "../lib/fuzzy";
-import type { SessionInfo, Uuid } from "../lib/types";
+import { getRecentFiles, subscribeRecentFiles } from "../lib/recentFiles";
+import { useProjectCwd } from "../lib/useProjectCwd";
+import type { AppStateView, SessionInfo } from "../lib/types";
 import { useT } from "../lib/i18n/context";
-import { IconSearch } from "./icons";
+import { IconFile, IconSearch } from "./icons";
 
 interface CommandItem {
   id: string;
   title: string;
-  icon: string;
+  icon: React.ReactNode;
   shortcut?: string;
   action: () => void;
 }
 
-/// Centered ⌘P overlay listing app actions and open sessions.
+/// File-row glyph reused for both project files and recent files.
+const fileIcon = <IconFile size={12} />;
+
+/// Centered Ctrl+P overlay: project-file quick open (VS Code style) + app
+/// actions + open sessions, all fuzzy-filtered. Recent files surface first.
 export default function CommandPalette({
+  state,
   onClose,
   onAskNewProject,
   onClearTerminal,
@@ -22,7 +29,10 @@ export default function CommandPalette({
   onOpenSettings,
   onOpenShortcuts,
   onOpenUsage,
+  onOpenSearch,
+  onReopenClosed,
 }: {
+  state: AppStateView | null;
   onClose: () => void;
   onAskNewProject: () => void;
   onClearTerminal: () => void;
@@ -30,17 +40,40 @@ export default function CommandPalette({
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenUsage: () => void;
+  onOpenSearch: () => void;
+  onReopenClosed: () => void;
 }) {
   const { t } = useT();
+  // The palette is mounted only while open, so this hook's polling only runs
+  // then (same pattern as the SearchPanel).
+  const { root } = useProjectCwd(state);
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [projectFiles, setProjectFiles] = useState<string[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const recent = useSyncExternalStore(subscribeRecentFiles, getRecentFiles);
 
   useEffect(() => {
     api.listAllSessions().then(setSessions);
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
+
+  // Lazy-load the project's file list once (per open). Repos can be large,
+  // so only the first 2000 paths come back.
+  useEffect(() => {
+    if (!root) {
+      setProjectFiles(null);
+      return;
+    }
+    api.listProjectFiles(root).then(setProjectFiles).catch(() => setProjectFiles([]));
+  }, [root]);
+
+  const openProjectFile = (rel: string) => {
+    if (!root) return;
+    const abs = `${root.replace(/[\\/]+$/, "")}\\${rel.replace(/\//g, "\\")}`;
+    api.openFile(abs, false);
+  };
 
   const commands: CommandItem[] = useMemo(
     () => [
@@ -67,6 +100,7 @@ export default function CommandPalette({
       { id: "toggle-left-sidebar", title: t("commandPalette.toggleLeftSidebar"), icon: "◧", shortcut: "Ctrl+B", action: () => api.toggleLeftSidebar() },
       { id: "toggle-right-sidebar", title: t("commandPalette.toggleRightSidebar"), icon: "◨", shortcut: "Ctrl+Shift+B", action: () => api.toggleRightPanel() },
       { id: "toggle-files", title: t("commandPalette.toggleFilesPanel"), icon: "▤", shortcut: "Ctrl+Shift+E", action: () => api.togglePanel("files") },
+      { id: "search-files", title: t("commandPalette.toggleSearchPanel"), icon: "⌕", shortcut: "Ctrl+Shift+F", action: onOpenSearch },
       { id: "toggle-git", title: t("commandPalette.toggleGitPanel"), icon: "⎇", shortcut: "Ctrl+Shift+G", action: () => api.togglePanel("git") },
       { id: "toggle-info", title: t("commandPalette.toggleInfoPanel"), icon: "i", shortcut: "Ctrl+Shift+I", action: () => api.togglePanel("info") },
       { id: "next-tab", title: t("commandPalette.nextTab"), icon: "⇥", shortcut: "Ctrl+Shift+]", action: () => api.selectNextTab() },
@@ -80,11 +114,33 @@ export default function CommandPalette({
         shortcut: `Ctrl+${i + 1}`,
         action: () => api.selectProjectByIndex(i),
       })),
+      { id: "reopen-tab", title: t("commandPalette.reopenClosedTab"), icon: "↺", shortcut: "Ctrl+Shift+T", action: onReopenClosed },
       { id: "open-settings", title: t("commandPalette.openSettings"), icon: "⚙", shortcut: "Ctrl+,", action: onOpenSettings },
       { id: "keyboard-shortcuts", title: t("shortcuts.title"), icon: "⌨", shortcut: "Ctrl+/", action: onOpenShortcuts },
       { id: "open-usage", title: t("commandPalette.openUsage"), icon: "▤", shortcut: "Ctrl+Shift+U", action: onOpenUsage },
     ],
-    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, onOpenUsage, t]
+    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, onOpenUsage, onOpenSearch, onReopenClosed, t]
+  );
+
+  const fileItems: CommandItem[] = useMemo(() => {
+    const items = (projectFiles ?? []).slice(0, 1000).map((rel, i) => ({
+      id: `file-${i}`,
+      title: rel,
+      icon: fileIcon,
+      action: () => openProjectFile(rel),
+    }));
+    return items;
+  }, [projectFiles, root]);
+
+  const recentItems: CommandItem[] = useMemo(
+    () =>
+      recent.map((r, i) => ({
+        id: `recent-${i}`,
+        title: r.path,
+        icon: fileIcon,
+        action: () => api.openFile(r.path, false),
+      })),
+    [recent]
   );
 
   const sessionItems: CommandItem[] = sessions.map((s) => ({
@@ -97,9 +153,10 @@ export default function CommandPalette({
   }));
 
   const filtered = useMemo(() => {
-    const all = [...commands, ...sessionItems];
-    return fuzzyFilter(all, query, (c) => c.title);
-  }, [commands, sessionItems, query]);
+    const all = [...recentItems, ...fileItems, ...commands, ...sessionItems];
+    const matched = fuzzyFilter(all, query, (c) => c.title);
+    return matched.slice(0, 60);
+  }, [recentItems, fileItems, commands, sessionItems, query]);
 
   useEffect(() => setSelection(0), [query]);
 
@@ -132,7 +189,7 @@ export default function CommandPalette({
         className="mt-20 w-[560px] max-w-[90vw] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-4 h-11 flex items-center gap-2">
+        <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2">
           <span className="text-muster-muted flex items-center">
             <IconSearch size={15} />
           </span>
@@ -142,7 +199,8 @@ export default function CommandPalette({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKey}
             placeholder={t("commandPalette.searchPlaceholder")}
-            className="flex-1 bg-transparent outline-none text-[15px]"
+            spellCheck={false}
+            className="flex-1 bg-transparent outline-none text-[15px] text-muster-fg placeholder:text-muster-muted/60"
           />
         </div>
         <div className="border-t border-white/[0.08]" />
@@ -162,7 +220,7 @@ export default function CommandPalette({
                 i === selection ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted"
               }`}
             >
-              <span className={`ui-fs-sm ${i === selection ? "text-muster-accent" : "text-muster-muted"}`}>
+              <span className={`ui-fs-sm flex-shrink-0 ${i === selection ? "text-muster-accent" : "text-muster-muted"}`}>
                 {cmd.icon}
               </span>
               <span className="flex-1 truncate">{cmd.title}</span>

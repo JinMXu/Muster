@@ -11,13 +11,16 @@
 - **分屏布局**：niri 风格的列 × 行网格布局，支持拖拽 pane 到任意边缘重排、跨标签页拖拽（拖到标签头即移入目标标签）、焦点跟随、单 pane 最大化（zoom）
 - **终端**：基于 ConPTY 的完整终端仿真（xterm.js），PowerShell 深度集成--每条命令执行后自动上报当前目录，应用可实时跟踪会话 cwd；支持终端响铃通知
 - **Worktree 追踪**：终端 `cd` 进入 git worktree 后，Files/Git/Info 面板即时重新锚定到 worktree 根目录（事件驱动，无轮询延迟），信息面板显示 worktree 标记
-- **文件编辑器**：Monaco 编辑器，语法高亮、查找替换、自动换行可选，编辑器主题跟随全局主题实时切换
-- **差异查看器**：Monaco Diff 视图，内联/分栏对比，主题跟随全局
+- **文件编辑器**：Monaco 编辑器，语法高亮、查找替换、自动换行可选，主题跟随全局；顶部工具条提供内联 diff vs HEAD（Δ，编辑时实时更新）、git blame、文件历史；终端报错行 `path:line[:col]` 点击直达编辑器对应行
+- **差异查看器**：Monaco Diff 视图，内联/分栏对比，主题跟随全局；支持任意两提交之间的对比（文件历史里点击提交 = 对比父提交，设置基准后可对比任意两版本）
 - **文件树**：懒加载目录树，支持内联重命名、新建文件/文件夹；拖拽文件到终端可直接粘贴路径
-- **Git 面板**：porcelain v2 状态、暂存/取消暂存、提交（`Ctrl+Enter` 快捷提交）、push/pull/fetch、分支管理与切换、stash、合并冲突检测、最近提交列表
+- **Git 面板**：porcelain v2 状态、暂存/取消暂存、提交（`Ctrl+Enter` 快捷提交）、push/pull/fetch、分支管理与切换、stash、合并冲突检测、最近提交列表；每行右键「文件历史」；**检查点**——锚定一个 HEAD 快照，持续列出其后的全部变更（含 agent 的新提交），逐个打开对比 diff
+- **项目搜索**：`Ctrl+Shift+F` 全项目全文搜索，gitignore/`.ignore` 感知（自动跳过 `node_modules`、`target`），结果按文件分组、命中高亮，Enter 直达文件行
+- **终端搜索**：终端焦点下 `Ctrl+F` 弹出滚动回滚搜索条，边输边增量高亮，Enter/Shift+Enter 循环跳转
+- **重开标签**：`Ctrl+Shift+T` 重开最近关闭的标签（文件按路径重开、diff 按提交重建、终端新建会话）
 - **信息面板**：显示 shell PID、工作目录、项目根路径、Git 分支/远程信息，以及项目相关的进程和监听端口列表
-- **用量面板**：只读汇总本机 AI 编程工具（Claude Code / Codex / OpenCode）的 token 用量与会话统计
-- **命令面板**：`Ctrl+P` 模糊搜索所有命令和已打开的会话
+- **用量面板**：只读汇总本机 AI 编程工具（Claude Code / Codex / OpenCode）的 token 用量与会话统计，附按日堆叠柱状图（按工具着色，悬停查看精确数值）
+- **命令面板**：`Ctrl+P` 模糊搜索项目文件（gitignore 感知，最多 2000 条）、最近打开文件、所有命令和已打开的会话
 - **标签切换器**：`Ctrl+Tab` 弹出覆盖层循环切换标签，带会话/文件路径预览
 - **主题**：内置 GitHub 风格默认主题 + 完整 Ghostty 主题目录（数百款），深色/浅色独立设置，支持跟随系统；Monaco 编辑器与差异视图同步跟随
 - **国际化**：中文 / English 界面，可跟随系统语言
@@ -26,7 +29,6 @@
 - **Agent CLI 桥**：`muster` 命令支持 agent 驱动的工作流——`muster split` 开分屏、`muster send <id> <text>` 发送按键、`muster capture <id>` 读取终端输出（后端维护 400 行 ANSI 剥离的滚动回滚）、`muster run -- <cmd>` 在新标签真实 PTY 中执行并等待完成返回退出码、`muster procs <id>` 查看进程树与监听端口、`muster agents` 查看各会话 agent 状态；自带 `skills/muster/SKILL.md` 供 AI 代理使用
 - **CLI 工具**：可将 Muster 添加到系统 PATH，支持从任意终端使用 `muster <path>` 直接打开项目，或 `muster --cmd "vim foo.js" <path>` 在终端会话中执行命令
 - **剪贴板安全保护**：当粘贴内容疑似可执行命令（多行命令、`sudo` / `curl` / `rm -rf` 等）时弹窗确认，防止意外执行恶意指令
-- **自动更新**：内置更新检查器，支持从 GitHub Release 频道获取最新版本与一键安装
 - **无障碍**：跟随系统 `prefers-reduced-motion` 偏好，启用时全局禁用动画与过渡效果
 - **资源管理器集成**：一键安装「在 Muster 中打开」右键菜单（写入 HKCU，无需管理员权限）
 
@@ -40,9 +42,8 @@
 | PTY | 手动 ConPTY 驱动（bundled OpenConsole.exe） |
 | 编辑器 / Diff | Monaco Editor |
 | Git | git2（libgit2，含 SSH） |
-| 自动更新 | tauri-plugin-updater（NSIS passive 模式） |
 | 剪贴板安全 | 前端粘贴拦截 + 危险内容检测 |
-| 其他 | notify（文件监听）、sysinfo（进程/端口/agent 检测）、rusqlite（用量统计，只读）、toml（配置）、winreg（PATH 注册表）、本地 TCP JSON IPC（`muster` CLI 桥） |
+| 其他 | notify（文件监听）、sysinfo（进程/端口/agent 检测）、ignore（gitignore 感知的项目搜索）、rusqlite（用量统计，只读）、toml（配置）、winreg（PATH 注册表）、本地 TCP JSON IPC（`muster` CLI 桥） |
 
 ## 目录结构
 
@@ -184,6 +185,7 @@ muster run -- cargo test      # 新标签真实 PTY 运行命令，等待完成�
 |---|---|
 | `Ctrl+T` | 新建终端标签 |
 | `Ctrl+W` | 关闭当前标签 |
+| `Ctrl+Shift+T` | 重开最近关闭的标签 |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 标签切换器（循环切换） |
 | `Ctrl+Shift+[` / `Ctrl+Shift+]` | 上一个 / 下一个标签 |
 | `Ctrl+D` | 向右分屏 |
@@ -197,10 +199,12 @@ muster run -- cargo test      # 新标签真实 PTY 运行命令，等待完成�
 
 | 快捷键 | 功能 |
 |---|---|
-| `Ctrl+P` | 命令面板 |
+| `Ctrl+P` | 命令面板（项目文件 / 最近文件 / 命令 / 会话） |
 | `Ctrl+B` | 切换左侧项目栏 |
 | `Ctrl+Shift+B` | 切换右侧边栏 |
 | `Ctrl+Shift+E` | 文件树面板 |
+| `Ctrl+Shift+F` | 项目全文搜索 |
+| `Ctrl+F` | 终端滚动回滚搜索（终端焦点下） |
 | `Ctrl+Shift+G` | Git 面板 |
 | `Ctrl+Shift+I` | 信息面板 |
 | `Ctrl+Shift+U` | 用量面板 |

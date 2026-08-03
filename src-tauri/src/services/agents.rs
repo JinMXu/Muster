@@ -99,8 +99,14 @@ const MARKERS: &[(AgentKind, &[&str])] = &[
 /// command line covers node/python launchers that run under a generic
 /// runtime (`node.exe` with the CLI path as an argument).
 pub fn detect_agent(pids: &[u32]) -> Option<AgentKind> {
+    detect_agent_with_sys(&crate::services::procs::refresh_and_snapshot(), pids)
+}
+
+/// Same as `detect_agent` but reads a caller-provided `System` cache. Use
+/// this inside a batch that already holds a `refresh_and_snapshot()` guard.
+pub fn detect_agent_with_sys(sys: &sysinfo::System, pids: &[u32]) -> Option<AgentKind> {
     for &pid in pids {
-        if let Some((name, cmd)) = crate::services::procs::process_cmdline(pid) {
+        if let Some((name, cmd)) = crate::services::procs::process_cmdline_with_sys(sys, pid) {
             if let Some(kind) = detect_in(&name, &cmd) {
                 return Some(kind);
             }
@@ -193,6 +199,14 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
     // another IPC round-trip.
     let mut meta: HashMap<Uuid, (String, String)> = HashMap::new();
 
+    // One full-system refresh per poll, shared across every session below.
+    // Refreshing inside `session_pids` per-session made the poll cost ~N× of
+    // this (and serialised under the sysinfo lock); the `with_sys` callers
+    // read the same cache, so per-session pid detection is now cache-only.
+    // The guard is held for the whole loop - `_with_sys` variants avoid
+    // re-locking (parking_lot Mutex is not reentrant).
+    let procs_cache = crate::services::procs::refresh_and_snapshot();
+
     for (label, state) in shared.all() {
         let g = state.lock();
         for sid in g.sessions.keys() {
@@ -218,8 +232,12 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
                     continue;
                 }
                 let shell_pid = session.shell_pid().unwrap_or(0);
-                let pids = crate::services::procs::session_pids(sid, shell_pid);
-                if let Some(agent) = detect_agent(&pids) {
+                let pids = crate::services::procs::session_pids_with_sys(
+                    &procs_cache,
+                    sid,
+                    shell_pid,
+                );
+                if let Some(agent) = detect_agent_with_sys(&procs_cache, &pids) {
                     // Agent alive this poll → working / waiting.
                     let agent_state = if session.idle_for() >= WAITING_AFTER {
                         AgentState::Waiting

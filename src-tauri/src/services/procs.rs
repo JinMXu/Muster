@@ -55,23 +55,53 @@ pub fn quiet_command(program: &str) -> std::process::Command {
 /// above its minimum CPU update interval).
 static SYSTEM: Lazy<Mutex<System>> = Lazy::new(|| Mutex::new(System::new()));
 
+/// One-shot refresh of the shared sysinfo cache. Call once per poll cycle
+/// (or per command invocation) and then use the `_with_sys` variants; CPU%
+/// is measured against the previous call of this, so the best cadence is
+/// "once per ~3s poll", not once per session. Holding the SYSTEM lock while
+/// iterating ~thousands of processes costs ~10–40ms; calling it N times per
+/// poll (once per agent session) was the bottleneck that prompted this split.
+pub fn refresh_global() {
+    let mut sys = SYSTEM.lock();
+    sys.refresh_processes_specifics(ProcessRefreshKind::everything());
+}
+
+/// Lock the shared `System` cache, refresh it, and return the guard. One
+/// acquisition serves the whole batch - pass `&*guard` to the `_with_sys`
+/// variants so they don't re-lock (parking_lot's Mutex is NOT reentrant,
+/// so a guard held here plus a `SYSTEM.lock()` inside a callee would deadlock).
+pub fn refresh_and_snapshot() -> parking_lot::MutexGuard<'static, System> {
+    let mut sys = SYSTEM.lock();
+    sys.refresh_processes_specifics(ProcessRefreshKind::everything());
+    sys
+}
+
 /// The pids belonging to a session: every process in its Windows Job Object
 /// when one is registered (see `jobs` below), otherwise the shell plus its
 /// ppid descendants as a fallback. The shell pid comes first when present,
 /// so the panel can keep it as the top row.
 ///
-/// Why jobs: MSYS2/Git-Bash (used by tools like opencode) re-parents children
+/// Why jobs: MSMS2/Git-Bash (used by tools like opencode) re-parents children
 /// through a short-lived stub, so grandchildren's ppid chains never reach the
 /// shell and the BFS silently loses them (e.g. `npm run dev`'s node.exe).
 /// Job membership, by contrast, is inherited at process creation regardless
 /// of the ppid chain.
+///
+/// This convenience entry refreshes the shared cache first, so each call is
+/// self-contained; for batch callers (the agent poller iterating several
+/// sessions), call `refresh_global()` once and use `session_pids_with_sys`
+/// to avoid an N-times-per-poll refresh.
 pub fn session_pids(session_id: Uuid, fallback_shell_pid: u32) -> Vec<u32> {
-    // One refresh serves both the alive-filter and the BFS; process_infos
-    // then reads this same cache (like process_names for PORTS), so per-pid
-    // CPU% is measured against the previous poll, not a same-instant refresh.
-    let mut sys = SYSTEM.lock();
-    sys.refresh_processes_specifics(ProcessRefreshKind::everything());
+    refresh_global();
+    let sys = SYSTEM.lock();
+    session_pids_with_sys(&sys, session_id, fallback_shell_pid)
+}
 
+/// Same as `session_pids` but reads an already-refreshed `System` cache
+/// instead of refreshing one itself. The intended call shape for a batch
+/// poller: `refresh_global()` once, then `session_pids_with_sys` for each
+/// session — saves N−1 full-system refreshes per poll.
+pub fn session_pids_with_sys(sys: &System, session_id: Uuid, fallback_shell_pid: u32) -> Vec<u32> {
     if let Some(mut pids) = jobs::query_pids(session_id) {
         // Exited processes can linger in the job's id list briefly; drop them.
         pids.retain(|&pid| sys.process(Pid::from_u32(pid)).is_some());
@@ -83,7 +113,7 @@ pub fn session_pids(session_id: Uuid, fallback_shell_pid: u32) -> Vec<u32> {
             return pids;
         }
     }
-    descendant_pids(&sys, fallback_shell_pid)
+    descendant_pids(sys, fallback_shell_pid)
 }
 
 /// Shape pid rows for the PROCESSES section (name/cpu/mem/exe), preserving
@@ -117,6 +147,14 @@ pub fn process_infos(pids: &[u32]) -> Vec<ProcessInfo> {
 /// just `node.exe`.
 pub fn process_cmdline(pid: u32) -> Option<(String, String)> {
     let sys = SYSTEM.lock();
+    process_cmdline_with_sys(&sys, pid)
+}
+
+/// Same as `process_cmdline` but reads a caller-provided `System` cache.
+/// Use this inside a batch that already holds a `refresh_and_snapshot()`
+/// guard - `process_cmdline` would re-lock the `SYSTEM` mutex and deadlock
+/// against the held guard (parking_lot Mutex is not reentrant).
+pub fn process_cmdline_with_sys(sys: &System, pid: u32) -> Option<(String, String)> {
     let p = sys.process(Pid::from_u32(pid))?;
     Some((p.name().to_string(), p.cmd().join(" ")))
 }

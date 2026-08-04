@@ -261,3 +261,39 @@ export function IconTerminal(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconKeyboard(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01" />
+      <path d="M10 10h.01" />
+      <path d="M14 10h.01" />
+      <path d="M18 10h.01" />
+      <path d="M6 14h.01" />
+      <path d="M18 14h.01" />
+      <path d="M10 14h4" />
+    </Svg>
+  );
+}
+
+export function IconType(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7V4h16v3" />
+      <path d="M9 20h6" />
+      <path d="M12 4v16" />
+    </Svg>
+  );
+}
+
+export function IconPlug(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8H6v4a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4V8Z" />
+    </Svg>
+  );
+}

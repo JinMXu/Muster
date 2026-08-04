@@ -65,6 +65,10 @@ const en = {
 
   settings: {
     title: "Settings",
+    tabGeneral: "General",
+    tabFont: "Font & Editor",
+    tabShortcuts: "Shortcuts",
+    tabIntegrations: "Integrations",
     appearance: "Appearance",
     themeSystem: "system",
     themeLight: "light",

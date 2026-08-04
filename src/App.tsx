@@ -10,8 +10,7 @@ import RightSidebar from "./components/RightSidebar";
 import ResizeHandle from "./components/ResizeHandle";
 import CommandPalette from "./components/CommandPalette";
 import TabSwitcher, { type SwitcherTab } from "./components/TabSwitcher";
-import Settings from "./components/Settings";
-import ShortcutsHelp from "./components/ShortcutsHelp";
+import Settings, { type SettingsTab } from "./components/Settings";
 import ContextMenu from "./components/ContextMenu";
 import UsagePanel from "./components/UsagePanel";
 import SearchPanel from "./components/SearchPanel";
@@ -35,7 +34,7 @@ export default function App() {
   const [state, setStateRaw] = useTauriEvent<AppStateView | null>("state-changed", null);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [showUsage, setShowUsage] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [agentBarOpen, setAgentBarOpen] = useState(false);
@@ -332,7 +331,7 @@ export default function App() {
       "ctrl+t": newSession,
       "ctrl+w": closeTab,
       "ctrl+p": () => setShowPalette(true),
-      "ctrl+/": () => setShowShortcuts(true),
+      "ctrl+/": () => { setSettingsTab("shortcuts"); setShowSettings(true); },
       "ctrl+b": () => api.toggleLeftSidebar(),
       "ctrl+shift+b": () => api.toggleRightPanel(),
       "ctrl+shift+e": () => api.togglePanel("files"),
@@ -367,7 +366,7 @@ export default function App() {
       "ctrl+s": saveFile,
       "ctrl+k": clearTerminal,
       "ctrl+shift+t": reopenClosedTab,
-      "ctrl+,": () => setShowSettings(true),
+      "ctrl+,": () => { setSettingsTab("general"); setShowSettings(true); },
       "ctrl+shift+u": () => setShowUsage(true),
       "ctrl+shift+a": () => setAgentBarOpen((v) => !v),
     };
@@ -648,7 +647,7 @@ export default function App() {
               onMove={moveProject}
               onRename={(id, name) => api.renameProject(id, name)}
               onProjectMenu={projectMenu}
-              onOpenSettings={() => setShowSettings(true)}
+              onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
               width={leftPanel.width}
               agentBarOpen={agentBarOpen}
               onAgentBarToggle={() => setAgentBarOpen((v) => !v)}
@@ -694,8 +693,8 @@ export default function App() {
           onAskNewProject={newProjectWithDialog}
           onClearTerminal={clearTerminal}
           onCloseProject={closeSelectedProject}
-          onOpenSettings={() => setShowSettings(true)}
-          onOpenShortcuts={() => setShowShortcuts(true)}
+          onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
+          onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
           onOpenUsage={() => setShowUsage(true)}
           onOpenSearch={() => setShowSearch(true)}
           onReopenClosed={reopenClosedTab}
@@ -718,11 +717,11 @@ export default function App() {
       )}
       {showSettings && (
         <Settings
+          initialTab={settingsTab}
           onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }}
           onOpenUsage={() => { setShowSettings(false); setShowUsage(true); }}
         />
       )}
-      {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showUsage && <UsagePanel onClose={() => setShowUsage(false)} />}
       {showSearch && <SearchPanel state={stateView} onClose={() => setShowSearch(false)} />}
       <ContextMenu />

@@ -65,6 +65,10 @@ const zh = {
 
   settings: {
     title: "设置",
+    tabGeneral: "通用",
+    tabFont: "字体与编辑器",
+    tabShortcuts: "快捷键",
+    tabIntegrations: "集成",
     appearance: "外观",
     themeSystem: "跟随系统",
     themeLight: "浅色",

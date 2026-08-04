@@ -39,6 +39,11 @@ pub fn save_settings(state: State<SharedState>, settings: Settings) -> Result<()
 pub fn available_themes() -> Vec<String> { crate::theme::catalog::available() }
 
 #[tauri::command]
+pub fn available_themes_with_info() -> Vec<crate::theme::ThemeInfo> {
+    crate::theme::catalog::available_with_info()
+}
+
+#[tauri::command]
 pub fn theme_colors(name: String, dark: bool) -> crate::theme::ThemeColors {
     crate::theme::ThemeColors::resolve(&name, dark)
 }

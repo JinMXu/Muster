@@ -297,3 +297,11 @@ export function IconPlug(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconCheck(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </Svg>
+  );
+}

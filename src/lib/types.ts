@@ -229,6 +229,13 @@ export interface ThemeColors {
   palette: string[];
 }
 
+export interface ThemeInfo {
+  name: string;
+  is_dark: boolean;
+  background: string;
+  accent: string;
+}
+
 /// Which CLI tool a usage record came from (mirrors Rust ToolKind).
 export type ToolKind = "opencode" | "claude_code" | "codex" | "kimi_code";
 

@@ -104,6 +104,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             state::default_settings,
             state::save_settings,
             state::available_themes,
+            state::available_themes_with_info,
             state::theme_colors,
             state::session_info,
             state::list_all_sessions,

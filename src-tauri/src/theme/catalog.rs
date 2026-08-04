@@ -148,18 +148,35 @@ pub fn default_for(dark: bool) -> ThemeColors {
     if dark { default_dark() } else { default_light() }
 }
 
+const BUILT_IN_NAMES: [&str; 6] = [
+    "Default Dark", "Default Light", "Dracula", "Tokyo Night", "Gruvbox Dark", "Monokai Pro",
+];
+
+fn built_in_themes() -> Vec<ThemeColors> {
+    vec![default_dark(), default_light(), dracula(), tokyo_night(), gruvbox_dark(), monokai_pro()]
+}
+
 pub fn available() -> Vec<String> {
-    let built_in = ["Default Dark", "Default Light", "Dracula", "Tokyo Night", "Gruvbox Dark", "Monokai Pro"];
-    // Built-ins first (the app's defaults at top), then the full Ghostty catalog,
-    // skipping any names that duplicate a built-in (matched case-insensitively
-    // so the built-in entry always wins in `by_name`).
-    let mut names: Vec<String> = built_in.iter().map(|s| s.to_string()).collect();
+    let mut names: Vec<String> = BUILT_IN_NAMES.iter().map(|s| s.to_string()).collect();
     names.extend(
         super::catalog_ghostty::THEMES
             .iter()
             .map(|t| t.name)
-            .filter(|n| !built_in.iter().any(|b| b.eq_ignore_ascii_case(n)))
+            .filter(|n| !BUILT_IN_NAMES.iter().any(|b| b.eq_ignore_ascii_case(n)))
             .map(str::to_owned),
     );
     names
+}
+
+/// All themes with dark/light metadata + swatch colors, built-ins first.
+pub fn available_with_info() -> Vec<super::ThemeInfo> {
+    let built_ins = built_in_themes();
+    let mut result: Vec<super::ThemeInfo> = built_ins.iter().map(|t| t.to_info()).collect();
+    result.extend(
+        super::catalog_ghostty::THEMES
+            .iter()
+            .filter(|t| !BUILT_IN_NAMES.iter().any(|b| b.eq_ignore_ascii_case(t.name)))
+            .map(|t| t.to_colors().to_info()),
+    );
+    result
 }

@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/invoke";
 import { formatTokens } from "../lib/format";
-import type { Settings as SettingsType, UsageSummary } from "../lib/types";
+import type { Settings as SettingsType, ThemeInfo, UsageSummary } from "../lib/types";
 import { useT, type TKey } from "../lib/i18n/context";
 import {
   IconChartBar,
+  IconCheck,
+  IconChevronDown,
   IconChevronRight,
   IconSettings,
   IconKeyboard,
@@ -77,13 +79,13 @@ export default function Settings({
   initialTab?: SettingsTab;
 }) {
   const [s, setS] = useState<SettingsType | null>(null);
-  const [themes, setThemes] = useState<string[]>([]);
+  const [themes, setThemes] = useState<ThemeInfo[]>([]);
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const { t } = useT();
 
   useEffect(() => {
     api.settings().then(setS);
-    api.availableThemes().then(setThemes);
+    api.availableThemesWithInfo().then(setThemes);
   }, []);
 
   useEffect(() => {
@@ -261,6 +263,119 @@ function Toggle({
   );
 }
 
+function Swatch({ background, accent }: { background: string; accent: string }) {
+  return (
+    <span
+      className="w-4 h-4 rounded-full flex-shrink-0 border-2"
+      style={{
+        backgroundColor: `#${background}`,
+        borderColor: `#${accent}`,
+      }}
+    />
+  );
+}
+
+const BUILT_IN_THEMES = new Set([
+  "Default Dark", "Default Light", "Dracula", "Tokyo Night", "Gruvbox Dark", "Monokai Pro",
+]);
+
+function ThemePicker({
+  themes,
+  dark,
+  value,
+  onChange,
+}: {
+  themes: ThemeInfo[];
+  dark: boolean;
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const filtered = themes.filter(
+    (th) =>
+      th.is_dark === dark &&
+      th.name.toLowerCase().includes(query.toLowerCase())
+  );
+  const selected = themes.find((th) => th.name === value);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-base outline-none border border-transparent hover:border-white/[0.12] transition-colors"
+      >
+        {selected && <Swatch background={selected.background} accent={selected.accent} />}
+        <span className="flex-1 text-left truncate">{value}</span>
+        <span className={`text-muster-muted transition-transform duration-muster ease-muster ${open ? "rotate-180" : ""}`}>
+          <IconChevronDown size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-muster-bg border border-white/[0.1] rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+          <div className="p-1.5 border-b border-white/[0.06]">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search..."
+              className="w-full bg-white/[0.05] px-2 py-1 rounded ui-fs-sm outline-none"
+            />
+          </div>
+          <div className="max-h-[220px] overflow-y-auto py-1">
+            {filtered.map((th, i) => {
+              const showSeparator =
+                i > 0 &&
+                BUILT_IN_THEMES.has(th.name) &&
+                !BUILT_IN_THEMES.has(filtered[i - 1].name);
+              return (
+                <div key={th.name}>
+                  {showSeparator && (
+                    <div className="my-1 border-t border-white/[0.06]" />
+                  )}
+                  <button
+                    onClick={() => {
+                      onChange(th.name);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 ui-fs-sm text-left hover:bg-white/[0.06] transition-colors ${
+                      th.name === value ? "text-muster-accent" : "text-muster-fg"
+                    }`}
+                  >
+                    <Swatch background={th.background} accent={th.accent} />
+                    <span className="flex-1 truncate">{th.name}</span>
+                    {th.name === value && <IconCheck size={12} />}
+                  </button>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div className="px-2.5 py-2 ui-fs-sm text-muster-muted">
+                No themes found
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GeneralTab({
   s,
   update,
@@ -269,7 +384,7 @@ function GeneralTab({
 }: {
   s: SettingsType;
   update: (patch: Partial<SettingsType>) => void;
-  themes: string[];
+  themes: ThemeInfo[];
   t: ReturnType<typeof useT>["t"];
 }) {
   const appearanceOptions: {
@@ -316,31 +431,21 @@ function GeneralTab({
       </Field>
 
       <Field label={t("settings.darkTheme")}>
-        <select
+        <ThemePicker
+          themes={themes}
+          dark
           value={s.theme_dark}
-          onChange={(e) => update({ theme_dark: e.target.value })}
-          className="w-full bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-base outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
-        >
-          {themes.map((th) => (
-            <option key={th} value={th}>
-              {th}
-            </option>
-          ))}
-        </select>
+          onChange={(name) => update({ theme_dark: name })}
+        />
       </Field>
 
       <Field label={t("settings.lightTheme")}>
-        <select
+        <ThemePicker
+          themes={themes}
+          dark={false}
           value={s.theme_light}
-          onChange={(e) => update({ theme_light: e.target.value })}
-          className="w-full bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-base outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
-        >
-          {themes.map((th) => (
-            <option key={th} value={th}>
-              {th}
-            </option>
-          ))}
-        </select>
+          onChange={(name) => update({ theme_light: name })}
+        />
       </Field>
     </div>
   );

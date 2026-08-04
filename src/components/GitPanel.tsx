@@ -43,6 +43,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   const [discardTarget, setDiscardTarget] = useState<DiscardTarget | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [loadingLabel, setLoadingLabel] = useState<string | null>(null);
   // File history overlay target: the row's repo + repo-relative path.
   const [history, setHistory] = useState<{ repoRoot: string; path: string } | null>(null);
   // Change checkpoint: the HEAD oid captured when the user pressed "Set", so
@@ -69,6 +70,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   /// entries auto-expand their transcript). Keeps the last 3 entries.
   const runOp = (label: string, cliHint: string, promise: Promise<string>) => {
     const id = ++opSeq.current;
+    setLoadingLabel(label);
     setOps((prev) =>
       [{ id, label, status: "running" as const, output: `$ ${cliHint}\n`, expanded: false }, ...prev].slice(0, 3)
     );
@@ -83,7 +85,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             o.id === id ? { ...o, status: "failed" as const, output: o.output + String(err), expanded: true } : o
           )
         )
-    );
+    ).finally(() => setLoadingLabel((prev) => (prev === label ? null : prev)));
   };
 
   const banner = (
@@ -485,6 +487,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
               runOp(t("git.fetch"), t("git.fetchCli"), api.git.fetch(info.repo_root).then(() => t("git.fetched")))
             }
             disabled={info.remotes.length === 0}
+            loading={loadingLabel === t("git.fetch")}
           >
             {t("git.fetch")}
           </SmallButton>
@@ -493,6 +496,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
               runOp(t("git.pull"), t("git.pullCli"), api.git.pull(info.repo_root).then(() => t("git.pulled")))
             }
             disabled={!info.has_upstream}
+            loading={loadingLabel === t("git.pull")}
           >
             {t("git.pull")}
           </SmallButton>
@@ -505,6 +509,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
                 api.git.push(info.repo_root, remote).then(() => t("git.pushed"))
               );
             }}
+            loading={loadingLabel === t("git.push")}
           >
             {t("git.push")}
           </SmallButton>
@@ -512,6 +517,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             onClick={() =>
               runOp(t("git.stash"), t("git.stashCli"), api.git.stashAll(info.repo_root).then(() => t("git.stashed")))
             }
+            loading={loadingLabel === t("git.stash")}
           >
             {t("git.stash")}
           </SmallButton>
@@ -520,6 +526,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
               runOp(t("git.pop"), t("git.popCli"), api.git.stashPop(info.repo_root).then(() => t("git.popped")))
             }
             disabled={info.stash_count === 0}
+            loading={loadingLabel === t("git.pop")}
           >
             {t("git.pop")}
           </SmallButton>
@@ -784,18 +791,29 @@ function SmallButton({
   children,
   onClick,
   disabled,
+  loading,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
-      className="flex-1 px-1.5 py-1 rounded bg-white/[0.05] ui-fs-xs enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
+      disabled={disabled || loading}
+      className={`flex-1 px-1.5 py-1 rounded ui-fs-xs transition-all duration-muster ease-muster ${
+        loading
+          ? "bg-white/[0.08] text-muster-fg opacity-60"
+          : "bg-white/[0.05] enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97]"
+      }`}
     >
-      {children}
+      <span className={loading ? "inline-flex items-center gap-1" : ""}>
+        {loading && (
+          <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+        )}
+        {children}
+      </span>
     </button>
   );
 }

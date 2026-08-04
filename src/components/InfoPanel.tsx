@@ -22,7 +22,12 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const [ports, setPorts] = useState<ListenPort[]>([]);
   // Bumped by the header refresh button to re-run every poll below at once.
   const [nonce, setNonce] = useState(0);
-  const refresh = () => setNonce((n) => n + 1);
+  const [spinning, setSpinning] = useState(false);
+  const refresh = () => {
+    setSpinning(true);
+    setNonce((n) => n + 1);
+    setTimeout(() => setSpinning(false), 600);
+  };
 
   const { t } = useT();
   const shellPid = projSession && !projSession.has_exited ? projSession.pid : null;
@@ -124,7 +129,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
           title={t("info.refresh")}
           className="text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded p-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
         >
-          <IconRefresh size={11} />
+          <IconRefresh size={11} className={spinning ? "animate-spin" : ""} />
         </button>
       </div>
       <Row label={t("info.project")} value={project?.name ?? "—"} />

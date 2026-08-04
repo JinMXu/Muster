@@ -98,9 +98,15 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
-    await api.usage.refresh();
-    await load();
+    setRefreshing(true);
+    try {
+      await api.usage.refresh();
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const filteredSessions = sessions
@@ -153,7 +159,7 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
                 className="px-2 py-1 rounded bg-white/[0.05] ui-fs-sm text-muster-muted hover:bg-muster-hover-btn transition-colors"
                 title={t("usage.refresh")}
               >
-                &#8635; {t("usage.refresh")}
+                <span className={`inline-block ${refreshing ? "animate-spin" : ""}`}>&#8635;</span> {t("usage.refresh")}
               </button>
             </div>
           </div>

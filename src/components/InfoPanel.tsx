@@ -3,20 +3,24 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AppStateView, GitStatusInfo, ListenPort, ProcessInfo, SessionInfo } from "../lib/types";
 import { api } from "../lib/invoke";
 import { useProjectCwd } from "../lib/useProjectCwd";
+import { reloadSettings, useSettings } from "../lib/settingsStore";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
-import { IconArrowUpRight, IconRefresh, IconX } from "./icons";
+import { IconArrowUpRight, IconGlobe, IconRefresh, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 
 /// Info panel: details about the focused session, selected project, and the
 /// repository it lives in (shell/PID, cwd, project dir, git branch/remote),
 /// plus the session's process tree (PROCESSES) and listening TCP ports
-/// (PORTS — session processes plus any process working in the project
-/// directory, so externally started dev servers still show).
+/// (PORTS — the session's own processes; with the "project ports" setting
+/// on, also any process working in the project directory, so externally
+/// started dev servers still show).
 export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
   const projSession = sessions.find((s) => s.project_id === project?.id) ?? null;
   const { root, cwd } = useProjectCwd(state);
+  const settings = useSettings();
+  const projectPorts = settings?.project_ports ?? false;
   const [git, setGit] = useState<GitStatusInfo | null>(null);
   const [procs, setProcs] = useState<ProcessInfo[]>([]);
   const [ports, setPorts] = useState<ListenPort[]>([]);
@@ -60,7 +64,8 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
 
   // PROCESSES + PORTS: poll the session's tracked processes (Job Object
   // members, falling back to the shell's descendant tree), then the listening
-  // ports of those pids plus any process belonging to the project directory.
+  // ports of those pids. With the "project ports" setting on, ports of any
+  // process working in the project directory are included too.
   // Stale guard: this effect is keyed on the session id and shell pid, so if
   // either changes while a request is in flight the effect is torn down
   // (alive=false) and the late result dropped.
@@ -77,7 +82,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       if (!alive) return;
       setProcs(list);
       const pids = list.map((p) => p.pid);
-      const ps = await api.sessionPorts(pids, root).catch(() => [] as ListenPort[]);
+      const ps = await api.sessionPorts(pids, projectPorts ? root : null).catch(() => [] as ListenPort[]);
       if (!alive) return;
       setPorts(ps);
     };
@@ -87,7 +92,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       alive = false;
       clearInterval(i);
     };
-  }, [shellPid, projSession?.id, root, nonce]);
+  }, [shellPid, projSession?.id, root, projectPorts, nonce]);
 
   /// Kill and re-poll after a beat so the OS has time to reap the process.
   const kill = (pid: number) => {
@@ -118,6 +123,16 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       { label: t("info.killProcess"), danger: true, action: () => kill(pt.pid) },
     ];
     openMenu({ x: e.clientX, y: e.clientY, items });
+  };
+
+  /// Flip the "project ports" setting and persist it; reloadSettings notifies
+  /// the store so this panel (and the Settings modal) pick up the new value.
+  const toggleProjectPorts = () => {
+    if (!settings) return;
+    api
+      .saveSettings({ ...settings, project_ports: !settings.project_ports })
+      .then(reloadSettings)
+      .catch(() => {});
   };
 
   return (
@@ -183,7 +198,23 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
               ))
             )}
           </Section>
-          <Section label={t("info.ports")}>
+          <Section
+            label={t("info.ports")}
+            action={
+              <button
+                onClick={toggleProjectPorts}
+                title={t("info.includeProjectPorts")}
+                aria-pressed={projectPorts}
+                className={`rounded p-0.5 active:scale-[.97] transition-colors duration-muster ease-muster ${
+                  projectPorts
+                    ? "text-muster-accent"
+                    : "text-muster-muted/60 hover:text-muster-fg hover:bg-muster-hover-btn"
+                }`}
+              >
+                <IconGlobe size={11} />
+              </button>
+            }
+          >
             {ports.length === 0 ? (
               <div className="ui-fs-sm text-muster-muted/70 px-1">{t("info.noListeningPorts")}</div>
             ) : (
@@ -222,10 +253,21 @@ function Row({ label, value, hint }: { label: string; value: string; hint?: stri
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({
+  label,
+  action,
+  children,
+}: {
+  label: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div>
-      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{label}</div>
+      <div className="flex items-center justify-between">
+        <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{label}</div>
+        {action}
+      </div>
       <div className="mt-1 space-y-0.5">{children}</div>
     </div>
   );

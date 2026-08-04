@@ -370,14 +370,14 @@ pub fn kill(pid: u32) -> Result<(), String> {
 }
 
 /// Listening TCP ports via `netstat -ano -p tcp` (available on every Windows
-/// version), owned by either:
-/// - one of `pids` (the session's processes), or
-/// - a process belonging to `project_root` — its working directory is the
-///   root or below, or its command line references the root — so a dev
-///   server started outside the session still shows up. The directory
-///   fallback is skipped for overly broad roots (home directory, drive
-///   roots): there it matches unrelated system processes, which is noise
-///   rather than signal.
+/// version), owned by one of `pids` (the session's processes). When
+/// `project_root` is Some (the "project ports" setting), listeners owned by
+/// any process belonging to that directory — its working directory is the
+/// root or below, or its command line references the root — are included too,
+/// so a dev server started outside the session still shows up. The directory
+/// fallback is skipped for overly broad roots (home directory, drive roots):
+/// there it matches unrelated system processes, which is noise rather than
+/// signal.
 ///
 /// Parse failures are tolerated: rows that don't parse are skipped and
 /// whatever parsed is returned.
@@ -748,9 +748,15 @@ mod tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
 
-        // End-to-end: a listener owned by this test process is found via the
-        // pid path.
+    /// End-to-end: a listener owned by this test process shows up in
+    /// listen_ports when its pid is passed. Runs netstat — verify manually
+    /// with `cargo test --lib -- --ignored`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "runs netstat; run manually: cargo test --lib -- --ignored"]
+    fn finds_own_listener() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let mine = super::listen_ports(&[std::process::id()], None);

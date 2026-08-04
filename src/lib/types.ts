@@ -15,6 +15,7 @@ export interface Settings {
   ui_font_size: number;
   font_thicken: boolean;
   editor_wrap_lines: boolean;
+  project_ports: boolean;
   language: "system" | "en" | "zh";
 }
 

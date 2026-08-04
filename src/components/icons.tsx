@@ -298,6 +298,17 @@ export function IconPlug(props: IconProps) {
   );
 }
 
+export function IconGlobe(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a13.5 13.5 0 0 0 0 18" />
+      <path d="M12 3a13.5 13.5 0 0 1 0 18" />
+    </Svg>
+  );
+}
+
 export function IconCheck(props: IconProps) {
   return (
     <Svg {...props}>

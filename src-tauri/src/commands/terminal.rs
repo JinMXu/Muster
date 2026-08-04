@@ -83,10 +83,11 @@ pub fn kill_process(session_id: Uuid, shell_pid: u32, pid: u32) -> Result<(), St
     crate::services::procs::kill(pid)
 }
 
-/// PORTS section: listening TCP ports owned by the given pids, plus any
-/// process belonging to the project directory (working directory or command
-/// line under it), so dev servers started outside this session still show.
-/// The directory matching is skipped for broad roots (home dir, drive root).
+/// PORTS section: listening TCP ports owned by the given pids (the session's
+/// processes). When `project_root` is Some (the "project ports" setting),
+/// listeners from any process working in that directory are included too, so
+/// dev servers started outside this session still show. The directory
+/// matching is skipped for broad roots (home dir, drive root).
 #[tauri::command]
 pub fn session_ports(
     pids: Vec<u32>,

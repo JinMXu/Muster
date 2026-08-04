@@ -32,6 +32,11 @@ pub struct Settings {
     pub font_thicken: bool,
     #[serde(default)]
     pub editor_wrap_lines: bool,
+    /// Info panel PORTS: also include listeners from processes that merely
+    /// work inside the project directory (dev servers started outside the
+    /// session), not just the session's own process tree.
+    #[serde(default)]
+    pub project_ports: bool,
     #[serde(default = "default_language")]
     pub language: String,
 }
@@ -47,6 +52,7 @@ impl Default for Settings {
             ui_font_size: 12.0,
             font_thicken: false,
             editor_wrap_lines: false,
+            project_ports: false,
             language: "system".into(),
         }
     }

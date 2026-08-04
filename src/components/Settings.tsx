@@ -447,6 +447,16 @@ function GeneralTab({
           onChange={(name) => update({ theme_light: name })}
         />
       </Field>
+
+      <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2.5">
+        <span className="ui-fs-base text-muster-fg">
+          {t("settings.projectPorts")}
+        </span>
+        <Toggle
+          checked={s.project_ports}
+          onChange={(v) => update({ project_ports: v })}
+        />
+      </div>
     </div>
   );
 }

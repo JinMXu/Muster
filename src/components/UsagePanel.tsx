@@ -101,10 +101,14 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    const minSpin = new Promise<void>((r) => setTimeout(r, 600));
     try {
       await api.usage.refresh();
       await load();
+    } catch {
+      // ignore – the spin still plays so the user sees feedback
     } finally {
+      await minSpin;
       setRefreshing(false);
     }
   }, [load]);
@@ -156,7 +160,8 @@ export default function UsagePanel({ onClose }: { onClose: () => void }) {
               </div>
               <button
                 onClick={handleRefresh}
-                className="px-2 py-1 rounded bg-white/[0.05] ui-fs-sm text-muster-muted hover:bg-muster-hover-btn transition-colors"
+                disabled={refreshing}
+                className="px-2 py-1 rounded bg-white/[0.05] ui-fs-sm text-muster-muted hover:bg-muster-hover-btn transition-all duration-muster ease-muster active:scale-[.97] disabled:opacity-50"
                 title={t("usage.refresh")}
               >
                 <span className={`inline-block ${refreshing ? "animate-spin" : ""}`}>&#8635;</span> {t("usage.refresh")}

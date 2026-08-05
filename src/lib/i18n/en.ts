@@ -249,6 +249,7 @@ const en = {
     stageAllBtn: "Stage All",
     discardAllBtn: "Discard All",
     noMatchingFiles: "No matching files",
+    workingTreeClean: "Working tree clean",
     recentCommits: "Recent commits",
     discardConfirmTitle: "Discard changes",
     discardConfirmSingularUntracked:

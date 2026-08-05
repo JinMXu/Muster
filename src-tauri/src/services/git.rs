@@ -37,6 +37,10 @@ pub struct GitStatusInfo {
     pub remotes: Vec<String>,
     pub recent_commits: Vec<RecentCommit>,
     pub stash_count: usize,
+    /// Insertions/deletions of the HEAD → workdir+index diff, with untracked
+    /// text files counted as additions (git's numstat omits them).
+    pub line_additions: usize,
+    pub line_deletions: usize,
     pub error: Option<String>,
     /// True when this repository is a linked worktree (not the main checkout).
     pub is_worktree: bool,
@@ -165,6 +169,18 @@ pub fn status(root: &str) -> GitStatusInfo {
         }
     }
 
+    // Line stats for the compact "+N −M" summary: HEAD → workdir+index diff
+    // (None tree = empty tree, covering repos without a first commit). The
+    // diff omits untracked files, so count their text lines as additions.
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    if let Ok(diff) = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), None) {
+        if let Ok(stats) = diff.stats() {
+            info.line_additions = stats.insertions();
+            info.line_deletions = stats.deletions();
+        }
+    }
+    info.line_additions += untracked_line_additions(&info.changed_entries, &repo_root);
+
     if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
         info.branches = branches
             .filter_map(|b| b.ok())
@@ -209,6 +225,67 @@ pub fn status(root: &str) -> GitStatusInfo {
     }
 
     info
+}
+
+/// Git's numstat output has no representation for untracked files, so mirror
+/// its new-text-file behavior: sum the logical line counts of untracked
+/// entries (untracked directories collapse into one status entry, hence the
+/// recursion). Symlink content is its destination path — one added line.
+fn untracked_line_additions(entries: &[GitStatusEntry], repo_root: &str) -> usize {
+    let root = std::path::Path::new(repo_root);
+    entries
+        .iter()
+        .filter(|e| e.is_untracked)
+        .map(|e| text_line_count(&root.join(&e.path)))
+        .sum()
+}
+
+/// Logical line count of one file, using git's usual NUL-byte binary
+/// heuristic (first 8000 bytes). A trailing partial line still counts.
+fn text_line_count(path: &std::path::Path) -> usize {
+    use std::io::Read;
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(_) => return 0,
+    };
+    if meta.file_type().is_symlink() {
+        return 1;
+    }
+    if meta.is_dir() {
+        return std::fs::read_dir(path)
+            .map(|rd| rd.flatten().map(|e| text_line_count(&e.path())).sum())
+            .unwrap_or(0);
+    }
+    if !meta.is_file() {
+        return 0;
+    }
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut probe = [0u8; 8000];
+    let n = file.read(&mut probe).unwrap_or(0);
+    if probe[..n].contains(&0) {
+        return 0;
+    }
+    let mut byte_count = n;
+    let mut newline_count = probe[..n].iter().filter(|&&b| b == b'\n').count();
+    let mut last_byte = probe[..n].last().copied();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        match file.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                byte_count += n;
+                newline_count += chunk[..n].iter().filter(|&&b| b == b'\n').count();
+                last_byte = chunk[..n].last().copied();
+            }
+        }
+    }
+    if byte_count == 0 {
+        return 0;
+    }
+    newline_count + usize::from(last_byte != Some(b'\n'))
 }
 
 fn status_char_index(s: Status) -> char {
@@ -870,6 +947,20 @@ mod tests {
         assert!(g.entries[0].exists);
         assert_eq!(g.entries[0].size, 3);
         assert!(!g.entries[1].exists);
+    }
+
+    #[test]
+    fn status_counts_untracked_text_lines_as_additions() {
+        let tmp = TempRepo::new();
+        // Tracked change: "one" (no trailing newline) -> two lines = +2 −1.
+        std::fs::write(tmp.0.join("a.txt"), "one\ntwo\n").unwrap();
+        // Untracked text file: 2 lines (trailing partial line still counts).
+        std::fs::write(tmp.0.join("new.txt"), "x\ny").unwrap();
+        // Untracked binary file (NUL byte): not counted.
+        std::fs::write(tmp.0.join("bin.dat"), [0u8, 1, 2]).unwrap();
+        let info = status(&tmp.root());
+        assert_eq!(info.line_additions, 4);
+        assert_eq!(info.line_deletions, 1);
     }
 
     #[test]

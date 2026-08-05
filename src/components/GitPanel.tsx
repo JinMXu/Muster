@@ -156,6 +156,8 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   const msgEmpty = message.trim().length === 0;
   const stagedCount = info.staged_entries.length;
   const anythingToCommit = stagedCount + info.changed_entries.length > 0;
+  // A clean repo shows an explicit status instead of an empty section list.
+  const isClean = info.merge_entries.length + stagedCount + info.changed_entries.length === 0;
   const canCommitStaged = !msgEmpty && !hasConflicts && stagedCount > 0;
   const canCommitAll = !msgEmpty && !hasConflicts && anythingToCommit;
   const canAmend = !msgEmpty && !hasConflicts && hasHead && stagedCount > 0;
@@ -344,6 +346,13 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
             {info.upstream ? `${info.upstream}` : "unpublished"}
             {info.ahead > 0 && ` ↑${info.ahead}`}
             {info.behind > 0 && ` ↓${info.behind}`}
+            {!isClean && (info.line_additions > 0 || info.line_deletions > 0) && (
+              <>
+                {" "}
+                <span className="text-green-400">+{info.line_additions}</span>{" "}
+                <span className="text-red-400">−{info.line_deletions}</span>
+              </>
+            )}
           </div>
         </div>
         <button
@@ -524,6 +533,12 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {isClean && q.length === 0 && (
+          <div className="flex items-center gap-1.5 px-2 py-2 ui-fs-sm text-muster-muted">
+            <span className="text-green-400">✓</span>
+            {t("git.workingTreeClean")}
+          </div>
+        )}
         {mergeEntries.length > 0 && (
           <Section
             title={t("git.mergeChanges")}

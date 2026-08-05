@@ -176,6 +176,8 @@ export interface GitStatusInfo {
   merge_entries: GitStatusEntry[];
   staged_entries: GitStatusEntry[];
   changed_entries: GitStatusEntry[];
+  line_additions: number;
+  line_deletions: number;
   branches: string[];
   remotes: string[];
   recent_commits: RecentCommit[];

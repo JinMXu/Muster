@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { AppStateView, GitGuard, GitStatusEntry, GitStatusInfo } from "../lib/types";
+import type { AppStateView, GitGuard, GitStatusEntry } from "../lib/types";
 import { api } from "../lib/invoke";
+import { refreshGitStatus, useGitStatus } from "../lib/gitStatusStore";
 import { useProjectCwd } from "../lib/useProjectCwd";
 import { shellQuotePath } from "../lib/shellEscape";
 import { getFocusedSessionId } from "../lib/sessionUtils";
@@ -33,11 +34,12 @@ type DiscardTarget =
 type SectionKind = "merge" | "staged" | "changes";
 
 /// Git panel: status, stage/unstage, commit, branch operations.
-/// Polls every 2 seconds. Mutations report through the ops banner; discard
-/// goes through a guarded inline confirmation.
+/// Status comes from the shared poller in gitStatusStore (3s). Mutations
+/// report through the ops banner; discard goes through a guarded inline
+/// confirmation.
 export default function GitPanel({ state }: { state: AppStateView | null }) {
   const { root: cwd } = useProjectCwd(state);
-  const [info, setInfo] = useState<GitStatusInfo | null>(null);
+  const info = useGitStatus(cwd);
   const [message, setMessage] = useState("");
   const [ops, setOps] = useState<GitOp[]>([]);
   const [discardTarget, setDiscardTarget] = useState<DiscardTarget | null>(null);
@@ -52,18 +54,6 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
   const [cpFiles, setCpFiles] = useState<string[] | null>(null);
   const opSeq = useRef(0);
   const { t } = useT();
-
-  useEffect(() => {
-    if (!cwd) return;
-    let alive = true;
-    const tick = () => api.gitStatus(cwd!).then((i) => alive && setInfo(i));
-    tick();
-    const interval = setInterval(tick, 3000);
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, [cwd]);
 
   /// Run one git mutation through the banner: push a running entry with the
   /// equivalent CLI line, then record the summary or the error (failed
@@ -140,7 +130,7 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
               t("git.initializeRepo"),
               t("git.initCli"),
               api.git.init(cwd).then(() => {
-                setInfo(null);
+                refreshGitStatus(cwd);
                 return t("git.initialized");
               })
             )

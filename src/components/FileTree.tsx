@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { AppStateView, DirEntry } from "../lib/types";
+import type { AppStateView, DirEntry, GitStatusEntry } from "../lib/types";
 import { api } from "../lib/invoke";
+import { useGitStatus } from "../lib/gitStatusStore";
 import { useT } from "../lib/i18n/context";
 import { useProjectCwd } from "../lib/useProjectCwd";
 import { shellQuotePath } from "../lib/shellEscape";
@@ -28,6 +29,26 @@ interface Node {
   draft?: boolean;
 }
 
+/// Right-edge decoration for a tree row: a git status letter with its color.
+interface GitBadge {
+  letter: string;
+  className: string;
+}
+
+/// Letter + color for one status entry, mirroring GitPanel's letter pick
+/// (staged when present, else unstaged). M/R/... amber, A/? green,
+/// D/conflict red.
+function gitBadge(e: GitStatusEntry): GitBadge {
+  const letter = e.staged !== "." && e.staged !== "?" ? e.staged : e.unstaged;
+  const className =
+    e.is_conflict || letter === "D"
+      ? "text-red-400"
+      : letter === "A" || letter === "?"
+        ? "text-green-400"
+        : "text-amber-400";
+  return { letter, className };
+}
+
 /// File tree with lazy directory expansion, inline rename, new file/folder,
 /// move-to-trash, a right-click context menu, and auto-refresh on external
 /// changes (backend watches every loaded directory and emits `fs-changed`).
@@ -45,6 +66,36 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ parentDir: string; isDirectory: boolean } | null>(null);
   const { t } = useT();
+
+  // Git status decorations from the shared poller (gitStatusStore); null
+  // until the first fetch resolves or when the project is not a repo.
+  const gitInfo = useGitStatus(root);
+
+  // Decorations keyed by lowercased absolute path (Windows is case-
+  // insensitive): files get a status letter, directories containing any
+  // changed path get a dot marker. Paths under the repo root only.
+  const { badges, dirtyDirs } = useMemo(() => {
+    const badges = new Map<string, GitBadge>();
+    const dirtyDirs = new Set<string>();
+    if (gitInfo?.is_repo) {
+      const repoRoot = gitInfo.repo_root.replace(/[\\/]+$/, "");
+      for (const list of [gitInfo.merge_entries, gitInfo.staged_entries, gitInfo.changed_entries]) {
+        for (const e of list) {
+          const abs = `${repoRoot}\\${e.path.replace(/\//g, "\\")}`;
+          const key = abs.toLowerCase();
+          if (!badges.has(key)) badges.set(key, gitBadge(e));
+          let dir = abs;
+          while (dir.length > repoRoot.length) {
+            const idx = dir.lastIndexOf("\\");
+            if (idx <= repoRoot.length) break;
+            dir = dir.slice(0, idx);
+            dirtyDirs.add(dir.toLowerCase());
+          }
+        }
+      }
+    }
+    return { badges, dirtyDirs };
+  }, [gitInfo]);
 
   const loadDir = useCallback(async (dir: string) => {
     try {
@@ -343,6 +394,8 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
             isExpanded={!!expanded[node.path]}
             isSelected={selected === node.path}
             isRenaming={renaming === node.path}
+            badge={node.is_directory ? undefined : badges.get(node.path.toLowerCase())}
+            dirty={node.is_directory && dirtyDirs.has(node.path.toLowerCase())}
             onToggle={() => toggle(node)}
             onOpen={() => onOpenFile(node.path)}
             onStartRename={() => setRenaming(node.path)}
@@ -432,6 +485,8 @@ function Row({
   isExpanded,
   isSelected,
   isRenaming,
+  badge,
+  dirty,
   onToggle,
   onOpen,
   onStartRename,
@@ -446,6 +501,10 @@ function Row({
   isExpanded: boolean;
   isSelected: boolean;
   isRenaming: boolean;
+  /// Git status letter for files; undefined when clean or unknown.
+  badge?: GitBadge;
+  /// Directory contains at least one changed path (aggregated dot).
+  dirty?: boolean;
   onToggle: () => void;
   onOpen: () => void;
   onStartRename: () => void;
@@ -505,6 +564,14 @@ function Row({
         />
       ) : (
         <span className="flex-1 truncate">{node.name}</span>
+      )}
+      {!isRenaming && badge && (
+        <span className={`flex-shrink-0 ui-fs-xs ${badge.className}`}>{badge.letter}</span>
+      )}
+      {!isRenaming && dirty && (
+        <span className="flex-shrink-0 ui-fs-xs text-amber-400" title={t("fileTree.containsChanges")}>
+          ●
+        </span>
       )}
       {!isRenaming && (
         <span className="hidden group-hover:flex items-center gap-0.5">

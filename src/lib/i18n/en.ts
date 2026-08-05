@@ -292,6 +292,7 @@ const en = {
     newFolderHereTooltip: "New folder here",
     renameTooltip: "Rename",
     trashTooltip: "Move to Recycle Bin",
+    containsChanges: "Contains uncommitted changes",
   },
 
   filePane: {

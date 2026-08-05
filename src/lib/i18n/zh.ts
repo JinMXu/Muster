@@ -290,6 +290,7 @@ const zh = {
     newFolderHereTooltip: "在此新建文件夹",
     renameTooltip: "重命名",
     trashTooltip: "移至回收站",
+    containsChanges: "包含未提交的更改",
   },
 
   filePane: {

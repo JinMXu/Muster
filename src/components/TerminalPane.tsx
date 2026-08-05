@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { Terminal } from "@xterm/xterm";
 import { acquire } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
 import { shellQuotePath } from "../lib/shellEscape";
@@ -8,6 +9,29 @@ import { useT } from "../lib/i18n/context";
 import { getTerminalSearchState, subscribeTerminalSearch } from "../lib/terminalSearch";
 import PasteWarning, { looksDangerousPaste } from "./PasteWarning";
 import TerminalSearchBar from "./TerminalSearchBar";
+
+/// Re-sync a re-attached terminal's scroll viewport.
+///
+/// While a parked terminal's DOM element is detached (tab switch, zoom,
+/// project switch), the browser destroys the `.xterm-viewport` scrolling
+/// box, resetting its scrollTop to 0 — but xterm's internal ydisp keeps
+/// pointing at the previous position (usually the bottom). Re-inserting the
+/// element does not restore scrollTop, and xterm only re-applies it lazily;
+/// any scroll event read in the meantime (a wheel tick, or one queued by the
+/// detach itself) is interpreted by xterm's Viewport as a giant upward
+/// scroll and slams the viewport to the top of the scrollback, after which
+/// the terminal no longer follows output. Force the viewport's cached
+/// metrics to be recomputed so it re-applies scrollTop from ydisp right now
+/// — wherever ydisp is, so a user who scrolled up stays put.
+function resyncViewport(term: Terminal): void {
+  const viewport = (term as unknown as {
+    viewport?: { reset(): void; syncScrollArea(immediate?: boolean): void };
+  }).viewport;
+  if (!viewport) return;
+  viewport.reset(); // clear cached sizes/scrollTop so the sync isn't skipped
+  viewport.syncScrollArea(true); // immediate: re-apply scrollTop = ydisp * rowHeight
+}
+
 
 /// One terminal pane: attaches the parked xterm instance for `sessionId`
 /// (owned by `terminalRegistry`) into its container div. The instance
@@ -49,6 +73,7 @@ export default function TerminalPane({
       entry.term.open(container);
     } else if (entry.term.element.parentElement !== container) {
       container.appendChild(entry.term.element);
+      resyncViewport(entry.term);
     }
 
     const pushSize = () => {

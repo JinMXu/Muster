@@ -2,19 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
-import { useSettings } from "../lib/settingsStore";
+import { useSettings, updateSettings } from "../lib/settingsStore";
 import type { DiffTabInfo } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 
 /// Monaco diff view. Side-by-side by default, with a toolbar toggle for the
 /// unified (inline) view and a reload button that re-reads the file from disk.
+/// The view-mode preference is persisted via settingsStore.
 export default function DiffPane({ diffId, focused }: { diffId: string; focused: boolean }) {
   const [diff, setDiff] = useState<DiffTabInfo | null>(null);
-  const [sideBySide, setSideBySide] = useState(true);
   const [monacoReady, setMonacoReady] = useState(false);
   const { t } = useT();
   // Same settings-driven options as the file editor (font size/family/wrap).
   const settings = useSettings();
+  const sideBySide = settings?.diff_side_by_side ?? true;
   const options = useMemo(() => ({
     ...editorOptions,
     fontSize: settings?.font_size ?? 13,
@@ -60,7 +61,7 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
           ) : null}
         </span>
         <button
-          onClick={() => setSideBySide((v) => !v)}
+          onClick={() => updateSettings({ diff_side_by_side: !sideBySide })}
           className="px-1.5 py-0.5 rounded hover:bg-muster-hover-btn text-muster-muted hover:text-muster-fg active:scale-[.97] transition-transform duration-muster ease-muster"
           title={t("diffPane.toggleView")}
         >

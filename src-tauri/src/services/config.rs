@@ -32,6 +32,9 @@ pub struct Settings {
     pub font_thicken: bool,
     #[serde(default)]
     pub editor_wrap_lines: bool,
+    /// Diff viewer layout: side-by-side (true) or unified/inline (false).
+    #[serde(default = "default_diff_side_by_side")]
+    pub diff_side_by_side: bool,
     /// Info panel PORTS: also include listeners from processes that merely
     /// work inside the project directory (dev servers started outside the
     /// session), not just the session's own process tree.
@@ -52,6 +55,7 @@ impl Default for Settings {
             ui_font_size: 12.0,
             font_thicken: false,
             editor_wrap_lines: false,
+            diff_side_by_side: true,
             project_ports: false,
             language: "system".into(),
         }
@@ -113,6 +117,7 @@ fn default_light() -> String { "Default Light".into() }
 fn default_font_size() -> f64 { Settings::DEFAULT_FONT_SIZE }
 fn default_ui_font_size() -> f64 { Settings::DEFAULT_UI_FONT_SIZE }
 fn default_language() -> String { "system".into() }
+fn default_diff_side_by_side() -> bool { true }
 
 #[cfg(test)]
 mod tests {
@@ -173,6 +178,7 @@ mod tests {
         assert_eq!(s.theme_light, "Default Light");
         assert!(s.font_family.is_empty());
         assert!(!s.editor_wrap_lines);
+        assert!(s.diff_side_by_side);
         fs::remove_dir_all(&dir).ok();
     }
 

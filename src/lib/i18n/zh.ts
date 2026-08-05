@@ -85,6 +85,7 @@ const zh = {
     darkTheme: "深色主题",
     lightTheme: "浅色主题",
     wrapLines: "编辑器中自动换行",
+    diffSideBySide: "Diff 并排视图",
     projectPorts: "端口列表包含项目目录进程",
     integrations: "集成",
     integrationsTitle: "集成",

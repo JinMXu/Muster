@@ -53,6 +53,16 @@ export function reloadSettings(): Promise<void> {
   return initSettings();
 }
 
+/// Persist a setting change made outside the Settings modal (e.g. the diff
+/// viewer's side-by-side toggle): patch the cached settings, notify
+/// subscribers, and save to disk.
+export async function updateSettings(patch: Partial<SettingsType>): Promise<void> {
+  if (!current) return;
+  current = { ...current, ...patch };
+  notify();
+  await api.saveSettings(current);
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => {

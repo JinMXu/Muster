@@ -85,6 +85,7 @@ const en = {
     darkTheme: "Dark theme",
     lightTheme: "Light theme",
     wrapLines: "Wrap long lines in editor",
+    diffSideBySide: "Side-by-side diff view",
     projectPorts: "Include project-directory processes in port list",
     integrations: "Integrations",
     integrationsTitle: "Integrations",

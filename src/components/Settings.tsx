@@ -533,6 +533,15 @@ function FontTab({
             onChange={(v) => update({ editor_wrap_lines: v })}
           />
         </div>
+        <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2.5">
+          <span className="ui-fs-base text-muster-fg">
+            {t("settings.diffSideBySide")}
+          </span>
+          <Toggle
+            checked={s.diff_side_by_side}
+            onChange={(v) => update({ diff_side_by_side: v })}
+          />
+        </div>
       </div>
     </div>
   );

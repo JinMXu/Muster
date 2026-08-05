@@ -28,6 +28,8 @@ const zh = {
     closeOthers: "关闭其他",
     closeToRight: "关闭右侧",
     closeAll: "全部关闭",
+    closeAllFiles: "关闭所有文件",
+    closeAllDiffs: "关闭所有 Diff",
     unsavedChangesTitle: "未保存的更改",
     unsavedChangesSingular: "此文件有未保存的更改：",
     unsavedChangesPlural: ({ n }: { n: number }) => `${n} 个文件有未保存的更改：`,

@@ -28,6 +28,8 @@ const en = {
     closeOthers: "Close Others",
     closeToRight: "Close to Right",
     closeAll: "Close All",
+    closeAllFiles: "Close All Files",
+    closeAllDiffs: "Close All Diffs",
     unsavedChangesTitle: "Unsaved changes",
     unsavedChangesSingular: "This file has unsaved changes:",
     unsavedChangesPlural: ({ n }: { n: number }) => `${n} files have unsaved changes:`,

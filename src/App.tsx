@@ -28,7 +28,16 @@ import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/con
 import { getFocusedSessionId } from "./lib/sessionUtils";
 import { openTerminalSearch } from "./lib/terminalSearch";
 import type { Lang } from "./lib/i18n/types";
-import type { AppStateView, DirtyFile, ProjectView, TabView, Uuid } from "./lib/types";
+import type { AppStateView, DirtyFile, PaneContentKind, ProjectView, TabView, Uuid } from "./lib/types";
+
+/// Kind of a tab = its focused pane's content kind (first pane as fallback).
+function tabKind(tab: TabView): PaneContentKind | null {
+  return (
+    tab.columns.flatMap((c) => c.panes).find((p) => p.id === tab.focused_pane_id)?.content.kind ??
+    tab.columns[0]?.panes[0]?.content.kind ??
+    null
+  );
+}
 
 export default function App() {
   const [state, setStateRaw] = useTauriEvent<AppStateView | null>("state-changed", null);
@@ -269,6 +278,20 @@ export default function App() {
     const tabs = selectedProject?.tabs.map((t) => t.id) ?? [];
     closeTabsWithPrompt(tabs, () => api.closeAllTabs());
   }, [selectedProject, closeTabsWithPrompt]);
+
+  // Close every tab of one kind ("file" / "diff") in the clicked tab's
+  // project, with the same unsaved-changes confirmation as the other batch
+  // close actions.
+  const closeTabsByKind = useCallback(
+    (anchorTabId: Uuid, kind: PaneContentKind) => {
+      const ids = tabsOfProjectWith(anchorTabId)
+        .filter((t) => tabKind(t) === kind)
+        .map((t) => t.id);
+      if (ids.length === 0) return;
+      closeTabsWithPrompt(ids, () => ids.forEach((id) => api.closeTab(id)));
+    },
+    [tabsOfProjectWith, closeTabsWithPrompt]
+  );
 
   const closeProject = useCallback(async (id: Uuid) => {
     const dirty = await api.projectDirtyFiles(id);
@@ -572,6 +595,8 @@ export default function App() {
     (tab: TabView, x: number, y: number, requestRename: () => void) => {
       // Reveal/Copy Path resolve against the tab's focused pane at click time.
       const contextPath = () => api.paneContextPath(tab.id, tab.focused_pane_id);
+      // Batch-close entries only appear when the project has a tab of that kind.
+      const kinds = new Set(tabsOfProjectWith(tab.id).map(tabKind));
       openMenu({
         x,
         y,
@@ -597,11 +622,17 @@ export default function App() {
           { label: t("common.close"), action: () => closeTabById(tab.id) },
           { label: t("app.closeOthers"), action: () => closeOtherTabs(tab.id) },
           { label: t("app.closeToRight"), action: () => closeTabsToRight(tab.id) },
+          ...(kinds.has("file")
+            ? [{ label: t("app.closeAllFiles"), action: () => closeTabsByKind(tab.id, "file") }]
+            : []),
+          ...(kinds.has("diff")
+            ? [{ label: t("app.closeAllDiffs"), action: () => closeTabsByKind(tab.id, "diff") }]
+            : []),
           { label: t("app.closeAll"), action: () => closeAllTabs() },
         ],
       });
     },
-    [closeTabById, closeOtherTabs, closeTabsToRight, closeAllTabs, t]
+    [closeTabById, closeOtherTabs, closeTabsToRight, closeTabsByKind, closeAllTabs, tabsOfProjectWith, t]
   );
 
   const projectMenu = useCallback(

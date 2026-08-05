@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
-import { IconMaximize2, IconPanelRight, IconPlus, IconX } from "./icons";
+import { IconColumns, IconMaximize2, IconPanelRight, IconPlus, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import { api } from "../lib/invoke";
 import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
@@ -325,7 +325,10 @@ function TabItem({
             />
           )}
           {tab.pane_count > 1 && (
-            <span className="ui-fs-2xs text-muster-muted/70">[] {tab.pane_count}</span>
+            <span className="flex items-center gap-0.5 ui-fs-2xs text-muster-muted/70">
+              <IconColumns size={10} />
+              {tab.pane_count}
+            </span>
           )}
           {hovering ? (
             <button

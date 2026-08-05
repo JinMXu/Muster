@@ -316,3 +316,12 @@ export function IconCheck(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconColumns(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M12 3v18" />
+    </Svg>
+  );
+}

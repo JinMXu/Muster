@@ -87,6 +87,9 @@ export default function App() {
 
   // Ctrl+Tab switcher subtitles, cached per tab id (see the switcher below).
   const subtitleCache = useRef(new Map<Uuid, string>());
+  // Most-recently-used tab order (front = most recent) for the Ctrl+Tab
+  // switcher. Updated on every tab activation; closed tabs are pruned below.
+  const mruRef = useRef<Uuid[]>([]);
 
   // Dispose parked terminal instances whose session no longer exists
   // (tab/pane/project closed). Terminals for live sessions stay parked in
@@ -155,7 +158,21 @@ export default function App() {
     for (const id of [...subtitleCache.current.keys()]) {
       if (!tabIds.has(id)) subtitleCache.current.delete(id);
     }
+    // Same for the MRU list.
+    mruRef.current = mruRef.current.filter((id) => tabIds.has(id));
   }, [stateView]);
+
+  // Track tab recency: every activation moves the tab to the front of the
+  // MRU list. `tab-focused` patches selected_tab_id into state, so pane-only
+  // state updates don't retrigger this.
+  const activeTabId = selectedProject?.selected_tab_id ?? null;
+  useEffect(() => {
+    if (!activeTabId) return;
+    const mru = mruRef.current;
+    const i = mru.indexOf(activeTabId);
+    if (i !== -1) mru.splice(i, 1);
+    mru.unshift(activeTabId);
+  }, [activeTabId]);
 
   const refresh = useCallback(() => api.state().then(setStateRaw), [setStateRaw]);
 
@@ -546,9 +563,18 @@ export default function App() {
         const project = s?.projects.find((p) => p.id === s.selected_project_id);
         const tabs = project?.tabs ?? [];
         if (!project || tabs.length < 2) return; // nothing to switch between
-        const curIdx = Math.max(0, tabs.findIndex((t) => t.id === project.selected_tab_id));
-        setSwitcher({ tabs: tabs.map(toSwitcherTab), index: (curIdx + step + tabs.length) % tabs.length });
-        resolveSubtitles(tabs);
+        // Order by recency (MRU): the active tab comes first, never-activated
+        // tabs (missing from the list) fall back to tab order at the end.
+        const mru = mruRef.current;
+        const ordered = [...tabs].sort(
+          (a, b) =>
+            (mru.indexOf(a.id) < 0 ? mru.length : mru.indexOf(a.id)) -
+            (mru.indexOf(b.id) < 0 ? mru.length : mru.indexOf(b.id))
+        );
+        // Forward starts at the previously used tab, backward at the oldest.
+        const index = step === 1 ? 1 : ordered.length - 1;
+        setSwitcher({ tabs: ordered.map(toSwitcherTab), index });
+        resolveSubtitles(ordered);
         return;
       }
       if (e.key === "Escape" && switcherRef.current) {

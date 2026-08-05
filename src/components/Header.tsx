@@ -134,7 +134,7 @@ export default function Header({
               agent={sessionId ? agents[sessionId] ?? null : null}
               onSelect={() => onSelectTab(tab.id)}
               onClose={() => onCloseTab(tab.id)}
-              onMove={(to) => onMoveTab(tab.id, to)}
+              onMove={(from) => onMoveTab(from, tab.id)}
               onDragStart={() => setDragging(tab.id)}
               onDragEnd={() => setDragging(null)}
               onRename={(name) => onRenameTab(tab.id, name)}
@@ -206,7 +206,9 @@ function TabItem({
   agent: LiveAgentStatus | null;
   onSelect: () => void;
   onClose: () => void;
-  onMove: (to: Uuid) => void;
+  /// A tab was dropped on this tab to reorder: `from` is the dragged tab's
+  /// id (this tab is the drop target).
+  onMove: (from: Uuid) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   onRename: (name: string | null) => void;
@@ -243,9 +245,9 @@ function TabItem({
       onDoubleClick={startRename}
       draggable
       onDragStart={(e) => {
-        // Carry the tab id so a drop on a pane edge (PaneLayout) can split
-        // the tab's panes into that pane's tab. Tab-to-tab drops ignore this
-        // type and still reorder.
+        // Carry the tab id: a drop on a pane edge (PaneLayout) splits the
+        // tab's panes into that pane's tab; a drop on another tab reads the
+        // id back to reorder.
         e.dataTransfer.setData("application/x-muster-tab", tab.id);
         e.dataTransfer.effectAllowed = "move";
         onDragStart();
@@ -274,8 +276,10 @@ function TabItem({
           onPaneDrop(paneId, sourceTabId);
           return;
         }
-        // Otherwise it's a tab-reorder drag.
-        onMove(tab.id);
+        // Otherwise it's a tab-reorder drag: the dragged tab's id rides the
+        // dataTransfer; this tab is the drop target.
+        const draggedTabId = e.dataTransfer.getData("application/x-muster-tab");
+        if (draggedTabId && draggedTabId !== tab.id) onMove(draggedTabId);
       }}
       onContextMenu={(e) => {
         e.preventDefault();

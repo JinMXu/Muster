@@ -4,9 +4,9 @@ import { api } from "../lib/invoke";
 import type { PaneDropEdge } from "../lib/invoke";
 import type { ProjectView, Uuid } from "../lib/types";
 import { useT } from "../lib/i18n/context";
+import { acquireHost, markAttached, markDetached } from "../lib/diffViewRegistry";
 import TerminalPane from "./TerminalPane";
 import FilePane from "./FilePane";
-import DiffPane from "./DiffPane";
 
 /// Render a niri-style layout: columns arranged left-to-right, with panes
 /// stacked top-to-bottom inside each column. Each pane is the focused kind's
@@ -207,6 +207,24 @@ const DROP_EDGE_CLASS: Record<PaneDropEdge, string> = {
   bottom: "inset-x-0 bottom-0 h-[3px]",
 };
 
+/// Slot that adopts the parked host element for a diff pane (see
+/// diffViewRegistry). The DiffPane itself is rendered once by DiffHosts in
+/// App, so tab/zoom/project switches only re-attach this DOM subtree instead
+/// of remounting the Monaco diff editor — same idea as TerminalPane.
+function DiffSlot({ diffId }: { diffId: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = acquireHost(diffId);
+    ref.current!.appendChild(host);
+    markAttached(diffId);
+    return () => {
+      host.remove();
+      markDetached(diffId);
+    };
+  }, [diffId]);
+  return <div ref={ref} className="w-full h-full" />;
+}
+
 function Pane({
   pane,
   focused,
@@ -287,7 +305,7 @@ function Pane({
         <FilePane fileId={pane.content.id} focused={focused} />
       )}
       {pane.content.kind === "diff" && (
-        <DiffPane diffId={pane.content.id} focused={focused} />
+        <DiffSlot diffId={pane.content.id} />
       )}
       {dropEdge && (
         <div

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { DiffEditor } from "@monaco-editor/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { DiffEditor, type MonacoDiffEditor } from "@monaco-editor/react";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
 import { useSettings, updateSettings } from "../lib/settingsStore";
@@ -9,9 +9,15 @@ import { useT } from "../lib/i18n/context";
 /// Monaco diff view. Side-by-side by default, with a toolbar toggle for the
 /// unified (inline) view and a reload button that re-reads the file from disk.
 /// The view-mode preference is persisted via settingsStore.
-export default function DiffPane({ diffId, focused }: { diffId: string; focused: boolean }) {
+///
+/// Rendered once per visited diff by DiffHosts (see diffViewRegistry), not by
+/// the pane slot, so tab/zoom/project switches keep it mounted. `visible` is
+/// false while parked (host element detached): polling pauses and state is
+/// kept as-is until the pane is shown again.
+export default function DiffPane({ diffId, visible }: { diffId: string; visible: boolean }) {
   const [diff, setDiff] = useState<DiffTabInfo | null>(null);
   const [monacoReady, setMonacoReady] = useState(false);
+  const editorRef = useRef<MonacoDiffEditor | null>(null);
   const { t } = useT();
   // Same settings-driven options as the file editor (font size/family/wrap).
   const settings = useSettings();
@@ -26,6 +32,7 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
   }), [settings?.font_size, settings?.font_family, settings?.editor_wrap_lines]);
 
   useEffect(() => {
+    if (!visible) return; // parked: keep the fetched diff, don't poll
     let alive = true;
     const tick = () => api.diffInfo(diffId).then((d) => alive && setDiff(d));
     tick();
@@ -34,7 +41,14 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
       alive = false;
       clearInterval(interval);
     };
-  }, [diffId]);
+  }, [diffId, visible]);
+
+  // The host element is detached while parked, so Monaco's automaticLayout
+  // can miss the 0→real-size transition when it is re-attached; force a
+  // layout pass when the pane is shown again.
+  useEffect(() => {
+    if (visible) editorRef.current?.layout();
+  }, [visible]);
 
   useEffect(() => { ensureMonaco().then(() => setMonacoReady(true)); }, []);
 
@@ -81,6 +95,7 @@ export default function DiffPane({ diffId, focused }: { diffId: string; focused:
           modified={diff.new}
           language={languageForPath(diff.path)}
           theme={MONACO_THEME}
+          onMount={(editor) => { editorRef.current = editor; }}
           options={{
             ...options,
             readOnly: true,

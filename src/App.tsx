@@ -15,10 +15,12 @@ import ContextMenu from "./components/ContextMenu";
 import UsagePanel from "./components/UsagePanel";
 import SearchPanel from "./components/SearchPanel";
 import PasteWarning, { looksDangerousPaste } from "./components/PasteWarning";
+import DiffHosts from "./components/DiffHosts";
 import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib/terminalRegistry";
+import { pruneHosts as pruneDiffHosts } from "./lib/diffViewRegistry";
 import { getLatestText, clearLatestText } from "./lib/fileEdits";
 import { popClosedTab, pushClosedTab, filePathOf, diffMetaOf } from "./lib/recentFiles";
 import { useTauriEvent } from "./hooks/useTauriEvent";
@@ -94,6 +96,7 @@ export default function App() {
   // Dispose parked terminal instances whose session no longer exists
   // (tab/pane/project closed). Terminals for live sessions stay parked in
   // the registry so their buffers survive tab/zoom/project switches.
+  // Parked diff hosts (diffViewRegistry) are pruned the same way.
   // Also records tabs that just disappeared (Ctrl+Shift+T reopen stack) and
   // prunes the switcher subtitle cache. `stateRef.current` still holds the
   // previous state here because the ref-update effect below runs later.
@@ -142,6 +145,7 @@ export default function App() {
       }
     }
     const ids = new Set<string>();
+    const diffIds = new Set<string>();
     const tabIds = new Set<string>();
     for (const p of stateView.projects) {
       for (const t of p.tabs) {
@@ -149,11 +153,15 @@ export default function App() {
         for (const c of t.columns) {
           for (const pane of c.panes) {
             if (pane.content.kind === "session") ids.add(pane.content.id);
+            else if (pane.content.kind === "diff") diffIds.add(pane.content.id);
           }
         }
       }
     }
     pruneSessions(ids);
+    // Same for parked diff hosts: closing the last pane showing a diff
+    // unmounts its keep-alive DiffPane; live diffs stay parked.
+    pruneDiffHosts(diffIds);
     // Drop switcher-subtitle cache entries for tabs that no longer exist.
     for (const id of [...subtitleCache.current.keys()]) {
       if (!tabIds.has(id)) subtitleCache.current.delete(id);
@@ -743,6 +751,8 @@ export default function App() {
               <EmptyState onNewProject={newProjectWithDialog} onNewSession={newSession} hasProject={!!selectedProject} />
             )}
           </div>
+          {/* Keep-alive diff panes (portal into parked hosts; no DOM here). */}
+          <DiffHosts />
         </main>
         {(stateView?.is_panel_visible ?? false) && (
           <>

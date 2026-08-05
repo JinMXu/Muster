@@ -8,7 +8,7 @@
 //! with the session id; the frontend then jumps to that session.
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_winrt_notification::Toast;
+use tauri_winrt_notification::{Sound, Toast};
 use uuid::Uuid;
 
 /// Show a system notification for `session_id` in window `label`. Clicking
@@ -20,6 +20,10 @@ pub fn send(app: &AppHandle, label: &str, session_id: Uuid, body: String) {
     let toast = Toast::new(&app_id)
         .title("Muster")
         .text2(&body)
+        // Attach the default notification sound explicitly: without an
+        // <audio> node Windows falls back to it anyway, but making it
+        // explicit keeps the sound tied to the toast regardless of defaults.
+        .sound(Some(Sound::Default))
         .on_activated(move |_| {
             if let Some(window) = app2.get_webview_window(&label2) {
                 // The window may be hidden (tray keep-alive) or minimized.

@@ -460,17 +460,11 @@ fn update_progress(app: &AppHandle, label: &str, session: &TerminalSession, stat
     }
 }
 
-/// Send a system notification for a terminal bell, but only when the
-/// session's own window isn't focused (the user isn't looking) and at most
+/// React to a terminal bell: show a system notification when the session's
+/// own window isn't focused (the user isn't looking), otherwise play the
+/// system sound directly since the toast is suppressed. Either way, at most
 /// once every 2 seconds per session. Notifications themselves stay global.
 fn notify_bell(app: &AppHandle, label: &str, session: &TerminalSession) {
-    let focused = app
-        .get_webview_window(label)
-        .map(|w| w.is_focused().unwrap_or(true))
-        .unwrap_or(true);
-    if focused {
-        return;
-    }
     {
         let mut last = session.last_bell_notify.lock();
         let now = Instant::now();
@@ -478,6 +472,19 @@ fn notify_bell(app: &AppHandle, label: &str, session: &TerminalSession) {
             return;
         }
         *last = Some(now);
+    }
+    let focused = app
+        .get_webview_window(label)
+        .map(|w| w.is_focused().unwrap_or(true))
+        .unwrap_or(true);
+    if focused {
+        // Plays asynchronously, so the PTY reader thread isn't blocked.
+        unsafe {
+            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
+                windows::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK,
+            );
+        }
+        return;
     }
     crate::services::notify::send(app, label, session.id, format!("{} \u{2014} Bell", session.title()));
 }

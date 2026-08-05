@@ -6,6 +6,7 @@ pub mod explorer;
 pub mod git;
 pub mod i18n;
 pub mod ipc;
+pub mod notify;
 pub mod persist;
 pub mod procs;
 pub mod search;

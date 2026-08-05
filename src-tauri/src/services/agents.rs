@@ -18,7 +18,6 @@ use serde::Serialize;
 use tauri::AppHandle;
 use tauri::Emitter;
 use tauri::Manager;
-use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 use crate::commands::SharedState;
@@ -372,12 +371,7 @@ fn notify_changed(
             }
             _ => continue,
         };
-        let _ = app
-            .notification()
-            .builder()
-            .title("Muster")
-            .body(body)
-            .show();
+        crate::services::notify::send(app, label, *sid, body);
     }
 }
 

@@ -204,6 +204,15 @@ export default function App() {
     return () => { unlisten.then((u) => u()); };
   }, [setStateRaw]);
 
+  // A system notification was clicked: jump to the session that raised it
+  // (the backend has already shown + focused this window).
+  useEffect(() => {
+    const unlisten = listen<{ id: Uuid }>("notification-activate", (event) => {
+      api.focusAgentSession(event.payload.id);
+    });
+    return () => { unlisten.then((u) => u()); };
+  }, []);
+
   // ---- action helpers ---------------------------------------------------
   const newProjectWithDialog = useCallback(async () => {
     const dir = await openDialog({ directory: true, multiple: false });

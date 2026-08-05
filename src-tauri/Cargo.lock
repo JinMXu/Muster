@@ -2482,6 +2482,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
+ "tauri-winrt-notification",
  "tempfile",
  "tokio",
  "toml 0.8.2",

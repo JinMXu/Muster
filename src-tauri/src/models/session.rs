@@ -1,4 +1,4 @@
-﻿use parking_lot::Mutex;
+use parking_lot::Mutex;
 use crate::services::conpty::ConPty;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -9,7 +9,6 @@ use tauri::window::{ProgressBarState, ProgressBarStatus};
 use tauri::AppHandle;
 use tauri::Emitter;
 use tauri::Manager;
-use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 use crate::base64_encode;
@@ -480,12 +479,7 @@ fn notify_bell(app: &AppHandle, label: &str, session: &TerminalSession) {
         }
         *last = Some(now);
     }
-    let _ = app
-        .notification()
-        .builder()
-        .title("Muster")
-        .body(format!("{} 閳?Bell", session.title()))
-        .show();
+    crate::services::notify::send(app, label, session.id, format!("{} \u{2014} Bell", session.title()));
 }
 
 /// Extract the path component of an OSC 7 `file://host/path` URI.

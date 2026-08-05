@@ -531,26 +531,38 @@ impl AppState {
     }
 
     /// Drag & drop a pane across tabs: detach `pane_id` from `source_tab_id`
-    /// and add it as a new column in `target_tab_id`. Refused when the source
-    /// tab would be left empty (a tab must always keep at least one pane), or
-    /// when the same tab is both source and target (use `move_pane` instead).
-    /// Returns true when a move actually happened.
+    /// and add it as a new column in `target_tab_id`. When the move empties
+    /// the source tab, that tab is closed — every pane was detached first, so
+    /// closing it terminates nothing (see remove_tab). Refused when the same
+    /// tab is both source and target (use `move_pane` instead). Returns true
+    /// when a move actually happened.
     pub fn move_pane_cross_tab(&mut self, source_tab_id: Uuid, pane_id: Uuid, target_tab_id: Uuid) -> bool {
         if source_tab_id == target_tab_id {
             return false;
         }
-        // Detach from source tab.
+        // Detach from source tab, allowing the move to take its last pane.
         let detached: Option<Pane> = {
             let mut found: Option<Pane> = None;
             for p in &mut self.projects {
                 if let Some(t) = p.tabs.iter_mut().find(|t| t.id == source_tab_id) {
-                    found = t.detach_pane(pane_id);
+                    found = t.detach_pane_allowing_empty(pane_id);
                     break;
                 }
             }
             found
         };
         let Some(pane) = detached else { return false };
+        // A move that emptied the source tab closes it rather than leaving a
+        // pane-less tab behind.
+        if let Some(p_idx) = self.project_index_of_tab(source_tab_id) {
+            let emptied = self.projects[p_idx]
+                .tabs
+                .iter()
+                .any(|t| t.id == source_tab_id && t.all_panes().is_empty());
+            if emptied {
+                self.remove_tab(p_idx, source_tab_id);
+            }
+        }
         // Insert into target tab.
         let inserted = {
             let mut ok = false;
@@ -1035,6 +1047,54 @@ mod tests {
         let diff = state.diffs.values().next().unwrap();
         assert_eq!(diff.repo_root, "C:\\definitely-not-a-repo");
         assert!(diff.staged);
+    }
+
+    #[test]
+    fn move_pane_cross_tab_closes_emptied_source_tab() {
+        let tab = |wd: &str| TabSnapshot {
+            custom_name: None,
+            columns: vec![ColumnSnapshot {
+                panes: vec![session_pane(wd, 1.0)],
+                weight: 1.0,
+            }],
+            focused_column: 0,
+            focused_row: 0,
+        };
+        let snapshot = SessionSnapshot {
+            projects: vec![ProjectSnapshot {
+                custom_name: None,
+                custom_directory: None,
+                tabs: vec![tab("C:\\work\\a"), tab("C:\\work\\b")],
+                selected_tab_index: Some(1),
+            }],
+            selected_project_index: Some(0),
+            is_left_sidebar_visible: None,
+            is_right_panel_visible: None,
+            right_panel_tab: None,
+        };
+        let mut state = fresh_state();
+        state.restore(&snapshot);
+
+        let project = &state.projects[0];
+        let source_tab = project.tabs[0].id;
+        let target_tab = project.tabs[1].id;
+        let pane = project.tabs[0].columns[0].panes[0].id;
+        let PaneContent::Session(session_id) = project.tabs[0].columns[0].panes[0].content else {
+            panic!()
+        };
+
+        // Moving the source tab's only pane succeeds and closes the tab.
+        assert!(state.move_pane_cross_tab(source_tab, pane, target_tab));
+        let project = &state.projects[0];
+        assert_eq!(project.tabs.len(), 1);
+        assert_eq!(project.tabs[0].id, target_tab);
+        assert_eq!(project.tabs[0].all_panes().len(), 2);
+        // Selection stays on the target tab.
+        assert_eq!(project.selected_tab_id, Some(target_tab));
+        // Closing the emptied source tab terminated nothing: the moved pane's
+        // session is still alive.
+        assert_eq!(state.sessions.len(), 2);
+        assert!(state.sessions.contains_key(&session_id));
     }
 
     #[test]

@@ -83,8 +83,8 @@ pub fn move_pane(
 
 /// Drag & drop a pane onto another tab (dropped on the tab's strip header):
 /// detach `pane_id` from `source_tab_id` and add it as a new columnise in
-/// `target_tab_id`. Refused when the source tab would be emptied or the
-/// pane is the only pane in its tab.
+/// `target_tab_id`. When the move empties the source tab, that tab is closed
+/// (its panes were all moved out first, so nothing is terminated).
 #[tauri::command]
 pub fn move_pane_cross_tab(
     window: Window,

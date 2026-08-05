@@ -51,9 +51,9 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
   };
 
   /// A header tab dropped on a pane edge: move its panes into this tab,
-  /// splitting each at the target pane's edge. The backend never empties a
-  /// tab (move_pane_cross_tab refuses the last pane), so a single-pane tab
-  /// stays put; multi-pane tabs keep their final pane behind.
+  /// splitting each at the target pane's edge. When every pane has moved out,
+  /// the backend closes the emptied source tab itself (move_pane_cross_tab),
+  /// and selection stays on this tab.
   const moveTabIntoSplit = async (draggedTabId: Uuid, targetPaneId: Uuid, edge: PaneDropEdge) => {
     const source = project.tabs.find((t) => t.id === draggedTabId);
     if (!source || source.id === tab.id) return;

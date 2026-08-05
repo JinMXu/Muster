@@ -94,18 +94,16 @@ impl PaneTab {
     }
 
     /// Detach (remove) a pane from this tab and return it by value so a caller
-    /// can re-insert it into another tab. The source column is dropped if it
-    /// becomes empty. The tab's focused pane id is repointed to another pane
-    /// in this tab (or left as-is if no pane remains). No-op (returns None)
-    /// when the pane is not present or this is the last pane in the tab (a tab
-    /// must always keep at least one pane).
-    pub fn detach_pane(&mut self, pane_id: Uuid) -> Option<Pane> {
+    /// can re-insert it into another tab — the tab's last pane may be taken.
+    /// The source column is dropped if it becomes empty. The tab's focused
+    /// pane id is repointed to another pane in this tab (or left as-is if no
+    /// pane remains). No-op (returns None) when the pane is not present. A
+    /// caller that empties a tab is expected to close it afterwards (see
+    /// AppState::move_pane_cross_tab).
+    pub fn detach_pane_allowing_empty(&mut self, pane_id: Uuid) -> Option<Pane> {
         let (ci, ri) = self.columns.iter().enumerate().find_map(|(ci, col)| {
             col.panes.iter().position(|p| p.id == pane_id).map(|ri| (ci, ri))
         })?;
-        if self.all_panes().len() <= 1 {
-            return None; // never empty a tab
-        }
         let pane = self.columns[ci].panes.remove(ri);
         if self.columns[ci].panes.is_empty() {
             self.columns.remove(ci);

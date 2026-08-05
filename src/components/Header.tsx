@@ -242,7 +242,14 @@ function TabItem({
       onMouseLeave={() => setHovering(false)}
       onDoubleClick={startRename}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={(e) => {
+        // Carry the tab id so a drop on a pane edge (PaneLayout) can split
+        // the tab's panes into that pane's tab. Tab-to-tab drops ignore this
+        // type and still reorder.
+        e.dataTransfer.setData("application/x-muster-tab", tab.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
       onDragEnd={onDragEnd}
       onDragOver={(e) => {
         // Tab reordering AND pane drops both accept the drag.

@@ -50,6 +50,22 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
     });
   };
 
+  /// A header tab dropped on a pane edge: move its panes into this tab,
+  /// splitting each at the target pane's edge. The backend never empties a
+  /// tab (move_pane_cross_tab refuses the last pane), so a single-pane tab
+  /// stays put; multi-pane tabs keep their final pane behind.
+  const moveTabIntoSplit = async (draggedTabId: Uuid, targetPaneId: Uuid, edge: PaneDropEdge) => {
+    const source = project.tabs.find((t) => t.id === draggedTabId);
+    if (!source || source.id === tab.id) return;
+    for (const col of source.columns) {
+      for (const p of col.panes) {
+        if (await api.movePaneCrossTab(source.id, p.id, tab.id)) {
+          await api.movePane(tab.id, p.id, targetPaneId, edge);
+        }
+      }
+    }
+  };
+
   if (tab.is_zoomed && tab.pane_count > 1) {
     const focused = tab.columns
       .flatMap((c) => c.panes)
@@ -57,7 +73,7 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
     if (focused) {
       return (
         <div className="absolute inset-0 p-0">
-          <Pane pane={focused} focused={true} paneKey={focused.id} tabId={tab.id} />
+          <Pane pane={focused} focused={true} paneKey={focused.id} tabId={tab.id} onTabDrop={moveTabIntoSplit} />
         </div>
       );
     }
@@ -93,6 +109,7 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
                       focused={pane.id === tab.focused_pane_id}
                       paneKey={pane.id}
                       tabId={tab.id}
+                      onTabDrop={moveTabIntoSplit}
                     />
                   </div>
                   {pi + 1 < col.panes.length && (
@@ -230,11 +247,15 @@ function Pane({
   focused,
   paneKey,
   tabId,
+  onTabDrop,
 }: {
   pane: ProjectView["tabs"][number]["columns"][number]["panes"][number];
   focused: boolean;
   paneKey: Uuid;
   tabId: Uuid;
+  /// A header tab dropped on this pane's edge: the tab's panes move into
+  /// this tab as a split.
+  onTabDrop: (draggedTabId: Uuid, targetPaneId: Uuid, edge: PaneDropEdge) => void;
 }) {
   // Edge a pane-move drag is hovering over; null when no such drag is over
   // us. dragenter/dragleave nest (the pane content has children), so a
@@ -242,6 +263,11 @@ function Pane({
   const [dropEdge, setDropEdge] = useState<PaneDropEdge | null>(null);
   const dragDepth = useRef(0);
   const { t } = useT();
+
+  // Pane-move drags and header-tab drags both split into this pane.
+  const acceptsDrag = (e: React.DragEvent<HTMLDivElement>) =>
+    e.dataTransfer.types.includes("application/x-muster-pane") ||
+    e.dataTransfer.types.includes("application/x-muster-tab");
 
   // Nearest edge of the pointer wins, so the highlight matches where the
   // backend will insert the pane.
@@ -262,7 +288,7 @@ function Pane({
     <div
       className={`relative w-full h-full ${focused ? "z-10 muster-pane-focused" : ""}`}
       onDragEnter={(e) => {
-        if (!e.dataTransfer.types.includes("application/x-muster-pane")) return;
+        if (!acceptsDrag(e)) return;
         dragDepth.current += 1;
       }}
       onDragLeave={() => {
@@ -270,17 +296,27 @@ function Pane({
         if (dragDepth.current === 0) setDropEdge(null);
       }}
       onDragOver={(e) => {
-        // Only claim pane-move drags; file-path drags fall through to the
-        // terminal drop target inside.
-        if (!e.dataTransfer.types.includes("application/x-muster-pane")) return;
+        // Only claim pane-move / tab drags; file-path drags fall through to
+        // the terminal drop target inside.
+        if (!acceptsDrag(e)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setDropEdge(edgeAt(e));
       }}
       onDrop={(e) => {
-        const draggedId = e.dataTransfer.getData("application/x-muster-pane");
         dragDepth.current = 0;
         setDropEdge(null);
+        // A header tab dropped here splits its panes into this tab.
+        const draggedTabId = e.dataTransfer.getData("application/x-muster-tab");
+        if (draggedTabId) {
+          // Dropping the tab already showing this pane is a no-op.
+          if (draggedTabId === tabId) return;
+          e.preventDefault();
+          e.stopPropagation();
+          onTabDrop(draggedTabId, pane.id, edgeAt(e));
+          return;
+        }
+        const draggedId = e.dataTransfer.getData("application/x-muster-pane");
         if (!draggedId || draggedId === pane.id) return;
         e.preventDefault();
         e.stopPropagation();

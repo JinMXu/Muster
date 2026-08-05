@@ -29,10 +29,26 @@ pub fn default_settings() -> Settings {
 }
 
 #[tauri::command]
-pub fn save_settings(state: State<SharedState>, settings: Settings) -> Result<(), String> {
+pub fn save_settings(app: AppHandle, state: State<SharedState>, settings: Settings) -> Result<(), String> {
     let mut guard = state.settings.lock();
     *guard = settings;
-    guard.save().map_err(|e| e.to_string())
+    guard.save().map_err(|e| e.to_string())?;
+
+    // Keep the tray menu in sync with the new language without a restart:
+    // the tray exposes no menu read accessor, so rebuild it in place.
+    let lang = crate::services::i18n::effective(&guard.language);
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        use tauri::menu::{Menu, MenuItem};
+        if let (Ok(new_window), Ok(quit)) = (
+            MenuItem::with_id(&app, "tray-new-window", crate::services::i18n::translate("tray-new-window", &lang), true, None::<&str>),
+            MenuItem::with_id(&app, "tray-quit", crate::services::i18n::translate("tray-quit", &lang), true, None::<&str>),
+        ) {
+            if let Ok(menu) = Menu::with_items(&app, &[&new_window, &quit]) {
+                let _ = tray.set_menu(Some(menu));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

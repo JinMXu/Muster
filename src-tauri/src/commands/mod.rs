@@ -71,6 +71,12 @@ impl SharedState {
         self.states.lock().get(label).cloned()
     }
 
+    /// Shared settings handle (e.g. bootstrap reads the language for the
+    /// tray menu before any window state exists).
+    pub fn settings(&self) -> Arc<Mutex<Settings>> {
+        self.settings.clone()
+    }
+
     /// Drop a closed window's state. Its sessions are terminated beforehand
     /// by the close/destroy handlers in bootstrap.
     pub fn remove_label(&self, label: &str) {

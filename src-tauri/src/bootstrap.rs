@@ -154,10 +154,13 @@ pub fn run() {
 
             // System tray with keep-alive: closing the last window only hides
             // it; the process lives on here until "Quit".
-            let new_window_item = MenuItem::with_id(app, "tray-new-window", "New Window", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)?;
+            let tray_lang = crate::services::i18n::effective(
+                &app.state::<SharedState>().settings().lock().language,
+            );
+            let new_window_item = MenuItem::with_id(app, "tray-new-window", crate::services::i18n::translate("tray-new-window", &tray_lang), true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "tray-quit", crate::services::i18n::translate("tray-quit", &tray_lang), true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&new_window_item, &quit_item])?;
-            let mut tray = TrayIconBuilder::new()
+            let mut tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Muster")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {

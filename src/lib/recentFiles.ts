@@ -95,6 +95,15 @@ export function takePendingReveal(id: string): number | null {
   return line ?? null;
 }
 
+/// Drop every tracked entry for a tab id (file path, diff meta, pending
+/// reveal). Called when the tab disappears from the app state, otherwise
+/// these maps only ever grow.
+export function untrackTab(id: string): void {
+  filePaths.delete(id);
+  diffMeta.delete(id);
+  pendingReveals.delete(id);
+}
+
 // ---- closed tab stack ------------------------------------------------------
 
 export function pushClosedTab(tab: ClosedTab): void {

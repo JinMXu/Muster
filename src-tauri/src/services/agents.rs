@@ -101,9 +101,9 @@ pub fn detect_agent(pids: &[u32]) -> Option<AgentKind> {
     detect_agent_with_sys(&crate::services::procs::refresh_and_snapshot(), pids)
 }
 
-/// Same as `detect_agent` but reads a caller-provided `System` cache. Use
-/// this inside a batch that already holds a `refresh_and_snapshot()` guard.
-pub fn detect_agent_with_sys(sys: &sysinfo::System, pids: &[u32]) -> Option<AgentKind> {
+/// Same as `detect_agent` but reads a caller-provided `ProcSnapshot`. Use
+/// this inside a batch built on one `refresh_and_snapshot()` call.
+pub fn detect_agent_with_sys(sys: &crate::services::procs::ProcSnapshot, pids: &[u32]) -> Option<AgentKind> {
     for &pid in pids {
         if let Some((name, cmd)) = crate::services::procs::process_cmdline_with_sys(sys, pid) {
             if let Some(kind) = detect_in(&name, &cmd) {
@@ -201,9 +201,10 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
     // One full-system refresh per poll, shared across every session below.
     // Refreshing inside `session_pids` per-session made the poll cost ~N× of
     // this (and serialised under the sysinfo lock); the `with_sys` callers
-    // read the same cache, so per-session pid detection is now cache-only.
-    // The guard is held for the whole loop - `_with_sys` variants avoid
-    // re-locking (parking_lot Mutex is not reentrant).
+    // read the same snapshot, so per-session pid detection is now cache-only.
+    // `refresh_and_snapshot` copies out the pid/parent/cmdline data and
+    // releases the global SYSTEM lock immediately, so the scan below (and any
+    // concurrent `session_processes` command) never waits on it.
     let procs_cache = crate::services::procs::refresh_and_snapshot();
 
     for (label, state) in shared.all() {

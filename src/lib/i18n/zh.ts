@@ -263,6 +263,7 @@ const zh = {
     dismiss: "关闭",
     sectionCount: ({ title, count }: { title: string; count: number }) =>
       `${title}（${count}）`,
+    moreHidden: ({ n }: { n: number }) => `…还有 ${n} 条未显示`,
     discardRowTitle: "放弃更改",
     commitNStaged: ({ n }: { n: number }) => `提交 ${n} 个已暂存更改`,
     setCheckpoint: "设置检查点",

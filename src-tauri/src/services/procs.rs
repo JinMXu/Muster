@@ -66,14 +66,42 @@ pub fn refresh_global() {
     sys.refresh_processes_specifics(ProcessRefreshKind::everything());
 }
 
-/// Lock the shared `System` cache, refresh it, and return the guard. One
-/// acquisition serves the whole batch - pass `&*guard` to the `_with_sys`
-/// variants so they don't re-lock (parking_lot's Mutex is NOT reentrant,
-/// so a guard held here plus a `SYSTEM.lock()` inside a callee would deadlock).
-pub fn refresh_and_snapshot() -> parking_lot::MutexGuard<'static, System> {
+/// Point-in-time copy of everything a batch scan needs from the sysinfo
+/// cache: the live pid set, parent links, and each process's image name +
+/// joined command line. Built once per poll under the `SYSTEM` lock, which
+/// is released as soon as the copy is done — the per-session scan then runs
+/// lock-free instead of holding the global sysinfo lock for the whole poll.
+pub struct ProcSnapshot {
+    /// Pids alive at refresh time.
+    alive: HashSet<u32>,
+    /// pid -> parent pid (only for processes with a known parent).
+    parents: HashMap<u32, u32>,
+    /// pid -> (image name, joined command line).
+    cmdline: HashMap<u32, (String, String)>,
+}
+
+/// Refresh the shared `System` cache and copy out a `ProcSnapshot`, dropping
+/// the `SYSTEM` lock on return. One acquisition serves the whole batch —
+/// pass `&snapshot` to the `_with_sys` variants so they don't re-lock
+/// (parking_lot's Mutex is NOT reentrant, so locking `SYSTEM` again inside a
+/// callee while the caller holds it would deadlock).
+pub fn refresh_and_snapshot() -> ProcSnapshot {
     let mut sys = SYSTEM.lock();
     sys.refresh_processes_specifics(ProcessRefreshKind::everything());
-    sys
+    let mut snap = ProcSnapshot {
+        alive: HashSet::with_capacity(sys.processes().len()),
+        parents: HashMap::with_capacity(sys.processes().len()),
+        cmdline: HashMap::with_capacity(sys.processes().len()),
+    };
+    for (pid, proc_) in sys.processes() {
+        let pid = pid.as_u32();
+        snap.alive.insert(pid);
+        if let Some(parent) = proc_.parent() {
+            snap.parents.insert(pid, parent.as_u32());
+        }
+        snap.cmdline.insert(pid, (proc_.name().to_string(), proc_.cmd().join(" ")));
+    }
+    snap
 }
 
 /// The pids belonging to a session: every process in its Windows Job Object
@@ -89,22 +117,21 @@ pub fn refresh_and_snapshot() -> parking_lot::MutexGuard<'static, System> {
 ///
 /// This convenience entry refreshes the shared cache first, so each call is
 /// self-contained; for batch callers (the agent poller iterating several
-/// sessions), call `refresh_global()` once and use `session_pids_with_sys`
-/// to avoid an N-times-per-poll refresh.
+/// sessions), call `refresh_and_snapshot()` once and use
+/// `session_pids_with_sys` to avoid an N-times-per-poll refresh.
 pub fn session_pids(session_id: Uuid, fallback_shell_pid: u32) -> Vec<u32> {
-    refresh_global();
-    let sys = SYSTEM.lock();
-    session_pids_with_sys(&sys, session_id, fallback_shell_pid)
+    let snap = refresh_and_snapshot();
+    session_pids_with_sys(&snap, session_id, fallback_shell_pid)
 }
 
-/// Same as `session_pids` but reads an already-refreshed `System` cache
+/// Same as `session_pids` but reads an already-refreshed `ProcSnapshot`
 /// instead of refreshing one itself. The intended call shape for a batch
-/// poller: `refresh_global()` once, then `session_pids_with_sys` for each
-/// session — saves N−1 full-system refreshes per poll.
-pub fn session_pids_with_sys(sys: &System, session_id: Uuid, fallback_shell_pid: u32) -> Vec<u32> {
+/// poller: `refresh_and_snapshot()` once, then `session_pids_with_sys` for
+/// each session — saves N−1 full-system refreshes per poll.
+pub fn session_pids_with_sys(sys: &ProcSnapshot, session_id: Uuid, fallback_shell_pid: u32) -> Vec<u32> {
     if let Some(mut pids) = jobs::query_pids(session_id) {
         // Exited processes can linger in the job's id list briefly; drop them.
-        pids.retain(|&pid| sys.process(Pid::from_u32(pid)).is_some());
+        pids.retain(|&pid| sys.alive.contains(&pid));
         if !pids.is_empty() {
             pids.sort_unstable();
             if let Some(i) = pids.iter().position(|&p| p == fallback_shell_pid) {
@@ -147,16 +174,16 @@ pub fn process_infos(pids: &[u32]) -> Vec<ProcessInfo> {
 /// just `node.exe`.
 pub fn process_cmdline(pid: u32) -> Option<(String, String)> {
     let sys = SYSTEM.lock();
-    process_cmdline_with_sys(&sys, pid)
-}
-
-/// Same as `process_cmdline` but reads a caller-provided `System` cache.
-/// Use this inside a batch that already holds a `refresh_and_snapshot()`
-/// guard - `process_cmdline` would re-lock the `SYSTEM` mutex and deadlock
-/// against the held guard (parking_lot Mutex is not reentrant).
-pub fn process_cmdline_with_sys(sys: &System, pid: u32) -> Option<(String, String)> {
     let p = sys.process(Pid::from_u32(pid))?;
     Some((p.name().to_string(), p.cmd().join(" ")))
+}
+
+/// Same as `process_cmdline` but reads a caller-provided `ProcSnapshot`.
+/// Use this inside a batch built on `refresh_and_snapshot()` —
+/// `process_cmdline` would re-lock the `SYSTEM` mutex and deadlock against
+/// a caller still holding it (parking_lot Mutex is not reentrant).
+pub fn process_cmdline_with_sys(sys: &ProcSnapshot, pid: u32) -> Option<(String, String)> {
+    sys.cmdline.get(&pid).cloned()
 }
 
 /// The shell itself plus every descendant (BFS over parent/child links), in
@@ -168,20 +195,17 @@ pub fn process_cmdline_with_sys(sys: &System, pid: u32) -> Option<(String, Strin
 /// children keep running but their `parent()` chain no longer reaches the
 /// shell, so they silently drop out of the list. Used only as the fallback
 /// when a session has no Job Object.
-fn descendant_pids(sys: &System, shell_pid: u32) -> Vec<u32> {
+fn descendant_pids(sys: &ProcSnapshot, shell_pid: u32) -> Vec<u32> {
     // parent -> children index for the BFS.
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for (pid, proc_) in sys.processes() {
-        if let Some(parent) = proc_.parent() {
-            children.entry(parent.as_u32()).or_default().push(pid.as_u32());
-        }
+    for (&pid, &parent) in &sys.parents {
+        children.entry(parent).or_default().push(pid);
     }
 
     // BFS from the shell, remembering each pid's depth.
-    let root = Pid::from_u32(shell_pid);
     let mut order: Vec<(u32, u32)> = Vec::new(); // (pid, depth)
     let mut queue: VecDeque<(u32, u32)> = VecDeque::new();
-    if sys.process(root).is_some() {
+    if sys.alive.contains(&shell_pid) {
         order.push((shell_pid, 0));
         queue.push_back((shell_pid, 0));
     }

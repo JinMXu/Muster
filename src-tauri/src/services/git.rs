@@ -231,19 +231,43 @@ pub fn status(root: &str) -> GitStatusInfo {
 /// its new-text-file behavior: sum the logical line counts of untracked
 /// entries (untracked directories collapse into one status entry, hence the
 /// recursion). Symlink content is its destination path — one added line.
+///
+/// Counting means reading every untracked file from disk, which on a big
+/// fresh repo (or one with a huge untracked directory) is unbounded I/O, so
+/// the scan is budgeted: at most `UNTRACKED_COUNT_MAX_FILES` files and
+/// `UNTRACKED_COUNT_MAX_BYTES` total, and any single file above
+/// `UNTRACKED_COUNT_MAX_FILE_BYTES` is skipped. Past the budget the count
+/// is silently truncated — the additions number is a stat for the UI, not
+/// exact data.
 fn untracked_line_additions(entries: &[GitStatusEntry], repo_root: &str) -> usize {
     let root = std::path::Path::new(repo_root);
+    let mut budget = LineCountBudget::default();
     entries
         .iter()
         .filter(|e| e.is_untracked)
-        .map(|e| text_line_count(&root.join(&e.path)))
+        .map(|e| text_line_count(&root.join(&e.path), &mut budget))
         .sum()
+}
+
+/// Files/bytes budget for `untracked_line_additions` (see its doc comment).
+const UNTRACKED_COUNT_MAX_FILES: usize = 1000;
+const UNTRACKED_COUNT_MAX_BYTES: u64 = 32 << 20;
+const UNTRACKED_COUNT_MAX_FILE_BYTES: u64 = 1 << 20;
+
+#[derive(Default)]
+struct LineCountBudget {
+    files: usize,
+    bytes: u64,
 }
 
 /// Logical line count of one file, using git's usual NUL-byte binary
 /// heuristic (first 8000 bytes). A trailing partial line still counts.
-fn text_line_count(path: &std::path::Path) -> usize {
+/// Returns 0 once `budget` is exhausted or the file is too large to count.
+fn text_line_count(path: &std::path::Path, budget: &mut LineCountBudget) -> usize {
     use std::io::Read;
+    if budget.files >= UNTRACKED_COUNT_MAX_FILES || budget.bytes >= UNTRACKED_COUNT_MAX_BYTES {
+        return 0;
+    }
     let meta = match std::fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(_) => return 0,
@@ -253,12 +277,14 @@ fn text_line_count(path: &std::path::Path) -> usize {
     }
     if meta.is_dir() {
         return std::fs::read_dir(path)
-            .map(|rd| rd.flatten().map(|e| text_line_count(&e.path())).sum())
+            .map(|rd| rd.flatten().map(|e| text_line_count(&e.path(), budget)).sum())
             .unwrap_or(0);
     }
-    if !meta.is_file() {
+    if !meta.is_file() || meta.len() > UNTRACKED_COUNT_MAX_FILE_BYTES {
         return 0;
     }
+    budget.files += 1;
+    budget.bytes += meta.len();
     let mut file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(_) => return 0,

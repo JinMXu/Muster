@@ -1,11 +1,35 @@
 //! Git commands - thin pass-throughs to `services::git`, wrapped in
 //! `spawn_blocking` so repo I/O doesn't starve Tauri's async runtime.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+
+/// Per-root serialization for `git_status`. The frontend polls from several
+/// intervals without waiting for the previous round, and a cold-cache scan
+/// of a big repo can take minutes — without this gate, duplicate scans of
+/// the same repo pile up on the blocking pool and crowd out everything
+/// else. Later callers queue behind the in-flight one and then re-run
+/// (getting a fresh result), which keeps the semantics exact.
+static STATUS_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 #[tauri::command]
 pub async fn git_status(repo_root: String) -> crate::services::git::GitStatusInfo {
-    tokio::task::spawn_blocking(move || crate::services::git::status(&repo_root))
-        .await
-        .unwrap_or_else(|_| crate::services::git::GitStatusInfo::default())
+    let lock = {
+        STATUS_LOCKS
+            .lock()
+            .entry(repo_root.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    tokio::task::spawn_blocking(move || {
+        let _guard = lock.lock();
+        crate::services::git::status(&repo_root)
+    })
+    .await
+    .unwrap_or_else(|_| crate::services::git::GitStatusInfo::default())
 }
 
 /// Anchor for the right panels: the toplevel of the repo containing `cwd`,

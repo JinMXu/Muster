@@ -22,7 +22,7 @@ import { openMenu } from "./lib/menuStore";
 import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib/terminalRegistry";
 import { pruneHosts as pruneDiffHosts } from "./lib/diffViewRegistry";
 import { getLatestText, clearLatestText } from "./lib/fileEdits";
-import { popClosedTab, pushClosedTab, filePathOf, diffMetaOf } from "./lib/recentFiles";
+import { popClosedTab, pushClosedTab, filePathOf, diffMetaOf, untrackTab } from "./lib/recentFiles";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { usePanelWidth } from "./hooks/usePanelWidth";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
@@ -113,34 +113,39 @@ export default function App() {
         const projectGone = !stateView.projects.some((np) => np.id === p.id);
         for (const t of p.tabs) {
           if (nextTabs.has(t.id)) continue;
-          if (projectGone) continue;
-          const content =
-            t.columns.flatMap((c) => c.panes).find((pn) => pn.id === t.focused_pane_id)?.content ??
-            t.columns[0]?.panes[0]?.content ??
-            null;
-          if (!content) continue;
-          if (content.kind === "file") {
-            const path = filePathOf(content.id);
-            if (path) pushClosedTab({ projectId: p.id, content: { kind: "file", path } });
-          } else if (content.kind === "diff") {
-            const meta = diffMetaOf(content.id);
-            if (meta) {
-              pushClosedTab({
-                projectId: p.id,
-                content: {
-                  kind: "diff",
-                  repoRoot: meta.repoRoot,
-                  path: meta.path,
-                  staged: meta.staged,
-                  oldRev: meta.oldRev ?? undefined,
-                  newRev: meta.newRev ?? undefined,
-                  workdir: meta.workdir,
-                },
-              });
+          if (!projectGone) {
+            const content =
+              t.columns.flatMap((c) => c.panes).find((pn) => pn.id === t.focused_pane_id)?.content ??
+              t.columns[0]?.panes[0]?.content ??
+              null;
+            if (content) {
+              if (content.kind === "file") {
+                const path = filePathOf(content.id);
+                if (path) pushClosedTab({ projectId: p.id, content: { kind: "file", path } });
+              } else if (content.kind === "diff") {
+                const meta = diffMetaOf(content.id);
+                if (meta) {
+                  pushClosedTab({
+                    projectId: p.id,
+                    content: {
+                      kind: "diff",
+                      repoRoot: meta.repoRoot,
+                      path: meta.path,
+                      staged: meta.staged,
+                      oldRev: meta.oldRev ?? undefined,
+                      newRev: meta.newRev ?? undefined,
+                      workdir: meta.workdir,
+                    },
+                  });
+                }
+              } else if (content.kind === "session") {
+                pushClosedTab({ projectId: p.id, content: { kind: "session" } });
+              }
             }
-          } else if (content.kind === "session") {
-            pushClosedTab({ projectId: p.id, content: { kind: "session" } });
           }
+          // The tab is gone: drop its tracked path/diff-meta/pending-reveal
+          // entries so those maps don't grow without bound.
+          untrackTab(t.id);
         }
       }
     }

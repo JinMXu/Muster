@@ -8,27 +8,38 @@ use crate::models::pane::{FocusDirection, PaneContent, PaneDropEdge, ResizeDirec
 use crate::models::project::RightPanel;
 
 #[tauri::command]
-pub fn split(window: Window, state: State<SharedState>, edge: PaneDropEdge) -> Result<(), String> {
+pub async fn split(window: Window, state: State<'_, SharedState>, edge: PaneDropEdge) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
-    {
-        let mut g = s.lock();
-        g.split(edge);
-    }
-    // Spawn the PTY for the new session created by `split`. The session id
-    // is the focused pane's session (the one we just inserted).
-    let new_session_opt = {
-        let g = s.lock();
-        g.selected_tab()
-            .and_then(|t| t.focused_pane())
-            .and_then(|p| match &p.content {
-                PaneContent::Session(id) => g.sessions.get(id).cloned(),
-                _ => None,
-            })
-    };
-    if let Some(session) = new_session_opt {
-        session.spawn(80, 24).map_err(|e| e.to_string())?;
-        session.attach_read_loop(window.app_handle().clone(), window.label().to_string());
-    }
+    // The PTY spawn for the new session (ConPty + CreateProcessW + shell
+    // detection) is slow, so the whole mutation+spawn runs on the blocking
+    // pool; `emit_state` still fires afterwards, as before.
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    let s2 = s.clone();
+    tokio::task::spawn_blocking(move || {
+        {
+            let mut g = s2.lock();
+            g.split(edge);
+        }
+        // Spawn the PTY for the new session created by `split`. The session
+        // id is the focused pane's session (the one we just inserted).
+        let new_session_opt = {
+            let g = s2.lock();
+            g.selected_tab()
+                .and_then(|t| t.focused_pane())
+                .and_then(|p| match &p.content {
+                    PaneContent::Session(id) => g.sessions.get(id).cloned(),
+                    _ => None,
+                })
+        };
+        if let Some(session) = new_session_opt {
+            session.spawn(80, 24).map_err(|e| e.to_string())?;
+            session.attach_read_loop(app, label);
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     emit_state(&window, &s.lock());
     Ok(())
 }

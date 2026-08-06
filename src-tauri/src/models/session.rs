@@ -18,9 +18,22 @@ use crate::base64_encode;
 /// buffer lives in xterm.js on the frontend.
 const MAX_SCROLLBACK_LINES: usize = 400;
 
+/// `pty:data` batching: reads are accumulated and emitted once the output
+/// pipe is momentarily drained (see `attach_read_loop`), so a flood of
+/// small reads becomes one emit per burst instead of one base64 payload +
+/// emit per ≤8 KiB read. This caps a single batch during an endless flood.
+const PTY_FLUSH_MAX_BYTES: usize = 64 * 1024;
+
+/// Cap for the unterminated scrollback tail (`scrollback_pending`): output
+/// with no newline for a long stretch (progress spam, binary dumps) is
+/// force-cut into a line at this size so the pending buffer and its
+/// `find('\n')` scans stay bounded.
+const MAX_SCROLLBACK_PENDING_BYTES: usize = 64 * 1024;
+
 /// One login shell owned by a terminal pane. The PTY is spawned via
-/// `spawn()`, after which the master is held for `resize`, the writer for
-/// `send_text`, and the reader drives an output pump thread.
+/// `spawn()`, after which the master is held for `resize`, input goes
+/// through a channel to a dedicated writer thread (`send_text`), and the
+/// reader drives an output pump thread.
 pub struct TerminalSession {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -54,7 +67,10 @@ pub struct TerminalSession {
     ansi: Mutex<AnsiStripper>,
 
     conpty: Mutex<Option<ConPty>>,
-    writer: Mutex<Option<Box<dyn Write + Send>>>,
+    /// Sending half of the input channel feeding the session's writer
+    /// thread (see `spawn_input_writer`). `None` before `spawn()` and after
+    /// `terminate()` (dropping it closes the channel → the thread exits).
+    input_tx: Mutex<Option<std::sync::mpsc::Sender<Vec<u8>>>>,
 }
 
 impl TerminalSession {
@@ -77,7 +93,7 @@ impl TerminalSession {
             scrollback_pending: Mutex::new(String::new()),
             ansi: Mutex::new(AnsiStripper::default()),
             conpty: Mutex::new(None),
-            writer: Mutex::new(None),
+            input_tx: Mutex::new(None),
         }
     }
 
@@ -101,7 +117,7 @@ impl TerminalSession {
         crate::services::procs::track_session(self.id, pid);
 
         let writer = conpty.take_writer()?;
-        *self.writer.lock() = Some(writer);
+        *self.input_tx.lock() = Some(spawn_input_writer(self.id, writer));
         *self.conpty.lock() = Some(conpty);
 
         Ok(())
@@ -132,17 +148,45 @@ impl TerminalSession {
             // across read chunk boundaries, so partial OSC bodies are kept
             // inside the scanner between chunks.
             let mut scanner = OscScanner::new();
+            // Batching buffer for `pty:data`. A burst of output arrives as
+            // many back-to-back reads; instead of emitting per read (one
+            // base64 payload + event per ≤8 KiB), accumulate and emit once
+            // the pipe is momentarily drained (PeekNamedPipe never blocks,
+            // and a pipe read returns as soon as ≥1 byte is queued, so the
+            // drain loop can't stall). Crucially this has no timer: a lone
+            // chunk — a keystroke echo — is emitted right away, and the
+            // tail of a burst never sits unflushed while `read` blocks.
+            // PTY_FLUSH_MAX_BYTES caps one batch during an endless flood.
+            let mut pending: Vec<u8> = Vec::new();
+            let flush = |pending: &mut Vec<u8>| {
+                if pending.is_empty() {
+                    return;
+                }
+                let payload = serde_json::json!({
+                    "id": session_id,
+                    "data": base64_encode(pending),
+                });
+                let _ = app.emit_to(&label, "pty:data", payload);
+                pending.clear();
+            };
             loop {
-                if inner.is_exited() { break }
+                if inner.is_exited() {
+                    flush(&mut pending);
+                    break;
+                }
+                if !pending.is_empty()
+                    && (pending.len() >= PTY_FLUSH_MAX_BYTES || pipe_avail(&reader) == 0)
+                {
+                    flush(&mut pending);
+                }
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        flush(&mut pending);
+                        break;
+                    }
                     Ok(n) => {
                         inner.record_output(&buf[..n]);
-                        let payload = serde_json::json!({
-                            "id": session_id,
-                            "data": base64_encode(&buf[..n]),
-                        });
-                        let _ = app.emit_to(&label, "pty:data", payload);
+                        pending.extend_from_slice(&buf[..n]);
                         let scan = scanner.feed(&buf[..n]);
                         if let Some(cwd) = scan.cwd {
                             let mut wd = inner.working_directory.lock();
@@ -168,7 +212,11 @@ impl TerminalSession {
                             notify_bell(&app, &label, &inner);
                         }
                     }
-                    Err(e) => { log::debug!("pty read ended (session {}): {e}", session_id); break; },
+                    Err(e) => {
+                        flush(&mut pending);
+                        log::debug!("pty read ended (session {}): {e}", session_id);
+                        break;
+                    }
                 }
             }
             // The shell exited on its own (EOF / read error), e.g. the user
@@ -234,6 +282,22 @@ impl TerminalSession {
                 sb.pop_front();
             }
         }
+        // Cap the unterminated tail: output without a newline for a long
+        // stretch (progress spam, binary dumps) would otherwise grow
+        // `pending` without bound and make every `find('\n')` above an O(n)
+        // scan. Hard-cut at a char boundary and push the cut part as a line.
+        if pending.len() > MAX_SCROLLBACK_PENDING_BYTES {
+            let mut cut = MAX_SCROLLBACK_PENDING_BYTES;
+            while !pending.is_char_boundary(cut) {
+                cut += 1;
+            }
+            let line: String = pending.drain(..cut).collect();
+            let mut sb = self.scrollback.lock();
+            sb.push_back(line);
+            while sb.len() > MAX_SCROLLBACK_LINES {
+                sb.pop_front();
+            }
+        }
     }
 
     /// The last `max` scrollback lines (with newlines), plus any partial
@@ -263,14 +327,14 @@ impl TerminalSession {
     }
 
     pub fn send_text(&self, text: &str) {
-        if let Some(w) = self.writer.lock().as_mut() {
-            if let Err(e) = w.write_all(text.as_bytes()) {
-                log::warn!("pty write failed (session {}): {e}", self.id);
-                return;
-            }
-            if let Err(e) = w.flush() {
-                log::warn!("pty flush failed (session {}): {e}", self.id);
-            }
+        if let Some(tx) = self.input_tx.lock().as_ref() {
+            // Queue-only: the actual (blocking) pipe write happens on the
+            // session's writer thread. A TUI that stops reading stdin makes
+            // conhost stop draining the pipe; with a direct write here that
+            // blocked the caller — which held the AppState lock, freezing
+            // the whole app. The queue is unbounded: terminal input is
+            // tiny, and a stuck pipe now only stalls the writer thread.
+            let _ = tx.send(text.as_bytes().to_vec());
         }
     }
 
@@ -286,6 +350,10 @@ impl TerminalSession {
         if let Some(conpty) = self.conpty.lock().as_mut() {
             conpty.kill_child();
         }
+        // Close the input channel so the writer thread exits; a write
+        // currently blocked on a full pipe fails once the child (and with
+        // it conhost) is gone.
+        *self.input_tx.lock() = None;
         crate::services::procs::untrack_session(self.id);
         *self.has_exited.lock() = true;
     }
@@ -296,6 +364,52 @@ impl TerminalSession {
     /// Sessions created by snapshot restore start unspawned; bootstrap spawns
     /// them once the app handle is ready.
     pub fn is_spawned(&self) -> bool { self.conpty.lock().is_some() }
+}
+
+/// Bytes currently queued in the PTY output pipe, without blocking
+/// (`PeekNamedPipe`). Errors report 0 ("drained") — the next blocking read
+/// surfaces the real error.
+#[cfg(windows)]
+fn pipe_avail(reader: &std::fs::File) -> u32 {
+    use std::os::windows::io::AsRawHandle;
+    let mut avail: u32 = 0;
+    let ok = unsafe {
+        windows::Win32::System::Pipes::PeekNamedPipe(
+            windows::Win32::Foundation::HANDLE(reader.as_raw_handle()),
+            None,
+            0,
+            None,
+            Some(&mut avail),
+            None,
+        )
+    };
+    if ok.is_ok() { avail } else { 0 }
+}
+
+/// Spawn the dedicated writer thread for one session's PTY input pipe and
+/// return the sending half of its channel. Writes are inherently blocking
+/// (`WriteFile` on a ~4 KiB pipe), and a TUI that stops reading stdin makes
+/// conhost stop draining it — doing this on a caller thread (which held the
+/// AppState lock) froze the whole app. With a channel, only this thread can
+/// ever block on a full pipe; byte order is preserved by the FIFO queue.
+/// The thread exits when the channel closes (sender dropped on
+/// `terminate()`/session drop) or when the pipe breaks.
+fn spawn_input_writer(session_id: Uuid, mut writer: Box<dyn Write + Send>) -> std::sync::mpsc::Sender<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        while let Ok(bytes) = rx.recv() {
+            if let Err(e) = writer.write_all(&bytes) {
+                log::warn!("pty write failed (session {}): {e}", session_id);
+                break;
+            }
+            if let Err(e) = writer.flush() {
+                log::warn!("pty flush failed (session {}): {e}", session_id);
+                break;
+            }
+        }
+        // Dropping `writer` here closes our end of the input pipe.
+    });
+    tx
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -768,5 +882,39 @@ mod tests {
         s.record_output(b"x");
         // The elapsed time since the write is near zero.
         assert!(s.idle_for() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn input_writer_preserves_byte_order_and_content() {
+        struct MockWriter {
+            buf: Arc<Mutex<Vec<u8>>>,
+            flushed: std::sync::mpsc::Sender<()>,
+        }
+        impl Write for MockWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.buf.lock().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                let _ = self.flushed.send(());
+                Ok(())
+            }
+        }
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let tx = spawn_input_writer(
+            Uuid::new_v4(),
+            Box::new(MockWriter { buf: buf.clone(), flushed: done_tx }),
+        );
+        // Keystrokes, a backspace byte and Enter must reach the pipe
+        // untouched and in send order.
+        tx.send(b"echo hi".to_vec()).unwrap();
+        tx.send(vec![0x7f]).unwrap();
+        tx.send(b"\r".to_vec()).unwrap();
+        drop(tx); // closes the channel → the writer thread exits
+        for _ in 0..3 {
+            done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        assert_eq!(*buf.lock(), b"echo hi\x7f\r");
     }
 }

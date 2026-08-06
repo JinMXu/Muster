@@ -5,19 +5,31 @@ use uuid::Uuid;
 
 use super::{emit_state, SharedState};
 
-/// Keeps `for_label` (get-or-create): the command returns a bare `Uuid` with
-/// no error channel, and it is only ever invoked by a live window — which
-/// the Destroyed cleanup path will own.
+/// Keeps `for_label` (get-or-create): it is only ever invoked by a live
+/// window — which the Destroyed cleanup path will own. (The `Result` is
+/// required by Tauri for async commands borrowing `State`; the frontend
+/// still just receives the `Uuid`.)
 #[tauri::command]
-pub fn new_project(window: Window, state: State<SharedState>, directory: Option<String>) -> Uuid {
+pub async fn new_project(window: Window, state: State<'_, SharedState>, directory: Option<String>) -> Result<Uuid, String> {
     let s = state.for_label(window.label());
-    let id = s.lock().new_project(directory);
-    // new_project spawns a session model without a PTY — bring it up now,
-    // same as bootstrap does for restored/starter sessions.
-    crate::bootstrap::spawn_pending(window.app_handle(), window.label(), &s);
-    crate::bootstrap::start_read_loops(window.app_handle(), window.label(), &s);
+    // `spawn_pending` brings up the new session's PTY (ConPty +
+    // CreateProcessW + shell detection, 100ms–1s) — run the whole thing on
+    // the blocking pool, same as `spawn_session`.
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    let s2 = s.clone();
+    let id = tokio::task::spawn_blocking(move || {
+        let id = s2.lock().new_project(directory);
+        // new_project spawns a session model without a PTY — bring it up
+        // now, same as bootstrap does for restored/starter sessions.
+        crate::bootstrap::spawn_pending(&app, &label, &s2);
+        crate::bootstrap::start_read_loops(&app, &label, &s2);
+        id
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     emit_state(&window, &s.lock());
-    id
+    Ok(id)
 }
 
 #[tauri::command]

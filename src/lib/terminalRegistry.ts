@@ -34,8 +34,15 @@ const registry = new Map<string, Entry>();
 
 /// Per-session buffer of incoming PTY data that arrived before the xterm
 /// instance was registered. Data is base64-encoded strings from the backend,
-/// flushed into the terminal when `create()` is called.
-const pendingBuffers = new Map<string, string[]>();
+/// flushed into the terminal when `create()` is called. Capped per session:
+/// a background session's output must not grow the JS heap without bound,
+/// and keeping more than xterm's scrollback (1000 lines) is pointless anyway.
+const MAX_PENDING_BYTES = 256 * 1024; // base64 chars kept per session
+interface PendingBuffer {
+  chunks: string[];
+  size: number;
+}
+const pendingBuffers = new Map<string, PendingBuffer>();
 
 /// Backend PTY events are listened to once for the whole module (not once per
 /// session) and dispatched by session id. Per-session listeners would outlive
@@ -57,12 +64,18 @@ export function ensureListeners(): Promise<void> {
       listen<PtyDataPayload>("pty:data", (event) => {
         const entry = registry.get(event.payload.id);
         if (!entry) {
-          // Terminal not yet created — buffer output so it renders when the pane mounts.
-          const buf = pendingBuffers.get(event.payload.id);
-          if (buf) {
-            buf.push(event.payload.data);
-          } else {
-            pendingBuffers.set(event.payload.id, [event.payload.data]);
+          // Terminal not yet created — buffer output so it renders when the
+          // pane mounts. Keep only the tail: drop the oldest chunks once the
+          // cap is exceeded.
+          let buf = pendingBuffers.get(event.payload.id);
+          if (!buf) {
+            buf = { chunks: [], size: 0 };
+            pendingBuffers.set(event.payload.id, buf);
+          }
+          buf.chunks.push(event.payload.data);
+          buf.size += event.payload.data.length;
+          while (buf.size > MAX_PENDING_BYTES && buf.chunks.length > 1) {
+            buf.size -= buf.chunks.shift()!.length;
           }
           return;
         }
@@ -220,7 +233,7 @@ function create(sessionId: string): Entry {
   // the pane).
   const pending = pendingBuffers.get(sessionId);
   if (pending) {
-    for (const data of pending) {
+    for (const data of pending.chunks) {
       term.write(base64ToBytes(data));
     }
     pendingBuffers.delete(sessionId);

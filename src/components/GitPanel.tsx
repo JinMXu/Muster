@@ -702,6 +702,11 @@ function OpsBanner({
   );
 }
 
+/// Max rows rendered per section. Huge repos (tens of thousands of
+/// untracked files) would otherwise insert that many DOM nodes at once
+/// and stall the renderer; the rest is summarized in a footer line.
+const MAX_SECTION_ROWS = 500;
+
 function Section({
   title,
   items,
@@ -732,7 +737,7 @@ function Section({
         </span>
         {actions && <span className="flex items-center gap-0.5">{actions}</span>}
       </div>
-      {items.map((e) => (
+      {items.slice(0, MAX_SECTION_ROWS).map((e) => (
         <div
           key={e.path}
           className="group flex items-center gap-1 px-2 py-1 hover:bg-muster-hover rounded ui-fs-sm"
@@ -766,6 +771,11 @@ function Section({
           )}
         </div>
       ))}
+      {items.length > MAX_SECTION_ROWS && (
+        <div className="px-2 py-1 ui-fs-xs text-muster-muted">
+          {t("git.moreHidden", { n: items.length - MAX_SECTION_ROWS })}
+        </div>
+      )}
     </div>
   );
 }

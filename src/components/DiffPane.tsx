@@ -34,9 +34,20 @@ export default function DiffPane({ diffId, visible }: { diffId: string; visible:
   useEffect(() => {
     if (!visible) return; // parked: keep the fetched diff, don't poll
     let alive = true;
-    const tick = () => api.diffInfo(diffId).then((d) => alive && setDiff(d));
+    const tick = () =>
+      api.diffInfo(diffId).then((d) => {
+        if (!alive) return;
+        // Skip the state update (and the re-render it causes) when the
+        // content is unchanged — most polls return an identical diff.
+        setDiff((prev) =>
+          prev && d && prev.old === d.old && prev.new === d.new &&
+          prev.loading === d.loading && prev.error === d.error
+            ? prev
+            : d
+        );
+      });
     tick();
-    const interval = setInterval(tick, 1000);
+    const interval = setInterval(tick, 3000);
     return () => {
       alive = false;
       clearInterval(interval);

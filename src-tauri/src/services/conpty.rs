@@ -15,7 +15,7 @@
 #![cfg(windows)]
 
 use std::ffi::c_void;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
 use std::ptr;
 
@@ -231,9 +231,9 @@ impl ConPty {
         Ok(pid)
     }
 
-    pub fn take_reader(&mut self) -> io::Result<Box<dyn Read + Send>> {
+    pub fn take_reader(&mut self) -> io::Result<std::fs::File> {
         self.reader.take()
-            .map(|h| Box::new(unsafe { std::fs::File::from_raw_handle(h.into_raw_handle()) }) as Box<dyn Read + Send>)
+            .map(|h| unsafe { std::fs::File::from_raw_handle(h.into_raw_handle()) })
             .ok_or_else(|| io::Error::other("reader already taken"))
     }
 

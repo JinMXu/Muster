@@ -265,6 +265,7 @@ const en = {
     dismiss: "Dismiss",
     sectionCount: ({ title, count }: { title: string; count: number }) =>
       `${title} (${count})`,
+    moreHidden: ({ n }: { n: number }) => `… ${n} more not shown`,
     discardRowTitle: "Discard changes",
     commitNStaged: ({ n }: { n: number }) => `Commit ${n} staged`,
     setCheckpoint: "Set Checkpoint",

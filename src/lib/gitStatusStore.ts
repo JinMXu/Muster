@@ -12,6 +12,10 @@ type Listener = (info: GitStatusInfo) => void;
 
 interface Entry {
   info: GitStatusInfo | null;
+  /// Cached JSON of `info` — comparing against the previous poll costs one
+  /// stringify of the new payload instead of two (the payload can be
+  /// megabytes in a large repo).
+  json: string;
   listeners: Set<Listener>;
   timer: ReturnType<typeof setInterval>;
 }
@@ -22,7 +26,14 @@ async function refresh(root: string) {
   const e = entries.get(root);
   if (!e) return;
   try {
-    e.info = await api.gitStatus(root);
+    const next = await api.gitStatus(root);
+    // Skip the fan-out when nothing changed: listeners re-render on every
+    // notification, and most polls return an identical snapshot. Only the
+    // new payload is serialized; the previous one is kept cached on the entry.
+    const json = JSON.stringify(next);
+    if (e.info && json === e.json) return;
+    e.json = json;
+    e.info = next;
     for (const l of e.listeners) l(e.info);
   } catch {
     // Transient git error (lock, repo vanished): keep the last snapshot.
@@ -46,7 +57,7 @@ export function useGitStatus(root: string | null): GitStatusInfo | null {
     }
     let e = entries.get(root);
     if (!e) {
-      e = { info: null, listeners: new Set(), timer: setInterval(() => refresh(root), POLL_MS) };
+      e = { info: null, json: "", listeners: new Set(), timer: setInterval(() => refresh(root), POLL_MS) };
       entries.set(root, e);
       refresh(root);
     }

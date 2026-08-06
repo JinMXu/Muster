@@ -51,11 +51,25 @@ fn powershell_spec(path: String, name: &str) -> ShellSpec {
 
 #[cfg(windows)]
 fn write_integration_script() -> Option<String> {
-    let dir = crate::services::persist::app_data_dir();
-    std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join("shell-integration.ps1");
-    std::fs::write(&path, INTEGRATION_PS1).ok()?;
-    Some(path.to_string_lossy().to_string())
+    // Resolved once per process: the script content is a compile-time
+    // constant, so after the first write (or a matching existing file)
+    // later spawns skip the disk I/O entirely.
+    static SCRIPT: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SCRIPT
+        .get_or_init(|| {
+            let dir = crate::services::persist::app_data_dir();
+            std::fs::create_dir_all(&dir).ok()?;
+            let path = dir.join("shell-integration.ps1");
+            let stale = match std::fs::read(&path) {
+                Ok(existing) => existing != INTEGRATION_PS1.as_bytes(),
+                Err(_) => true,
+            };
+            if stale {
+                std::fs::write(&path, INTEGRATION_PS1).ok()?;
+            }
+            Some(path.to_string_lossy().to_string())
+        })
+        .clone()
 }
 
 #[cfg(windows)]

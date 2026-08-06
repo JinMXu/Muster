@@ -64,7 +64,33 @@ export default function App() {
     // (the IPC round-trip completes). Starting them earlier drops their
     // initial output — restored sessions would show a blank terminal.
     ensureListeners().then(() => invoke('init_read_loops'));
+    // A tray "Settings" click that had to rebuild this window queues its
+    // action here; consume it now that the webview is up (a one-shot event
+    // emitted before mount would be lost).
+    api.takePendingAction().then((action) => {
+      if (action === "open-settings") {
+        setSettingsTab("general");
+        setShowSettings(true);
+      }
+    }).catch(() => {});
   }, [setStateRaw]);
+
+  // Tray "Settings" while the window is already alive arrives as an event.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen("open-settings", () => {
+      setSettingsTab("general");
+      setShowSettings(true);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   const savedSettings = useSettings();
   const sysLang = useMemo(() => detectInitialLang(), []);

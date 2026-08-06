@@ -35,6 +35,7 @@ const c = <T>(name: string, args?: Record<string, unknown>): Promise<T> => invok
 export const api = {
   state: () => c<AppStateView>("get_state"),
   settings: () => c<Settings>("get_settings"),
+  takePendingAction: () => c<string | null>("take_pending_action"),
   defaultSettings: () => c<Settings>("default_settings"),
   saveSettings: (s: Settings) => c<void>("save_settings", { settings: s }),
   availableThemes: () => c<string[]>("available_themes"),

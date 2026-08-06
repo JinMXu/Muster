@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use parking_lot::Mutex;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::commands::SharedState;
@@ -157,20 +157,40 @@ pub fn run() {
             let tray_lang = crate::services::i18n::effective(
                 &app.state::<SharedState>().settings().lock().language,
             );
-            let new_window_item = MenuItem::with_id(app, "tray-new-window", crate::services::i18n::translate("tray-new-window", &tray_lang), true, None::<&str>)?;
+            let show_main_item = MenuItem::with_id(app, "tray-show-main", crate::services::i18n::translate("tray-show-main", &tray_lang), true, None::<&str>)?;
+            let open_folder_item = MenuItem::with_id(app, "tray-open-folder", crate::services::i18n::translate("tray-open-folder", &tray_lang), true, None::<&str>)?;
+            let open_settings_item = MenuItem::with_id(app, "tray-open-settings", crate::services::i18n::translate("tray-open-settings", &tray_lang), true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "tray-quit", crate::services::i18n::translate("tray-quit", &tray_lang), true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&new_window_item, &quit_item])?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(app, &[&show_main_item, &open_folder_item, &open_settings_item, &separator, &quit_item])?;
             let mut tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Muster")
                 .menu(&menu)
+                // Left-click restores the main window instead of opening the
+                // menu; the context menu stays on right-click.
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "tray-new-window" => {
-                        let _ = spawn_window(app);
+                    "tray-show-main" => {
+                        show_main_window(app);
+                    }
+                    "tray-open-folder" => {
+                        open_folder_in_main(app);
+                    }
+                    "tray-open-settings" => {
+                        open_settings(app);
                     }
                     "tray-quit" => {
                         save_all_snapshots(app);
                         terminate_all_sessions(app);
                         app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| match event {
+                    // Single or double left-click restores the main window.
+                    TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }
+                    | TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => {
+                        show_main_window(tray.app_handle());
                     }
                     _ => {}
                 });
@@ -323,8 +343,57 @@ pub fn spawn_window(app: &AppHandle) -> Result<(), String> {
     }
     spawn_pending(app, &label, &s);
 
-    // Mirror the chrome settings of the "main" window in tauri.conf.json.
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+    build_window(app, &label)
+}
+
+/// Bring the main window back to the foreground. When the last window was
+/// closed the main window is only hidden (tray keep-alive), so this shows
+/// and focuses it; if it was actually closed while a secondary window kept
+/// the process alive, it is rebuilt from its persisted snapshot. Shared by
+/// the tray menu's "Open Main Window" and a left-click on the tray icon.
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
+    if let Err(e) = spawn_main_window(app) {
+        log::error!("failed to reopen main window: {e}");
+    }
+}
+
+/// Recreate the "main" window after it was closed while the process kept
+/// running in the tray. Mirrors the startup restore path: the persisted
+/// snapshot is restored (or a starter project created), pending sessions are
+/// spawned, and the window is rebuilt. The webview's first `get_state`
+/// already sees the restored layout, and its `init_read_loops` invoke starts
+/// the PTY output pumps.
+fn spawn_main_window(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<SharedState>();
+    let main = state.for_label("main");
+    {
+        let mut g = main.lock();
+        if let Some(snapshot) = crate::services::persist::load_snapshot_for("main") {
+            g.restore(&snapshot);
+        }
+        if g.projects.is_empty() {
+            g.new_project(None);
+        }
+    }
+    spawn_pending(app, "main", &main);
+    build_window(app, "main")?;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+/// Build a Muster window with the same chrome settings as the "main" window
+/// in tauri.conf.json (frameless, fixed starter size). Shared by the
+/// secondary-window spawner and the main-window recreation path.
+fn build_window(app: &AppHandle, label: &str) -> Result<(), String> {
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title("Muster")
         .inner_size(1000.0, 680.0)
         .min_inner_size(720.0, 480.0)
@@ -332,6 +401,60 @@ pub fn spawn_window(app: &AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Bring up the main window, then open a native folder picker. The chosen
+/// directory is opened as a new project in the main window (the same flow
+/// the `muster <dir>` CLI uses), so a project can be started straight from
+/// the tray without touching the UI.
+fn open_folder_in_main(app: &AppHandle) {
+    show_main_window(app);
+    use tauri_plugin_dialog::DialogExt;
+    let app = app.clone();
+    app.dialog().file().pick_folder(move |path| {
+        let Some(path) = path else { return };
+        let dir = match path.into_path() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(_) => return,
+        };
+        if dir.is_empty() {
+            return;
+        }
+        open_directory_as_project(&app, &dir);
+    });
+}
+
+/// Open `dir` as a new project in the main window and make the UI pick it
+/// up. Mirrors the single-instance argv handler so tray-opened projects
+/// behave identically to CLI-opened ones.
+fn open_directory_as_project(app: &AppHandle, dir: &str) {
+    let state = app.state::<SharedState>();
+    let main = state.for_label("main");
+    main.lock().new_project(Some(dir.to_string()));
+    spawn_pending(app, "main", &main);
+    start_read_loops(app, "main", &main);
+    if let Some(window) = app.get_webview_window("main") {
+        let view = main.lock().view();
+        let _ = window.emit("state-changed", view);
+    }
+}
+
+/// Show the main window and open its settings modal. When the window had to
+/// be recreated, the action is queued in `pending_action` instead of being
+/// emitted as an event: the freshly built webview can't have registered its
+/// listeners yet, so a one-shot event would be silently dropped.
+fn open_settings(app: &AppHandle) {
+    let missing = app.get_webview_window("main").is_none();
+    if missing {
+        app.state::<SharedState>()
+            .pending_action
+            .lock()
+            .replace("open-settings".into());
+    }
+    show_main_window(app);
+    if !missing {
+        let _ = app.emit_to("main", "open-settings", ());
+    }
 }
 
 /// Pick the next deterministic secondary-window label: `win-N` where N is one

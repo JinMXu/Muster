@@ -39,6 +39,11 @@ pub struct SharedState {
     settings: Arc<Mutex<Settings>>,
     pub usage: Arc<Mutex<UsageCache>>,
     pub agents: Arc<Mutex<AgentCache>>,
+    /// One-shot UI action queued by a tray menu item while the main window
+    /// is being (re)created. The frontend consumes it on mount via
+    /// `take_pending_action`, so a tray click can't be lost to the race
+    /// between the window build and the webview's event listeners.
+    pub pending_action: Arc<Mutex<Option<String>>>,
 }
 
 impl SharedState {
@@ -48,6 +53,7 @@ impl SharedState {
             settings: Arc::new(Mutex::new(settings)),
             usage: Arc::new(Mutex::new(UsageCache::default())),
             agents: Arc::new(Mutex::new(AgentCache::default())),
+            pending_action: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -107,6 +113,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
         .invoke_handler(tauri::generate_handler![
             state::get_state,
             state::get_settings,
+            state::take_pending_action,
             state::default_settings,
             state::save_settings,
             state::available_themes,

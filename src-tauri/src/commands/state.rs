@@ -21,6 +21,14 @@ pub fn get_settings(state: State<SharedState>) -> Settings {
     state.settings.lock().clone()
 }
 
+/// Consume a one-shot UI action queued by the tray (e.g. "open-settings"
+/// while the main window was being recreated). Called once by a window's
+/// frontend right after mount; returns `None` when nothing is pending.
+#[tauri::command]
+pub fn take_pending_action(state: State<SharedState>) -> Option<String> {
+    state.pending_action.lock().take()
+}
+
 /// Factory defaults for the Settings modal's "Reset" button — returned
 /// without touching the persisted config (the modal's Save does that).
 #[tauri::command]
@@ -38,12 +46,15 @@ pub fn save_settings(app: AppHandle, state: State<SharedState>, settings: Settin
     // the tray exposes no menu read accessor, so rebuild it in place.
     let lang = crate::services::i18n::effective(&guard.language);
     if let Some(tray) = app.tray_by_id("main-tray") {
-        use tauri::menu::{Menu, MenuItem};
-        if let (Ok(new_window), Ok(quit)) = (
-            MenuItem::with_id(&app, "tray-new-window", crate::services::i18n::translate("tray-new-window", &lang), true, None::<&str>),
+        use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+        if let (Ok(show_main), Ok(open_folder), Ok(open_settings), Ok(quit), Ok(separator)) = (
+            MenuItem::with_id(&app, "tray-show-main", crate::services::i18n::translate("tray-show-main", &lang), true, None::<&str>),
+            MenuItem::with_id(&app, "tray-open-folder", crate::services::i18n::translate("tray-open-folder", &lang), true, None::<&str>),
+            MenuItem::with_id(&app, "tray-open-settings", crate::services::i18n::translate("tray-open-settings", &lang), true, None::<&str>),
             MenuItem::with_id(&app, "tray-quit", crate::services::i18n::translate("tray-quit", &lang), true, None::<&str>),
+            PredefinedMenuItem::separator(&app),
         ) {
-            if let Ok(menu) = Menu::with_items(&app, &[&new_window, &quit]) {
+            if let Ok(menu) = Menu::with_items(&app, &[&show_main, &open_folder, &open_settings, &separator, &quit]) {
                 let _ = tray.set_menu(Some(menu));
             }
         }

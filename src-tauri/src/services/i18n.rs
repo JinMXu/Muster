@@ -10,7 +10,9 @@ pub fn translate<'a>(key: &'a str, lang: &str) -> &'a str {
         ("name-already-exists", true) => "此处已存在名为 '{name}' 的项",
         ("invalid-name", true) => "名称无效",
         ("name-no-slash", true) => "名称不能包含 '/' 或 '\\'",
-        ("tray-new-window", true) => "新建窗口",
+        ("tray-show-main", true) => "打开主窗口",
+        ("tray-open-folder", true) => "打开目录…",
+        ("tray-open-settings", true) => "设置",
         ("tray-quit", true) => "退出",
 
         // English defaults; unknown keys fall through to the key itself.
@@ -19,7 +21,9 @@ pub fn translate<'a>(key: &'a str, lang: &str) -> &'a str {
         ("name-already-exists", _) => "An item named '{name}' already exists here.",
         ("invalid-name", _) => "'{name}' is not a valid name.",
         ("name-no-slash", _) => "A name can't contain '/' or '\\'.",
-        ("tray-new-window", _) => "New Window",
+        ("tray-show-main", _) => "Open Main Window",
+        ("tray-open-folder", _) => "Open Folder…",
+        ("tray-open-settings", _) => "Settings",
         ("tray-quit", _) => "Quit",
         _ => key,
     }

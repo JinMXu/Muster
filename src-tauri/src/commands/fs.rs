@@ -7,9 +7,14 @@ use tauri::{Manager, State, Window};
 use super::{emit_state, unknown_window, SharedState};
 use crate::services::explorer;
 
+/// Runs on the blocking pool like `search_files`: a huge or slow (e.g.
+/// network) directory listing must not stall Tauri's main thread, where
+/// non-async commands execute.
 #[tauri::command]
-pub fn list_directory(path: String) -> Vec<explorer::DirEntry> {
-    explorer::list_directory(&path)
+pub async fn list_directory(path: String) -> Vec<explorer::DirEntry> {
+    tokio::task::spawn_blocking(move || explorer::list_directory(&path))
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]

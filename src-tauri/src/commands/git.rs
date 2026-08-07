@@ -7,12 +7,12 @@ use std::sync::Arc;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 
-/// Per-root serialization for `git_status`. The frontend polls from several
-/// intervals without waiting for the previous round, and a cold-cache scan
-/// of a big repo can take minutes — without this gate, duplicate scans of
-/// the same repo pile up on the blocking pool and crowd out everything
-/// else. Later callers queue behind the in-flight one and then re-run
-/// (getting a fresh result), which keeps the semantics exact.
+/// Per-root serialization for `git_status`. A cold-cache scan of a big repo
+/// can take minutes — without this gate, concurrent polls of the same repo
+/// pile up on the blocking pool and crowd out everything else. Later callers
+/// queue behind the in-flight one and then re-check the TTL cache (which the
+/// first caller just refreshed), so a queued call returns the fresh cached
+/// result instead of running a second full scan back to back.
 static STATUS_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
@@ -26,6 +26,12 @@ pub async fn git_status(repo_root: String) -> crate::services::git::GitStatusInf
     };
     tokio::task::spawn_blocking(move || {
         let _guard = lock.lock();
+        // Double-check after acquiring the lock: while this call was queued,
+        // the holder may have just recomputed, so its fresh cache entry
+        // serves this call too.
+        if let Some(info) = crate::services::git::cached_status(&repo_root) {
+            return info;
+        }
         crate::services::git::status(&repo_root)
     })
     .await

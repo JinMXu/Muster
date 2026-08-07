@@ -127,19 +127,33 @@ pub fn project_root(cwd: &str) -> String {
     }
 }
 
+/// Fresh cached status for `root`: the entry whose fingerprint still matches
+/// and whose age is under `STATUS_CACHE_TTL`, or `None` when a recompute is
+/// due (or `root` isn't a repo). The command layer uses this to double-check
+/// the cache after waiting on the per-root lock.
+pub fn cached_status(root: &str) -> Option<GitStatusInfo> {
+    let repo = repo_at(root).ok()?;
+    let fingerprint = status_fingerprint(&repo);
+    let cache = STATUS_CACHE.lock();
+    let cached = cache.get(root)?;
+    if cached.fingerprint == fingerprint && cached.computed.elapsed() < STATUS_CACHE_TTL {
+        Some(cached.info.clone())
+    } else {
+        None
+    }
+}
+
 pub fn status(root: &str) -> GitStatusInfo {
+    // Cheap reuse across the frontend's per-repo polls: recompute only when
+    // the index/HEAD moved or the cached entry is older than the TTL.
+    if let Some(info) = cached_status(root) {
+        return info;
+    }
     let repo = match repo_at(root) {
         Ok(r) => r,
         Err(_) => return GitStatusInfo::empty(root.to_string()),
     };
-    // Cheap reuse across the frontend's per-repo polls: recompute only when
-    // the index/HEAD moved or the cached entry is older than the TTL.
     let fingerprint = status_fingerprint(&repo);
-    if let Some(cached) = STATUS_CACHE.lock().get(root) {
-        if cached.fingerprint == fingerprint && cached.computed.elapsed() < STATUS_CACHE_TTL {
-            return cached.info.clone();
-        }
-    }
     let info = compute_status(&repo, root);
     STATUS_CACHE.lock().insert(
         root.to_string(),
@@ -153,6 +167,7 @@ pub fn status(root: &str) -> GitStatusInfo {
 /// is the expensive part of `status`; the cache wrapper decides when to run
 /// it.
 fn compute_status(repo: &Repository, root: &str) -> GitStatusInfo {
+    let started = Instant::now();
     let repo_root = repo.workdir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     // A linked worktree has `is_worktree() == true`; the main checkout has
     // `false`. Used by the frontend to show a "worktree" indicator in the
@@ -302,6 +317,16 @@ fn compute_status(repo: &Repository, root: &str) -> GitStatusInfo {
         }
     }
 
+    log::info!(
+        "compute_status: {root}: {} entries ({} staged, {} changed, {} conflicts, +{} −{}) in {}ms",
+        info.staged_entries.len() + info.changed_entries.len() + info.merge_entries.len(),
+        info.staged_entries.len(),
+        info.changed_entries.len(),
+        info.merge_entries.len(),
+        info.line_additions,
+        info.line_deletions,
+        started.elapsed().as_millis(),
+    );
     info
 }
 

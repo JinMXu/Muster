@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AppStateView, GitStatusInfo, ListenPort, ProcessInfo, SessionInfo } from "../lib/types";
+import type { AppStateView, ListenPort, ProcessInfo, SessionInfo } from "../lib/types";
 import { api } from "../lib/invoke";
+import { refreshGitStatus, useGitStatus } from "../lib/gitStatusStore";
 import { useProjectCwd } from "../lib/useProjectCwd";
 import { reloadSettings, useSettings } from "../lib/settingsStore";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
@@ -21,7 +22,9 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const { root, cwd } = useProjectCwd(state);
   const settings = useSettings();
   const projectPorts = settings?.project_ports ?? false;
-  const [git, setGit] = useState<GitStatusInfo | null>(null);
+  // Git branch/remote come from the shared store (one poller per repo root,
+  // fanned out to GitPanel/FileTree/this panel) instead of a private interval.
+  const git = useGitStatus(root);
   const [procs, setProcs] = useState<ProcessInfo[]>([]);
   const [ports, setPorts] = useState<ListenPort[]>([]);
   // Bumped by the header refresh button to re-run every poll below at once.
@@ -30,6 +33,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const refresh = () => {
     setSpinning(true);
     setNonce((n) => n + 1);
+    if (root) refreshGitStatus(root);
     setTimeout(() => setSpinning(false), 600);
   };
 
@@ -46,21 +50,6 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       clearInterval(i);
     };
   }, [nonce]);
-
-  useEffect(() => {
-    if (!root) {
-      setGit(null);
-      return;
-    }
-    let alive = true;
-    const tick = () => api.gitStatus(root).then((g) => alive && setGit(g));
-    tick();
-    const i = setInterval(tick, 5000);
-    return () => {
-      alive = false;
-      clearInterval(i);
-    };
-  }, [root, nonce]);
 
   // PROCESSES + PORTS: poll the session's tracked processes (Job Object
   // members, falling back to the shell's descendant tree), then the listening

@@ -114,6 +114,17 @@ npm run tauri dev
 npm run tauri build    # 产出 MSI 和 NSIS 安装包
 ```
 
+> **更换应用图标后必须清缓存再打包**：tauri-build 只监听 `tauri.conf.json` 等少数文件，不监听 `src-tauri/icons/icon.ico`。只换图标直接打包时，cargo 会复用旧的 `resource.lib`，导致 exe 内嵌图标还是旧的（表现为：托盘图标是新的，但任务栏图标先正常随后变回旧图标）。
+>
+> 换图标后执行以下任一操作再打包：
+>
+> ```sh
+> rm -rf src-tauri/target/release/build/muster-*   # 删掉 build script 缓存（推荐）
+> # 或者 touch src-tauri/build.rs / 改动一下 tauri.conf.json
+> ```
+>
+> 另外，如果安装后桌面快捷方式/资源管理器仍显示旧图标，那是 Windows 外壳图标缓存（`iconcache.db`）的问题，与打包产物无关，重启资源管理器或运行 `ie4uinit.exe -show` 刷新即可。
+
 ### 常用命令
 
 ```sh

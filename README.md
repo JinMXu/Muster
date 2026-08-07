@@ -50,7 +50,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 
 | 模块 | 能力 |
 |:---|:---|
-| **多窗口** | 多开窗口并行，布局定时快照，重启完整恢复。最后窗口关闭后驻留系统托盘，终端会话不中断 |
+| **多窗口** | 多开窗口并行，布局定时快照，重启完整恢复。最后窗口关闭后驻留系统托盘（左键点击或右键菜单恢复主窗口/打开目录/设置/退出），终端会话不中断 |
 | **分屏布局** | 列×行网格，拖拽 pane 到任意边缘重排，跨标签页拖拽，焦点跟随，zoom 最大化 |
 | **终端** | ConPTY 完整仿真（xterm.js），PowerShell 自动上报 cwd，响铃通知 |
 | **Worktree 追踪** | `cd` 进 worktree 后面板即时重锚定（事件驱动），Info 面板显示标记 |
@@ -177,10 +177,14 @@ muster doctor                         # 检查桥接状态
 muster new C:\projects\myapp          # 打开项目，打印首个终端会话 id
 muster split --v                      # 向下分屏，打印新会话 id
 muster send <id> "npm run dev" --enter    # 向会话发送按键
+muster send-keys <id> "ctrl+c"             # 向会话发送快捷键
 muster capture <id> --lines 200           # 读取会话最近输出
 muster procs <id>                     # 会话进程树 + 监听端口
 muster agents                         # 各会话的 coding agent 状态
 muster run -- cargo test              # 新标签 PTY 运行命令，等待完成
+muster wait <id>                       # 等待 agent 达到目标状态（默认 done）
+muster watch                           # 持续输出 agent 状态变化
+muster ls                              # 列出窗口、项目、标签与 pane
 ```
 
 - `run` 默认 600s 超时（`--timeout N`）；`--` 之后的内容原样作为命令

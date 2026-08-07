@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="src-tauri/icons/icon.png" alt="Muster" width="128" height="128" />
+
 # Muster
 
 **Windows 原生的终端工作区 — 终端、文件、Diff、Git，一窗之内。**

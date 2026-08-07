@@ -180,7 +180,59 @@ pub fn spawn_poll_loop(app: AppHandle) {
 }
 
 fn poll_once(app: &AppHandle, shared: &SharedState) {
+    // Fast path: nothing live to track. Skip the full-system process
+    // enumeration (the most expensive step of the poll) entirely when no
+    // window has a live spawned session - e.g. the app is sitting in the
+    // tray with only file tabs open, or there are no windows at all. We
+    // still must run the cleanup tail when there are leftover statuses
+    // (sessions that just exited), otherwise their agent dots would never
+    // be cleared; in that case `current` stays empty and the tail emits a
+    // removal for every previously-known session.
+    let has_live_session = shared.all().iter().any(|(_, s)| {
+        let g = s.lock();
+        g.sessions
+            .values()
+            .any(|sess| sess.is_spawned() && !sess.is_exited())
+    });
+
     let prev = shared.agents.lock().statuses.clone();
+    if !has_live_session {
+        // Nothing to detect, and nothing left to clear -> fully idle.
+        if prev.is_empty() {
+            return;
+        }
+        // Leftover statuses from sessions that have since exited: drop them
+        // so the frontend dots disappear. `current` is empty by design, so
+        // the cleanup tail below treats every `prev` entry as a removal.
+        let mut per_window: HashMap<String, Vec<(Uuid, Option<AgentStatus>)>> = HashMap::new();
+        for (label, state) in shared.all() {
+            let g = state.lock();
+            for sid in g.sessions.keys() {
+                if prev.contains_key(sid) {
+                    per_window.entry(label.clone()).or_default().push((*sid, None));
+                }
+            }
+        }
+        for (label, rows) in per_window {
+            let payload = serde_json::json!({
+                "sessions": rows.iter().map(|(id, _)| serde_json::json!({
+                    "id": id, "agent": null, "state": null
+                })).collect::<Vec<_>>(),
+            });
+            let _ = app.emit_to(&label, "agent-status-changed", payload);
+        }
+        let sessions: Vec<_> = prev.keys().map(|id| serde_json::json!({
+            "id": id, "agent": null, "state": null
+        })).collect();
+        crate::services::ipc::broadcast(serde_json::json!({
+            "event": "agent-status-changed",
+            "sessions": sessions,
+        }));
+        let _ = app.emit("all-agent-status", serde_json::json!({ "sessions": [] }));
+        shared.agents.lock().statuses = HashMap::new();
+        return;
+    }
+
     let mut current: HashMap<Uuid, AgentStatus> = HashMap::new();
     // (session id, Some(status)) for changed/added rows, None for removed.
     let mut changed: HashMap<Uuid, Option<AgentStatus>> = HashMap::new();
@@ -205,7 +257,10 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
     // `refresh_and_snapshot` copies out the pid/parent/cmdline data and
     // releases the global SYSTEM lock immediately, so the scan below (and any
     // concurrent `session_processes` command) never waits on it.
-    let procs_cache = crate::services::procs::refresh_and_snapshot();
+    // The poller only reads pid/parent/cmdline, so use the lightweight
+    // snapshot instead of `refresh_and_snapshot` (which also collects CPU%,
+    // memory and exe paths for every process on the machine).
+    let procs_cache = crate::services::procs::refresh_and_snapshot_light();
 
     for (label, state) in shared.all() {
         let g = state.lock();

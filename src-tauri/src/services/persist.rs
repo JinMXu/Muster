@@ -30,8 +30,15 @@ pub fn save_snapshot_for(label: &str, snapshot: &SessionSnapshot) -> std::io::Re
     }
     // Propagate serialization failures: writing an empty string would
     // clobber the existing snapshot with an unusable file.
-    let json = serde_json::to_string_pretty(snapshot).map_err(std::io::Error::other)?;
-    std::fs::write(path, json)?;
+    // Compact (non-pretty) serialization: the file is only read back by the
+    // app, and the autosave loop writes it every few seconds.
+    let json = serde_json::to_string(snapshot).map_err(std::io::Error::other)?;
+    // Write to a temp file and rename into place so a crash mid-write can't
+    // leave a truncated snapshot behind (the .bak recovery in `load` is the
+    // fallback). `std::fs::rename` replaces the destination on Windows.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, &path)?;
     Ok(())
 }
 

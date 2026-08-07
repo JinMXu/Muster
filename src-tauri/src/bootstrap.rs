@@ -1,8 +1,10 @@
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use uuid::Uuid;
 
 use crate::commands::SharedState;
 use crate::models::app::AppState;
@@ -228,17 +230,34 @@ pub fn run() {
 
             // Periodic autosave of every window's layout, so a crash doesn't
             // lose it (the close handler also saves, but only on a clean
-            // exit).
+            // exit). A window is only written when its layout actually
+            // changed since the last save: the layout `revision` bumps on
+            // every mutation, and the session-cwd fingerprint catches `cd`
+            // moves that happen outside the layout mutations.
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(5));
-                let state = handle.state::<SharedState>();
-                for (label, s) in state.all() {
-                    let snapshot = {
-                        let g = s.lock();
-                        build_snapshot(&g)
-                    };
-                    let _ = crate::services::persist::save_snapshot_for(&label, &snapshot);
+            std::thread::spawn(move || {
+                let mut last_saved: HashMap<String, (u64, Vec<(Uuid, String)>)> = HashMap::new();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    let state = handle.state::<SharedState>();
+                    for (label, s) in state.all() {
+                        let (rev, cwd_fp) = {
+                            let g = s.lock();
+                            (g.revision, g.session_cwd_fingerprint())
+                        };
+                        if last_saved
+                            .get(&label)
+                            .is_some_and(|(r, c)| *r == rev && *c == cwd_fp)
+                        {
+                            continue;
+                        }
+                        let snapshot = {
+                            let g = s.lock();
+                            build_snapshot(&g)
+                        };
+                        let _ = crate::services::persist::save_snapshot_for(&label, &snapshot);
+                        last_saved.insert(label, (rev, cwd_fp));
+                    }
                 }
             });
 
@@ -598,11 +617,38 @@ pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>
         .filter(|s| !s.is_spawned())
         .cloned()
         .collect();
-    for session in pending {
-        match session.spawn(80, 24) {
-            Ok(()) => log::info!("spawn_pending: session {} spawned ok", session.id),
-            Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", session.id, e),
+    if pending.is_empty() {
+        return;
+    }
+    // Single session: spawn inline, identical to the old sequential path.
+    if pending.len() == 1 {
+        match pending[0].spawn(80, 24) {
+            Ok(()) => log::info!("spawn_pending: session {} spawned ok", pending[0].id),
+            Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", pending[0].id, e),
         }
+        return;
+    }
+    // Several sessions (startup restore, multi-tab): spawn concurrently. Each
+    // session's PTY setup (CreateProcess + ConPTY init) is independent, so N
+    // sessions come up in roughly one round-trip instead of N sequential ones.
+    // The `is_spawned` gate above keeps re-entry idempotent.
+    const MAX_WORKERS: usize = 4;
+    let queue = Arc::new(Mutex::new(VecDeque::from(pending)));
+    let workers = queue.lock().len().min(MAX_WORKERS);
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let queue = queue.clone();
+        handles.push(std::thread::spawn(move || loop {
+            let next = queue.lock().pop_front();
+            let Some(session) = next else { break };
+            match session.spawn(80, 24) {
+                Ok(()) => log::info!("spawn_pending: session {} spawned ok", session.id),
+                Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", session.id, e),
+            }
+        }));
+    }
+    for h in handles {
+        let _ = h.join();
     }
 }
 

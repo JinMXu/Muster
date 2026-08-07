@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::Serialize;
-use sysinfo::{Pid, ProcessRefreshKind, System};
+use sysinfo::{Pid, ProcessRefreshKind, System, UpdateKind};
 use uuid::Uuid;
 
 /// One row of the PROCESSES section.
@@ -88,6 +88,33 @@ pub struct ProcSnapshot {
 pub fn refresh_and_snapshot() -> ProcSnapshot {
     let mut sys = SYSTEM.lock();
     sys.refresh_processes_specifics(ProcessRefreshKind::everything());
+    let mut snap = ProcSnapshot {
+        alive: HashSet::with_capacity(sys.processes().len()),
+        parents: HashMap::with_capacity(sys.processes().len()),
+        cmdline: HashMap::with_capacity(sys.processes().len()),
+    };
+    for (pid, proc_) in sys.processes() {
+        let pid = pid.as_u32();
+        snap.alive.insert(pid);
+        if let Some(parent) = proc_.parent() {
+            snap.parents.insert(pid, parent.as_u32());
+        }
+        snap.cmdline.insert(pid, (proc_.name().to_string(), proc_.cmd().join(" ")));
+    }
+    snap
+}
+
+/// Same as `refresh_and_snapshot` but refreshes only the fields the agent
+/// poller reads: pids, parent links, image names and command lines. CPU%,
+/// memory and exe paths are skipped (the PROCESSES panel requests those
+/// itself via `refresh_global`/`session_pids`), which makes this markedly
+/// cheaper on machines with many processes. The process list itself is
+/// always enumerated by sysinfo, so pids/parents stay accurate.
+pub fn refresh_and_snapshot_light() -> ProcSnapshot {
+    let mut sys = SYSTEM.lock();
+    sys.refresh_processes_specifics(
+        ProcessRefreshKind::new().with_cmd(UpdateKind::OnlyIfNotSet),
+    );
     let mut snap = ProcSnapshot {
         alive: HashSet::with_capacity(sys.processes().len()),
         parents: HashMap::with_capacity(sys.processes().len()),

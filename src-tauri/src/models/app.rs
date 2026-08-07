@@ -76,6 +76,10 @@ pub struct AppState {
     pub diffs: HashMap<Uuid, Arc<DiffTab>>,
     pub settings: Arc<Mutex<Settings>>,
     pub project_counter: usize,
+    /// Monotonic counter bumped on every layout mutation. The autosave loop
+    /// persists a window's snapshot only when this changed since the last
+    /// write, so an idle app stops hitting the disk every few seconds.
+    pub revision: u64,
 }
 
 impl AppState {
@@ -93,7 +97,31 @@ impl AppState {
             diffs: HashMap::new(),
             settings,
             project_counter: 0,
+            revision: 0,
         }
+    }
+
+    /// Mark the layout as changed. Called at the top of every `&mut self`
+    /// mutation so the autosave loop can skip unchanged windows cheaply.
+    /// Bumping on a no-op is harmless (it causes at most one extra save);
+    /// missing a real mutation would be worse, so the default is "assume
+    /// changed".
+    pub fn bump(&mut self) {
+        self.revision += 1;
+    }
+
+    /// Cheap fingerprint of session working directories. These can change
+    /// without a layout mutation (the PTY read pump tracks `cd` via OSC 7),
+    /// so the autosave loop compares this alongside `revision` to still
+    /// persist a moved terminal after a crash.
+    pub fn session_cwd_fingerprint(&self) -> Vec<(Uuid, String)> {
+        let mut out: Vec<(Uuid, String)> = self
+            .sessions
+            .iter()
+            .map(|(id, s)| (*id, s.current_directory()))
+            .collect();
+        out.sort_unstable_by_key(|(id, _)| *id);
+        out
     }
 
     // ---- Persistence --------------------------------------------------------
@@ -102,6 +130,7 @@ impl AppState {
     /// are created WITHOUT a PTY here — the caller (bootstrap) spawns them
     /// once the app handle is fully wired up.
     pub fn restore(&mut self, snapshot: &crate::models::project::SessionSnapshot) {
+        self.bump();
         use crate::models::project::PaneContentSnapshot;
 
         self.is_left_sidebar_visible = snapshot.is_left_sidebar_visible.unwrap_or(true);
@@ -262,6 +291,7 @@ impl AppState {
     // ---- Projects ----------------------------------------------------------
 
     pub fn new_project(&mut self, directory: Option<String>) -> Uuid {
+        self.bump();
         self.project_counter += 1;
         let fallback = format!("Project {}", self.project_counter);
         let mut project = Project::new(fallback);
@@ -296,6 +326,7 @@ impl AppState {
     }
 
     pub fn close_project(&mut self, id: Uuid) {
+        self.bump();
         if let Some(idx) = self.project_index(id) {
             let sids: Vec<Uuid> = self.projects[idx].session_ids();
             for sid in sids {
@@ -325,6 +356,7 @@ impl AppState {
     }
 
     pub fn move_project(&mut self, from: Uuid, to: Uuid) {
+        self.bump();
         if from == to { return }
         let Some(fi) = self.project_index(from) else { return };
         let Some(ti) = self.project_index(to) else { return };
@@ -333,23 +365,27 @@ impl AppState {
     }
 
     pub fn rename_project(&mut self, id: Uuid, name: Option<String>) {
+        self.bump();
         if let Some(p) = self.projects.iter_mut().find(|p| p.id == id) {
             p.custom_name = name.filter(|n| !n.is_empty());
         }
     }
 
     pub fn set_project_directory(&mut self, id: Uuid, directory: Option<String>) {
+        self.bump();
         if let Some(p) = self.projects.iter_mut().find(|p| p.id == id) {
             p.custom_directory = directory.filter(|d| !d.is_empty());
         }
     }
 
     pub fn select_project(&mut self, id: Uuid) {
+        self.bump();
         if self.projects.iter().any(|p| p.id == id) {
             self.selected_project_id = Some(id);
         }
     }
     pub fn select_project_by_index(&mut self, idx: usize) {
+        self.bump();
         if let Some(p) = self.projects.get(idx) {
             self.selected_project_id = Some(p.id);
         }
@@ -357,6 +393,7 @@ impl AppState {
     pub fn select_next_project(&mut self) { self.shift_project(1); }
     pub fn select_previous_project(&mut self) { self.shift_project(-1); }
     fn shift_project(&mut self, delta: i32) {
+        self.bump();
         if self.projects.is_empty() { return }
         let cur = self
             .project_index(self.selected_project_id.unwrap_or_default())
@@ -368,6 +405,7 @@ impl AppState {
     // ---- Sessions / Tabs --------------------------------------------------
 
     pub fn spawn_session_in_selected(&mut self, directory: Option<String>) -> Option<Uuid> {
+        self.bump();
         let project_id = self.selected_project_id?;
         let initial_dir = directory
             .or_else(|| self.compute_session_dir())
@@ -399,6 +437,7 @@ impl AppState {
     }
 
     pub fn close_selected_tab(&mut self) {
+        self.bump();
         let Some(p_idx) = self.projects.iter().position(|p| Some(p.id) == self.selected_project_id) else { return };
         if self.projects[p_idx].tabs.is_empty() {
             let pid = self.projects[p_idx].id;
@@ -433,6 +472,7 @@ impl AppState {
     /// reassigned when the closed tab was the selected one (see remove_tab),
     /// so closing a background tab keeps the current selection untouched.
     pub fn close_tab(&mut self, tab_id: Uuid) {
+        self.bump();
         let Some(p_idx) = self.project_index_of_tab(tab_id) else { return };
         self.remove_tab(p_idx, tab_id);
     }
@@ -442,6 +482,7 @@ impl AppState {
     }
 
     pub fn close_other_tabs(&mut self, tab_id: Uuid) {
+        self.bump();
         let Some(p_idx) = self.project_index_of_tab(tab_id) else { return };
         let ids: Vec<Uuid> = self.projects[p_idx]
             .tabs
@@ -457,6 +498,7 @@ impl AppState {
     }
 
     pub fn close_tabs_to_right(&mut self, tab_id: Uuid) {
+        self.bump();
         let Some(p_idx) = self.project_index_of_tab(tab_id) else { return };
         let Some(pos) = self.projects[p_idx].tabs.iter().position(|t| t.id == tab_id) else { return };
         let ids: Vec<Uuid> = self.projects[p_idx].tabs.iter().skip(pos + 1).map(|t| t.id).collect();
@@ -468,6 +510,7 @@ impl AppState {
     /// Close every tab of the selected project, keeping the (now empty)
     /// project itself alive.
     pub fn close_all_tabs(&mut self) {
+        self.bump();
         let Some(p_idx) = self.projects.iter().position(|p| Some(p.id) == self.selected_project_id) else { return };
         let ids: Vec<Uuid> = self.projects[p_idx].tabs.iter().map(|t| t.id).collect();
         for id in ids {
@@ -484,6 +527,7 @@ impl AppState {
     /// pane's current directory (see `compute_session_dir`). Returns the new
     /// session's id (None when the tab can't be split).
     pub fn split_with_dir(&mut self, edge: PaneDropEdge, dir: Option<String>) -> Option<Uuid> {
+        self.bump();
         let can_split = self.selected_tab().map(|t| t.can_split()).unwrap_or(false);
         if !can_split {
             return None;
@@ -506,9 +550,10 @@ impl AppState {
 
     // ---- Pane navigation ---------------------------------------------------
 
-    pub fn focus_pane(&mut self, dir: FocusDirection) { if let Some(t) = self.selected_tab_mut() { t.focus(dir); } }
-    pub fn resize_pane(&mut self, dir: ResizeDirection) { if let Some(t) = self.selected_tab_mut() { t.resize(dir); } }
+    pub fn focus_pane(&mut self, dir: FocusDirection) { self.bump(); if let Some(t) = self.selected_tab_mut() { t.focus(dir); } }
+    pub fn resize_pane(&mut self, dir: ResizeDirection) { self.bump(); if let Some(t) = self.selected_tab_mut() { t.resize(dir); } }
     pub fn resize_pane_divider(&mut self, tab_id: Uuid, vertical: bool, column_index: usize, index: usize, delta: f32) {
+        self.bump();
         for p in &mut self.projects {
             if let Some(t) = p.tabs.iter_mut().find(|t| t.id == tab_id) {
                 t.resize_divider(vertical, column_index, index, delta);
@@ -516,12 +561,13 @@ impl AppState {
             }
         }
     }
-    pub fn toggle_pane_zoom(&mut self) { if let Some(t) = self.selected_tab_mut() { t.toggle_zoom(); } }
-    pub fn equalize_panes(&mut self) { if let Some(t) = self.selected_tab_mut() { t.equalize(); } }
+    pub fn toggle_pane_zoom(&mut self) { self.bump(); if let Some(t) = self.selected_tab_mut() { t.toggle_zoom(); } }
+    pub fn equalize_panes(&mut self) { self.bump(); if let Some(t) = self.selected_tab_mut() { t.equalize(); } }
 
     /// Drag & drop rearrange: move `pane_id` to `edge` of `target_pane_id`
     /// within the tab `tab_id` (intra-tab only).
     pub fn move_pane(&mut self, tab_id: Uuid, pane_id: Uuid, target_pane_id: Uuid, edge: PaneDropEdge) {
+        self.bump();
         for p in &mut self.projects {
             if let Some(t) = p.tabs.iter_mut().find(|t| t.id == tab_id) {
                 t.move_pane(pane_id, target_pane_id, edge);
@@ -537,6 +583,7 @@ impl AppState {
     /// tab is both source and target (use `move_pane` instead). Returns true
     /// when a move actually happened.
     pub fn move_pane_cross_tab(&mut self, source_tab_id: Uuid, pane_id: Uuid, target_tab_id: Uuid) -> bool {
+        self.bump();
         if source_tab_id == target_tab_id {
             return false;
         }
@@ -587,9 +634,10 @@ impl AppState {
 
     // ---- Sidebar / panel ---------------------------------------------------
 
-    pub fn toggle_left_sidebar(&mut self) { self.is_left_sidebar_visible = !self.is_left_sidebar_visible; }
-    pub fn toggle_right_panel(&mut self) { self.is_panel_visible = !self.is_panel_visible; }
+    pub fn toggle_left_sidebar(&mut self) { self.bump(); self.is_left_sidebar_visible = !self.is_left_sidebar_visible; }
+    pub fn toggle_right_panel(&mut self) { self.bump(); self.is_panel_visible = !self.is_panel_visible; }
     pub fn toggle_panel(&mut self, panel: RightPanel) {
+        self.bump();
         if self.is_panel_visible && self.panel_tab == panel {
             self.is_panel_visible = false;
         } else {
@@ -601,6 +649,7 @@ impl AppState {
     // ---- Tab navigation ----------------------------------------------------
 
     pub fn select_next_tab(&mut self) {
+        self.bump();
         let Some(p) = self.selected_project_mut() else { return };
         if let Some(sel) = p.selected_tab_id {
             if let Some(i) = p.tabs.iter().position(|t| t.id == sel) {
@@ -610,6 +659,7 @@ impl AppState {
         }
     }
     pub fn select_previous_tab(&mut self) {
+        self.bump();
         let Some(p) = self.selected_project_mut() else { return };
         if let Some(sel) = p.selected_tab_id {
             if let Some(i) = p.tabs.iter().position(|t| t.id == sel) {
@@ -619,6 +669,7 @@ impl AppState {
         }
     }
     pub fn select_tab(&mut self, id: Uuid) {
+        self.bump();
         if let Some(p) = self.selected_project_mut() {
             if p.tabs.iter().any(|t| t.id == id) { p.selected_tab_id = Some(id); }
         }
@@ -629,6 +680,7 @@ impl AppState {
     /// was found in this AppState. Used by the cross-window agent mini-bar to
     /// jump the user to the agent's pane (possibly in another window).
     pub fn focus_session(&mut self, session_id: Uuid) -> bool {
+        self.bump();
         for project in &mut self.projects {
             for tab in &mut project.tabs {
                 for col in &mut tab.columns {
@@ -648,6 +700,7 @@ impl AppState {
         false
     }
     pub fn move_tab(&mut self, from: Uuid, to: Uuid) {
+        self.bump();
         if from == to { return }
         let Some(p) = self.selected_project_mut() else { return };
         let Some(fi) = p.tabs.iter().position(|t| t.id == from) else { return };
@@ -656,6 +709,7 @@ impl AppState {
         p.tabs.insert(ti, moved);
     }
     pub fn rename_tab(&mut self, id: Uuid, name: Option<String>) {
+        self.bump();
         if let Some(p) = self.selected_project_mut() {
             if let Some(t) = p.tabs.iter_mut().find(|t| t.id == id) {
                 t.custom_name = name.filter(|n| !n.is_empty());
@@ -666,6 +720,7 @@ impl AppState {
     // ---- Files / Diffs -----------------------------------------------------
 
     pub fn open_file(&mut self, path: &str, to_side: bool) -> Option<Uuid> {
+        self.bump();
         let file = Arc::new(FileTab::open(path));
         let id = file.id;
 
@@ -777,6 +832,7 @@ impl AppState {
     }
 
     pub fn open_diff(&mut self, repo_root: &str, path: &str, staged: bool) -> Option<Uuid> {
+        self.bump();
         let diff = Arc::new(DiffTab::new(repo_root.to_string(), path.to_string(), staged));
         let id = diff.id;
         let project_id = self.selected_project_id?;
@@ -789,6 +845,7 @@ impl AppState {
     /// file didn't exist on that side). Appended as a new pane/tab like the
     /// working-tree diffs.
     pub fn open_commit_diff(&mut self, repo_root: &str, path: &str, old_rev: &str, new_rev: &str) -> Option<Uuid> {
+        self.bump();
         let diff = Arc::new(DiffTab::with_revs(repo_root.to_string(), path.to_string(), old_rev.to_string(), new_rev.to_string()));
         let id = diff.id;
         let project_id = self.selected_project_id?;
@@ -799,6 +856,7 @@ impl AppState {
 
     /// Open a diff of `path` against its HEAD version (new side = worktree).
     pub fn open_workdir_diff(&mut self, repo_root: &str, path: &str) -> Option<Uuid> {
+        self.bump();
         let diff = Arc::new(DiffTab::new_workdir(repo_root.to_string(), path.to_string()));
         let id = diff.id;
         let project_id = self.selected_project_id?;
@@ -810,6 +868,7 @@ impl AppState {
     /// Open a diff of `path` between `old_rev` and the current worktree
     /// (the checkpoint panel's "changes since checkpoint" view).
     pub fn open_checkpoint_diff(&mut self, repo_root: &str, path: &str, old_rev: &str) -> Option<Uuid> {
+        self.bump();
         let diff = Arc::new(DiffTab::new_checkpoint(repo_root.to_string(), path.to_string(), old_rev.to_string()));
         let id = diff.id;
         let project_id = self.selected_project_id?;

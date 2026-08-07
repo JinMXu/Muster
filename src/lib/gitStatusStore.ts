@@ -6,7 +6,12 @@ import { api } from "./invoke";
 /// subscriber (GitPanel, FileTree decorations, ...), so multiple panels
 /// never duplicate `git_status` calls. The poller stops when the last
 /// subscriber for a root unsubscribes.
-const POLL_MS = 3000;
+///
+/// The backend keeps a short TTL cache keyed by repo root (plus an
+/// index/HEAD fingerprint), so an 8s poll is effectively free between
+/// recomputes; the slower cadence only delays the *backend* refresh of
+/// working-tree-only edits.
+const POLL_MS = 8000;
 
 type Listener = (info: GitStatusInfo) => void;
 

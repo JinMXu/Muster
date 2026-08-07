@@ -1,4 +1,9 @@
+use std::collections::HashMap;
+use std::time::{Duration, Instant, SystemTime};
+
 use git2::{BranchType, Oid, Repository, Status, StatusOptions};
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +57,58 @@ impl GitStatusInfo {
     }
 }
 
+/// How long a cached `git status` result is trusted without any cheap
+/// signal changing. Working-tree-only edits (no index/HEAD movement) don't
+/// trip the fingerprint below, so they surface after this window.
+const STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// One cached status result for a repo root.
+struct CachedStatus {
+    /// (index mtime ns, index len, HEAD oid) at compute time. Staging,
+    /// commits, branch switches and stashes all move the index/HEAD, so a
+    /// changed fingerprint invalidates the entry immediately; an unchanged
+    /// fingerprint still expires via `STATUS_CACHE_TTL`.
+    fingerprint: Option<(u64, u64, String)>,
+    computed: Instant,
+    info: GitStatusInfo,
+}
+
+/// The frontend polls `git_status` every few seconds per visible repo, so a
+/// full libgit2 status walk (untracked scan + rename detection + ahead/behind)
+/// would otherwise run repeatedly on large repos. The cache collapses those
+/// polls into one recompute per TTL unless something cheap changed.
+static STATUS_CACHE: Lazy<Mutex<HashMap<String, CachedStatus>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Cheap fingerprint of the git state that `status` depends on but that
+/// changes outside the working tree: the index file (mtime + size) and the
+/// HEAD commit. `repo.path()` is the git directory, where the index lives
+/// for both normal repos and linked worktrees.
+fn status_fingerprint(repo: &Repository) -> Option<(u64, u64, String)> {
+    let index = repo.path().join("index");
+    let meta = std::fs::metadata(index).ok()?;
+    let mtime_ns = meta
+        .modified()
+        .ok()?
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos() as u64;
+    let head = repo
+        .head()
+        .ok()
+        .and_then(|h| h.target())
+        .map(|oid| oid.to_string())
+        .unwrap_or_default();
+    Some((mtime_ns, meta.len(), head))
+}
+
+/// Drop the cached status for `root`. Called by every mutating git command
+/// so the user sees their staging/commit/discard immediately on the next
+/// poll instead of waiting out the TTL.
+fn invalidate_status_cache(root: &str) {
+    STATUS_CACHE.lock().remove(root);
+}
+
 /// Resolve the repository rooted at or containing `dir`.
 fn repo_at(dir: &str) -> Result<Repository, String> {
     Repository::discover(dir).map_err(|e| e.message().to_string())
@@ -75,6 +132,27 @@ pub fn status(root: &str) -> GitStatusInfo {
         Ok(r) => r,
         Err(_) => return GitStatusInfo::empty(root.to_string()),
     };
+    // Cheap reuse across the frontend's per-repo polls: recompute only when
+    // the index/HEAD moved or the cached entry is older than the TTL.
+    let fingerprint = status_fingerprint(&repo);
+    if let Some(cached) = STATUS_CACHE.lock().get(root) {
+        if cached.fingerprint == fingerprint && cached.computed.elapsed() < STATUS_CACHE_TTL {
+            return cached.info.clone();
+        }
+    }
+    let info = compute_status(&repo, root);
+    STATUS_CACHE.lock().insert(
+        root.to_string(),
+        CachedStatus { fingerprint, computed: Instant::now(), info: info.clone() },
+    );
+    info
+}
+
+/// Full `git status` computation for an already-resolved repository. Reads
+/// the worktree/index (untracked scan, rename similarity, ahead/behind) so it
+/// is the expensive part of `status`; the cache wrapper decides when to run
+/// it.
+fn compute_status(repo: &Repository, root: &str) -> GitStatusInfo {
     let repo_root = repo.workdir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     // A linked worktree has `is_worktree() == true`; the main checkout has
     // `false`. Used by the frontend to show a "worktree" indicator in the
@@ -639,6 +717,7 @@ macro_rules! try_git {
 }
 
 pub fn stage(repo_root: &str, path: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     let mut index = try_git!(repo.index(); "open index");
     try_git!(index.add_path(std::path::Path::new(path)); "stage file");
@@ -647,6 +726,7 @@ pub fn stage(repo_root: &str, path: &str) -> Result<(), String> {
 }
 
 pub fn stage_all(repo_root: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     let mut index = try_git!(repo.index(); "open index");
     try_git!(index.add_all(["*"].iter().map(std::path::Path::new), git2::IndexAddOption::DEFAULT, None); "stage all");
@@ -655,6 +735,7 @@ pub fn stage_all(repo_root: &str) -> Result<(), String> {
 }
 
 pub fn unstage(repo_root: &str, path: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     let path = std::path::Path::new(path);
     if let Ok(head) = repo.head() {
@@ -677,6 +758,7 @@ pub fn unstage(repo_root: &str, path: &str) -> Result<(), String> {
 /// there is no HEAD to reset to, so every index entry is removed instead
 /// (`git rm --cached -r -f .` equivalent).
 pub fn unstage_all(repo_root: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     if let Ok(head) = repo.head() {
         let object = try_git!(head.peel(git2::ObjectType::Any); "head object");
@@ -797,6 +879,7 @@ fn discard_file(repo_root: &str, path: &str) -> Result<String, String> {
 }
 
 pub fn discard_guarded(repo_root: &str, path: &str, guard: &GitGuard) -> Result<String, String> {
+    invalidate_status_cache(repo_root);
     validate_guard(repo_root, guard, Some(path))?;
     discard_file(repo_root, path)
 }
@@ -804,6 +887,7 @@ pub fn discard_guarded(repo_root: &str, path: &str, guard: &GitGuard) -> Result<
 /// Discard every file recorded in the guard. The entry list comes from the
 /// guard itself, so files created after the guard was taken are not touched.
 pub fn discard_all_guarded(repo_root: &str, guard: &GitGuard) -> Result<String, String> {
+    invalidate_status_cache(repo_root);
     validate_guard(repo_root, guard, None)?;
     let mut summaries = Vec::new();
     for entry in &guard.entries {
@@ -813,6 +897,7 @@ pub fn discard_all_guarded(repo_root: &str, guard: &GitGuard) -> Result<String, 
 }
 
 pub fn commit(repo_root: &str, message: &str, include_all: bool, amend: bool) -> Result<Oid, String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     if include_all {
         let mut index = try_git!(repo.index(); "open index");
@@ -843,6 +928,7 @@ pub fn commit(repo_root: &str, message: &str, include_all: bool, amend: bool) ->
 }
 
 pub fn switch_branch(repo_root: &str, name: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     try_git!(repo.set_head(&format!("refs/heads/{name}")); "set head");
     let head = try_git!(repo.head(); "head");
@@ -854,6 +940,7 @@ pub fn switch_branch(repo_root: &str, name: &str) -> Result<(), String> {
 }
 
 pub fn create_branch(repo_root: &str, name: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     let head = try_git!(repo.head(); "head");
     let commit = try_git!(head.peel_to_commit(); "head commit");
@@ -893,6 +980,7 @@ pub fn fetch(repo_root: &str) -> Result<(), String> {
 }
 
 pub fn pull(repo_root: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     // Shell out to git for the merge step — git2's merge helpers are fiddly
     // and we want strict --ff-only semantics.
     super::procs::quiet_command("git")
@@ -913,6 +1001,7 @@ pub fn push(repo_root: &str, remote: &str) -> Result<(), String> {
 }
 
 pub fn stash_all(repo_root: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let mut repo = repo_at(repo_root)?;
     let sig = signature(&repo)?;
     try_git!(repo.stash_save(&sig, "muster", Some(git2::StashFlags::INCLUDE_UNTRACKED)); "stash");
@@ -920,12 +1009,14 @@ pub fn stash_all(repo_root: &str) -> Result<(), String> {
 }
 
 pub fn stash_pop(repo_root: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     let mut repo = repo_at(repo_root)?;
     try_git!(repo.stash_pop(0, None); "pop stash");
     Ok(())
 }
 
 pub fn init(repo_root: &str) -> Result<(), String> {
+    invalidate_status_cache(repo_root);
     Repository::init(repo_root).map(|_| ()).map_err(|e| e.message().to_string())
 }
 

@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use crate::services::conpty::ConPty;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -60,6 +61,13 @@ pub struct TerminalSession {
     last_agent_notify: Mutex<Option<Instant>>,
     /// Ring buffer of ANSI-stripped output lines (for `muster capture`).
     scrollback: Mutex<VecDeque<String>>,
+    /// Whether any consumer (`muster capture`/`run`/`wait`, which read via
+    /// `scrollback_lines`) has asked for this session's scrollback. The ring
+    /// and its ANSI stripper are only maintained while true, so a session
+    /// nobody is capturing skips the per-chunk string work on the PTY hot
+    /// path entirely. Set once, never unset (a session's lifetime is short
+    /// enough that "capture was requested at some point" is a fine proxy).
+    capture_active: AtomicBool,
     /// Partial line not yet terminated by `\n`, accumulated across chunks.
     scrollback_pending: Mutex<String>,
     /// Escape-sequence state carried across chunk boundaries, so a sequence
@@ -92,6 +100,7 @@ impl TerminalSession {
             scrollback: Mutex::new(VecDeque::new()),
             scrollback_pending: Mutex::new(String::new()),
             ansi: Mutex::new(AnsiStripper::default()),
+            capture_active: AtomicBool::new(false),
             conpty: Mutex::new(None),
             input_tx: Mutex::new(None),
         }
@@ -254,6 +263,15 @@ impl TerminalSession {
     /// the read pump on every chunk.
     pub fn record_output(&self, bytes: &[u8]) {
         *self.last_output_at.lock() = Instant::now();
+        // Fast path: nobody has ever read this session's scrollback, so the
+        // ANSI strip + line-ring maintenance below would be pure waste on
+        // every chunk (build-log floods, `cat` of a big file, ...). The OSC
+        // scanner in the read pump (cwd/progress/bell) is unaffected - it
+        // runs outside `record_output`. The first `scrollback_lines` call
+        // flips this on for the session's lifetime.
+        if !self.capture_active.load(Ordering::Relaxed) {
+            return;
+        }
         let mut stripped = String::new();
         self.ansi.lock().feed(bytes, &mut stripped);
         if stripped.is_empty() {
@@ -304,6 +322,11 @@ impl TerminalSession {
     /// unterminated tail. For `muster capture`. Lock order matches
     /// `record_output` (pending, then ring) to avoid deadlock.
     pub fn scrollback_lines(&self, max: usize) -> Vec<String> {
+        // Reading activates capture: from here on the ring accumulates.
+        // Because the ANSI stripper is only fed while active, its state is
+        // still the initial default at this first read, so the first chunk
+        // strips cleanly.
+        self.capture_active.store(true, Ordering::Relaxed);
         let tail = self.scrollback_pending.lock().clone();
         let mut lines: Vec<String> = self.scrollback.lock().iter().cloned().collect();
         if !tail.is_empty() {
@@ -845,6 +868,8 @@ mod tests {
     #[test]
     fn scrollback_ring_keeps_last_lines_and_pending_tail() {
         let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        // Activate capture (a consumer read the scrollback), then feed.
+        assert!(s.scrollback_lines(1000).is_empty());
         for _ in 0..10 {
             s.record_output(b"line\n");
         }
@@ -863,6 +888,8 @@ mod tests {
     #[test]
     fn scrollback_dedups_line_redraws() {
         let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        // Activate capture first: without a consumer the ring stays dormant.
+        assert!(s.scrollback_lines(1000).is_empty());
         // Per-keystroke line redraws (`\r`-rewritten): each extends the last.
         for i in 0.."echo HI".len() {
             let prefix: String = "echo HI".chars().take(i + 1).collect();

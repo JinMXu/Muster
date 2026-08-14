@@ -6,6 +6,8 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use crate::services::i18n::translate;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitStatusEntry {
     pub path: String,
@@ -143,7 +145,7 @@ pub fn cached_status(root: &str) -> Option<GitStatusInfo> {
     }
 }
 
-pub fn status(root: &str) -> GitStatusInfo {
+pub fn status(root: &str, lang: &str) -> GitStatusInfo {
     // Cheap reuse across the frontend's per-repo polls: recompute only when
     // the index/HEAD moved or the cached entry is older than the TTL.
     if let Some(info) = cached_status(root) {
@@ -154,7 +156,7 @@ pub fn status(root: &str) -> GitStatusInfo {
         Err(_) => return GitStatusInfo::empty(root.to_string()),
     };
     let fingerprint = status_fingerprint(&repo);
-    let info = compute_status(&repo, root);
+    let info = compute_status(&repo, root, lang);
     STATUS_CACHE.lock().insert(
         root.to_string(),
         CachedStatus { fingerprint, computed: Instant::now(), info: info.clone() },
@@ -166,7 +168,7 @@ pub fn status(root: &str) -> GitStatusInfo {
 /// the worktree/index (untracked scan, rename similarity, ahead/behind) so it
 /// is the expensive part of `status`; the cache wrapper decides when to run
 /// it.
-fn compute_status(repo: &Repository, root: &str) -> GitStatusInfo {
+fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
     let started = Instant::now();
     let repo_root = repo.workdir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     // A linked worktree has `is_worktree() == true`; the main checkout has
@@ -185,7 +187,7 @@ fn compute_status(repo: &Repository, root: &str) -> GitStatusInfo {
         if head.is_branch() {
             info.branch = head.shorthand().map(str::to_owned);
         } else {
-            info.branch = Some("detached HEAD".into());
+            info.branch = Some(translate("git-detached-head", lang).to_string());
         }
     }
     if let Some(branch_name) = &info.branch {
@@ -305,7 +307,7 @@ fn compute_status(repo: &Repository, root: &str) -> GitStatusInfo {
                         .unwrap_or("")
                         .to_string(),
                     author: commit.author().name().unwrap_or("").to_string(),
-                    relative_date: relative_date(now, commit.time().seconds()),
+                    relative_date: relative_date(now, commit.time().seconds(), lang),
                 });
             }
             info.recent_commits = commits;
@@ -439,8 +441,8 @@ fn status_char_workdir(s: Status) -> char {
 
 /// Human relative age in `git log --date=relative` style: the largest unit
 /// that fits, singular when the count is 1 (months ≈ 30 days, years ≈ 365).
-/// Future timestamps clamp to "0 seconds ago".
-fn relative_date(now: i64, then: i64) -> String {
+/// Future timestamps clamp to "0 seconds ago". Localized via `i18n` keys.
+fn relative_date(now: i64, then: i64, lang: &str) -> String {
     const MINUTE: i64 = 60;
     const HOUR: i64 = 60 * MINUTE;
     const DAY: i64 = 24 * HOUR;
@@ -448,14 +450,22 @@ fn relative_date(now: i64, then: i64) -> String {
     const MONTH: i64 = 30 * DAY;
     const YEAR: i64 = 365 * DAY;
     let secs = (now - then).max(0);
-    let (n, unit) = if secs < MINUTE { (secs, "second") }
-    else if secs < HOUR { (secs / MINUTE, "minute") }
-    else if secs < DAY { (secs / HOUR, "hour") }
-    else if secs < WEEK { (secs / DAY, "day") }
-    else if secs < MONTH { (secs / WEEK, "week") }
-    else if secs < YEAR { (secs / MONTH, "month") }
-    else { (secs / YEAR, "year") };
-    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+    let (n, unit_key) = if secs < MINUTE { (secs, "time-second") }
+    else if secs < HOUR { (secs / MINUTE, "time-minute") }
+    else if secs < DAY { (secs / HOUR, "time-hour") }
+    else if secs < WEEK { (secs / DAY, "time-day") }
+    else if secs < MONTH { (secs / WEEK, "time-week") }
+    else if secs < YEAR { (secs / MONTH, "time-month") }
+    else { (secs / YEAR, "time-year") };
+    let singular = translate(unit_key, lang);
+    let unit = if lang != "zh" && n != 1 {
+        format!("{singular}s")
+    } else {
+        singular.to_string()
+    };
+    translate("time-ago", lang)
+        .replace("{n}", &n.to_string())
+        .replace("{unit}", &unit)
 }
 
 /// Commit/stash signature: git config `user.name` / `user.email` (local or
@@ -477,22 +487,22 @@ fn signature(repo: &Repository) -> Result<git2::Signature<'static>, String> {
 ///
 /// Shells out to `git show` to read each side — cleaner than walking the index
 /// via libgit2's `Index::get_path` (whose arity differs across git2 versions).
-pub fn load_staged_diff(root: &str, path: &str) -> Result<(String, String), String> {
-    let old = git_show(root, &format!("HEAD:{path}"))?;
-    let new = git_show(root, &format!(":{path}"))?;
+pub fn load_staged_diff(root: &str, path: &str, lang: &str) -> Result<(String, String), String> {
+    let old = git_show(root, &format!("HEAD:{path}"), lang)?;
+    let new = git_show(root, &format!(":{path}"), lang)?;
     Ok((old, new))
 }
 
 /// Loads unstaged diff content: `index:path` vs the worktree file.
-pub fn load_unstaged_diff(root: &str, path: &str) -> Result<(String, String), String> {
-    let old = git_show(root, &format!(":{path}"))?;
+pub fn load_unstaged_diff(root: &str, path: &str, lang: &str) -> Result<(String, String), String> {
+    let old = git_show(root, &format!(":{path}"), lang)?;
     let full = std::path::Path::new(root).join(path);
     let new = match std::fs::read(&full) {
         Ok(bytes) => {
             if bytes.contains(&0) {
-                return Err("Binary file".into());
+                return Err(translate("git-binary-file", lang).to_string());
             }
-            String::from_utf8(bytes).map_err(|_| "Binary file".to_string())?
+            String::from_utf8(bytes).map_err(|_| translate("git-binary-file", lang).to_string())?
         }
         Err(_) => String::new(), // file deleted from the worktree
     };
@@ -501,7 +511,7 @@ pub fn load_unstaged_diff(root: &str, path: &str) -> Result<(String, String), St
 
 /// `git show <spec>` — UTF-8 text. Returns empty content if the spec resolves
 /// to nothing, and `Binary file` if the bytes don't decode.
-pub fn git_show(root: &str, spec: &str) -> Result<String, String> {
+pub fn git_show(root: &str, spec: &str, lang: &str) -> Result<String, String> {
     let output = super::procs::quiet_command("git")
         .args(["show", spec])
         .current_dir(root)
@@ -512,9 +522,9 @@ pub fn git_show(root: &str, spec: &str) -> Result<String, String> {
     }
     let bytes = output.stdout;
     if bytes.contains(&0) {
-        return Err("Binary file".into());
+        return Err(translate("git-binary-file", lang).into());
     }
-    String::from_utf8(bytes).map_err(|_| "Binary file".to_string())
+    String::from_utf8(bytes).map_err(|_| translate("git-binary-file", lang).to_string())
 }
 
 /// One commit that touched a path, as reported by `git log --follow`.
@@ -534,7 +544,7 @@ pub struct FileCommit {
 /// History of `path` (repo-relative), oldest-first, following renames. Shells
 /// out to `git log --follow` — libgit2's revwalk has no path filter, and
 /// renames need `--follow` anyway. Unit-separated format keeps parsing robust.
-pub fn file_history(root: &str, path: &str) -> Vec<FileCommit> {
+pub fn file_history(root: &str, path: &str, lang: &str) -> Vec<FileCommit> {
     const SEP: char = '\x1f';
     let format = format!("%H{SEP}%P{SEP}%an{SEP}%at{SEP}%s");
     let output = super::procs::quiet_command("git")
@@ -571,7 +581,7 @@ pub fn file_history(root: &str, path: &str) -> Vec<FileCommit> {
             parent: parents.split_whitespace().next().filter(|p| !p.is_empty()).map(str::to_owned),
             subject: subject.to_string(),
             author: author.to_string(),
-            relative_date: relative_date(now, timestamp),
+            relative_date: relative_date(now, timestamp, lang),
             date_ms: timestamp * 1000,
         });
     }
@@ -583,16 +593,16 @@ pub fn file_history(root: &str, path: &str) -> Vec<FileCommit> {
 /// Load the content of `path` at two commits, for an arbitrary two-commit
 /// diff. An empty rev (or a rev where the file didn't exist) yields an empty
 /// side — exactly right for files added or deleted between the two commits.
-pub fn load_commit_diff(root: &str, path: &str, old_rev: &str, new_rev: &str) -> Result<(String, String), String> {
+pub fn load_commit_diff(root: &str, path: &str, old_rev: &str, new_rev: &str, lang: &str) -> Result<(String, String), String> {
     let old = if old_rev.is_empty() {
         String::new()
     } else {
-        git_show(root, &format!("{old_rev}:{path}"))?
+        git_show(root, &format!("{old_rev}:{path}"), lang)?
     };
     let new = if new_rev.is_empty() {
         String::new()
     } else {
-        git_show(root, &format!("{new_rev}:{path}"))?
+        git_show(root, &format!("{new_rev}:{path}"), lang)?
     };
     Ok((old, new))
 }
@@ -600,19 +610,19 @@ pub fn load_commit_diff(root: &str, path: &str, old_rev: &str, new_rev: &str) ->
 /// `old_rev:path` vs the current working-tree file (new side read from disk).
 /// An empty new side means the file was deleted from the worktree. Used by
 /// the checkpoint panel and the editor's "Diff vs HEAD" tab.
-pub fn load_workdir_diff(root: &str, path: &str, old_rev: &str) -> Result<(String, String), String> {
+pub fn load_workdir_diff(root: &str, path: &str, old_rev: &str, lang: &str) -> Result<(String, String), String> {
     let old = if old_rev.is_empty() {
         String::new()
     } else {
-        git_show(root, &format!("{old_rev}:{path}"))?
+        git_show(root, &format!("{old_rev}:{path}"), lang)?
     };
     let full = std::path::Path::new(root).join(path);
     let new = match std::fs::read(&full) {
         Ok(bytes) => {
             if bytes.contains(&0) {
-                return Err("Binary file".into());
+                return Err(translate("git-binary-file", lang).into());
             }
-            String::from_utf8(bytes).map_err(|_| "Binary file".to_string())?
+            String::from_utf8(bytes).map_err(|_| translate("git-binary-file", lang).to_string())?
         }
         Err(_) => String::new(), // file deleted from the worktree
     };
@@ -622,7 +632,7 @@ pub fn load_workdir_diff(root: &str, path: &str, old_rev: &str) -> Result<(Strin
 /// HEAD content of `path`, or `None` when the repo has no commits yet or the
 /// path isn't tracked there — gates the editor's inline diff (a brand-new
 /// file has nothing to diff against).
-pub fn file_at_head(root: &str, path: &str) -> Result<Option<String>, String> {
+pub fn file_at_head(root: &str, path: &str, lang: &str) -> Result<Option<String>, String> {
     let repo = repo_at(root)?;
     let head = match repo.head() {
         Ok(h) => h,
@@ -632,7 +642,7 @@ pub fn file_at_head(root: &str, path: &str) -> Result<Option<String>, String> {
     if tree.get_path(std::path::Path::new(path)).is_err() {
         return Ok(None);
     }
-    Ok(Some(git_show(root, &format!("HEAD:{path}"))?))
+    Ok(Some(git_show(root, &format!("HEAD:{path}"), lang)?))
 }
 
 
@@ -649,7 +659,7 @@ pub struct BlameLine {
 
 /// git-blame for `path` (repo-relative): the last commit per line. Lines in
 /// a commit hunk share the commit's author/summary/date.
-pub fn blame(root: &str, path: &str) -> Result<Vec<BlameLine>, String> {
+pub fn blame(root: &str, path: &str, lang: &str) -> Result<Vec<BlameLine>, String> {
     let repo = repo_at(root)?;
     let mut opts = git2::BlameOptions::new();
     opts.track_copies_same_file(true);
@@ -667,7 +677,7 @@ pub fn blame(root: &str, path: &str) -> Result<Vec<BlameLine>, String> {
             Err(_) => continue,
         };
         let author = commit.author().name().unwrap_or("").to_string();
-        let date = relative_date(now, commit.time().seconds());
+        let date = relative_date(now, commit.time().seconds(), lang);
         let short: String = hunk.final_commit_id().to_string().chars().take(7).collect();
         let start = hunk.final_start_line();
         for line in start..start + hunk.lines_in_hunk() {
@@ -733,48 +743,48 @@ pub fn checkpoint_changed_files(root: &str, checkpoint: &str) -> Vec<String> {
 }
 
 macro_rules! try_git {
-    ($expr:expr; $msg:expr) => {
+    ($expr:expr; $key:expr; $lang:expr) => {
         match $expr {
             Ok(v) => v,
-            Err(e) => return Err(format!("{}: {}", $msg, e.message())),
+            Err(e) => return Err(format!("{}: {}", translate($key, $lang), e.message())),
         }
     };
 }
 
-pub fn stage(repo_root: &str, path: &str) -> Result<(), String> {
+pub fn stage(repo_root: &str, path: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
-    let mut index = try_git!(repo.index(); "open index");
-    try_git!(index.add_path(std::path::Path::new(path)); "stage file");
-    try_git!(index.write(); "write index");
+    let mut index = try_git!(repo.index(); "git-open-index"; lang);
+    try_git!(index.add_path(std::path::Path::new(path)); "git-stage-file"; lang);
+    try_git!(index.write(); "git-write-index"; lang);
     Ok(())
 }
 
-pub fn stage_all(repo_root: &str) -> Result<(), String> {
+pub fn stage_all(repo_root: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
-    let mut index = try_git!(repo.index(); "open index");
-    try_git!(index.add_all(["*"].iter().map(std::path::Path::new), git2::IndexAddOption::DEFAULT, None); "stage all");
-    try_git!(index.write(); "write index");
+    let mut index = try_git!(repo.index(); "git-open-index"; lang);
+    try_git!(index.add_all(["*"].iter().map(std::path::Path::new), git2::IndexAddOption::DEFAULT, None); "git-stage-all"; lang);
+    try_git!(index.write(); "git-write-index"; lang);
     Ok(())
 }
 
-pub fn unstage(repo_root: &str, path: &str) -> Result<(), String> {
+pub fn unstage(repo_root: &str, path: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     let path = std::path::Path::new(path);
     if let Ok(head) = repo.head() {
-        let tree = try_git!(head.peel_to_tree(); "head tree");
-        let mut index = try_git!(repo.index(); "open index");
-        try_git!(index.remove_path(path); "remove path");
-        try_git!(index.write(); "write index");
+        let tree = try_git!(head.peel_to_tree(); "git-head-tree"; lang);
+        let mut index = try_git!(repo.index(); "git-open-index"; lang);
+        try_git!(index.remove_path(path); "git-remove-path"; lang);
+        try_git!(index.write(); "git-write-index"; lang);
         let mut builder = git2::build::CheckoutBuilder::new();
         builder.path(path).force();
-        try_git!(repo.checkout_tree(tree.as_object(), Some(&mut builder)); "reset to head");
+        try_git!(repo.checkout_tree(tree.as_object(), Some(&mut builder)); "git-reset-to-head"; lang);
     } else {
-        let mut index = try_git!(repo.index(); "open index");
-        try_git!(index.remove_path(path); "remove path");
-        try_git!(index.write(); "write index");
+        let mut index = try_git!(repo.index(); "git-open-index"; lang);
+        try_git!(index.remove_path(path); "git-remove-path"; lang);
+        try_git!(index.write(); "git-write-index"; lang);
     }
     Ok(())
 }
@@ -782,16 +792,16 @@ pub fn unstage(repo_root: &str, path: &str) -> Result<(), String> {
 /// Unstage everything: reset the whole index to HEAD. On an unborn branch
 /// there is no HEAD to reset to, so every index entry is removed instead
 /// (`git rm --cached -r -f .` equivalent).
-pub fn unstage_all(repo_root: &str) -> Result<(), String> {
+pub fn unstage_all(repo_root: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     if let Ok(head) = repo.head() {
-        let object = try_git!(head.peel(git2::ObjectType::Any); "head object");
-        try_git!(repo.reset_default(Some(&object), ["*"].iter().map(std::path::Path::new)); "reset index");
+        let object = try_git!(head.peel(git2::ObjectType::Any); "git-head-object"; lang);
+        try_git!(repo.reset_default(Some(&object), ["*"].iter().map(std::path::Path::new)); "git-reset-index"; lang);
     } else {
-        let mut index = try_git!(repo.index(); "open index");
-        try_git!(index.remove_all(["*"].iter().map(std::path::Path::new), None); "clear index");
-        try_git!(index.write(); "write index");
+        let mut index = try_git!(repo.index(); "git-open-index"; lang);
+        try_git!(index.remove_all(["*"].iter().map(std::path::Path::new), None); "git-clear-index"; lang);
+        try_git!(index.write(); "git-write-index"; lang);
     }
     Ok(())
 }
@@ -814,8 +824,6 @@ pub struct GitGuard {
     pub branch: Option<String>,
     pub entries: Vec<GuardEntry>,
 }
-
-const GUARD_MISMATCH: &str = "Files changed while the confirmation was open";
 
 fn head_fingerprint(repo: &Repository) -> (Option<String>, Option<String>) {
     match repo.head() {
@@ -861,11 +869,11 @@ pub fn guard(repo_root: &str, paths: &[String]) -> GitGuard {
 
 /// Re-validate the guard against the live repo. `only` restricts the file
 /// check to a single entry (single-file discard); `None` checks all of them.
-fn validate_guard(repo_root: &str, guard: &GitGuard, only: Option<&str>) -> Result<(), String> {
+fn validate_guard(repo_root: &str, guard: &GitGuard, only: Option<&str>, lang: &str) -> Result<(), String> {
     let repo = repo_at(repo_root)?;
     let (head_oid, branch) = head_fingerprint(&repo);
     if head_oid != guard.head_oid || branch != guard.branch {
-        return Err(GUARD_MISMATCH.to_string());
+        return Err(translate("git-files-changed", lang).to_string());
     }
     for entry in &guard.entries {
         if let Some(only) = only {
@@ -875,7 +883,7 @@ fn validate_guard(repo_root: &str, guard: &GitGuard, only: Option<&str>) -> Resu
         }
         let now = entry_fingerprint(repo_root, &entry.path);
         if now.exists != entry.exists || now.size != entry.size || now.mtime_ms != entry.mtime_ms {
-            return Err(GUARD_MISMATCH.to_string());
+            return Err(translate("git-files-changed", lang).to_string());
         }
     }
     Ok(())
@@ -884,62 +892,66 @@ fn validate_guard(repo_root: &str, guard: &GitGuard, only: Option<&str>) -> Resu
 /// Discards one path: restores tracked files from HEAD, sends untracked
 /// files to the Recycle Bin (they have nothing in HEAD to restore). Returns
 /// a short human summary.
-fn discard_file(repo_root: &str, path: &str) -> Result<String, String> {
+fn discard_file(repo_root: &str, path: &str, lang: &str) -> Result<String, String> {
     let repo = repo_at(repo_root)?;
     let status = repo
         .status_file(std::path::Path::new(path))
         .unwrap_or(git2::Status::empty());
     if status.contains(git2::Status::WT_NEW) {
         let abs = std::path::Path::new(repo_root).join(path);
-        crate::services::explorer::trash(abs.to_string_lossy().as_ref())?;
-        return Ok(format!("Moved {path} to Recycle Bin"));
+        crate::services::explorer::trash(abs.to_string_lossy().as_ref(), lang)?;
+        return Ok(translate("git-moved-to-recycle", lang)
+            .replace("{path}", path)
+            .to_string());
     }
     let mut builder = git2::build::CheckoutBuilder::new();
     builder.path(path).force();
     if let Ok(head) = repo.head() {
-        let tree = try_git!(head.peel_to_tree(); "head tree");
-        try_git!(repo.checkout_tree(tree.as_object(), Some(&mut builder)); "checkout tree");
+        let tree = try_git!(head.peel_to_tree(); "git-head-tree"; lang);
+        try_git!(repo.checkout_tree(tree.as_object(), Some(&mut builder)); "git-checkout"; lang);
     }
-    Ok(format!("Discarded changes in {path}"))
+    Ok(translate("git-discarded", lang)
+        .replace("{path}", path)
+        .to_string())
 }
 
-pub fn discard_guarded(repo_root: &str, path: &str, guard: &GitGuard) -> Result<String, String> {
+pub fn discard_guarded(repo_root: &str, path: &str, guard: &GitGuard, lang: &str) -> Result<String, String> {
     invalidate_status_cache(repo_root);
-    validate_guard(repo_root, guard, Some(path))?;
-    discard_file(repo_root, path)
+    validate_guard(repo_root, guard, Some(path), lang)?;
+    discard_file(repo_root, path, lang)
 }
 
 /// Discard every file recorded in the guard. The entry list comes from the
 /// guard itself, so files created after the guard was taken are not touched.
-pub fn discard_all_guarded(repo_root: &str, guard: &GitGuard) -> Result<String, String> {
+pub fn discard_all_guarded(repo_root: &str, guard: &GitGuard, lang: &str) -> Result<String, String> {
     invalidate_status_cache(repo_root);
-    validate_guard(repo_root, guard, None)?;
+    validate_guard(repo_root, guard, None, lang)?;
     let mut summaries = Vec::new();
     for entry in &guard.entries {
-        summaries.push(discard_file(repo_root, &entry.path)?);
+        summaries.push(discard_file(repo_root, &entry.path, lang)?);
     }
     Ok(summaries.join("\n"))
 }
 
-pub fn commit(repo_root: &str, message: &str, include_all: bool, amend: bool) -> Result<Oid, String> {
+pub fn commit(repo_root: &str, message: &str, include_all: bool, amend: bool, lang: &str) -> Result<Oid, String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
     if include_all {
-        let mut index = try_git!(repo.index(); "open index");
-        try_git!(index.add_all(["*"].iter().map(std::path::Path::new), git2::IndexAddOption::DEFAULT, None); "stage all");
-        try_git!(index.write(); "write index");
+        let mut index = try_git!(repo.index(); "git-open-index"; lang);
+        try_git!(index.add_all(["*"].iter().map(std::path::Path::new), git2::IndexAddOption::DEFAULT, None); "git-stage-all"; lang);
+        try_git!(index.write(); "git-write-index"; lang);
     }
-    let mut index = try_git!(repo.index(); "open index");
-    let tree_oid = try_git!(index.write_tree(); "write tree");
-    let tree = try_git!(repo.find_tree(tree_oid); "find tree");
+    let mut index = try_git!(repo.index(); "git-open-index"; lang);
+    let tree_oid = try_git!(index.write_tree(); "git-write-tree"; lang);
+    let tree = try_git!(repo.find_tree(tree_oid); "git-find-tree"; lang);
     let signature = signature(&repo)?;
     let head = repo.head();
     let parents: Vec<git2::Commit> = if amend {
         let head = head.map_err(|e| e.message().to_string())?;
-        let commit = try_git!(head.peel_to_commit(); "head commit");
+        let commit = try_git!(head.peel_to_commit(); "git-head-commit"; lang);
         vec![commit]
     } else if let Ok(h) = head {
-        vec![try_git!(h.peel_to_commit(); "head commit")]
+        vec![try_git!(h.peel_to_commit(); "git-head-commit"; lang)]
     } else {
         vec![]
     };
@@ -947,35 +959,35 @@ pub fn commit(repo_root: &str, message: &str, include_all: bool, amend: bool) ->
     let update_ref = if amend || repo.head().is_ok() { Some("HEAD") } else { None };
     let oid = try_git!(
         repo.commit(update_ref, &signature, &signature, message, &tree, &parent_oids[..]);
-        "commit"
+        "git-commit"; lang
     );
     Ok(oid)
 }
 
-pub fn switch_branch(repo_root: &str, name: &str) -> Result<(), String> {
+pub fn switch_branch(repo_root: &str, name: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
-    try_git!(repo.set_head(&format!("refs/heads/{name}")); "set head");
-    let head = try_git!(repo.head(); "head");
-    let tree = try_git!(head.peel_to_tree(); "head tree");
+    try_git!(repo.set_head(&format!("refs/heads/{name}")); "git-set-head"; lang);
+    let head = try_git!(repo.head(); "git-head"; lang);
+    let tree = try_git!(head.peel_to_tree(); "git-head-tree"; lang);
     let mut builder = git2::build::CheckoutBuilder::new();
     builder.force();
-    try_git!(repo.checkout_tree(tree.as_object(), Some(&mut builder)); "checkout");
+    try_git!(repo.checkout_tree(tree.as_object(), Some(&mut builder)); "git-checkout"; lang);
     Ok(())
 }
 
-pub fn create_branch(repo_root: &str, name: &str) -> Result<(), String> {
+pub fn create_branch(repo_root: &str, name: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let repo = repo_at(repo_root)?;
-    let head = try_git!(repo.head(); "head");
-    let commit = try_git!(head.peel_to_commit(); "head commit");
-    let _ = try_git!(repo.branch(name, &commit, false); "create branch");
-    switch_branch(repo_root, name)
+    let head = try_git!(repo.head(); "git-head"; lang);
+    let commit = try_git!(head.peel_to_commit(); "git-head-commit"; lang);
+    let _ = try_git!(repo.branch(name, &commit, false); "git-create-branch"; lang);
+    switch_branch(repo_root, name, lang)
 }
 
-pub fn fetch(repo_root: &str) -> Result<(), String> {
+pub fn fetch(repo_root: &str, lang: &str) -> Result<(), String> {
     let repo = repo_at(repo_root)?;
-    let remotes = try_git!(repo.remotes(); "list remotes");
+    let remotes = try_git!(repo.remotes(); "git-list-remotes"; lang);
     // Fetch every remote with prune, tolerating individual failures: an
     // offline or unreachable remote must not block updates from the rest.
     // Only an across-the-board failure (or zero remotes) surfaces an error.
@@ -990,7 +1002,7 @@ pub fn fetch(repo_root: &str) -> Result<(), String> {
             Ok(()) => any_ok = true,
             Err(e) => {
                 if first_err.is_none() {
-                    first_err = Some(format!("fetch {name}: {}", e.message()));
+                    first_err = Some(format!("{}: {}", translate("git-fetch", lang).replace("{name}", name), e.message()));
                 }
             }
         }
@@ -1016,27 +1028,27 @@ pub fn pull(repo_root: &str) -> Result<(), String> {
         .and_then(|o| if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).to_string()) })
 }
 
-pub fn push(repo_root: &str, remote: &str) -> Result<(), String> {
+pub fn push(repo_root: &str, remote: &str, lang: &str) -> Result<(), String> {
     let repo = repo_at(repo_root)?;
-    let mut r = try_git!(repo.find_remote(remote); "find remote");
-    let head = try_git!(repo.head(); "head");
+    let mut r = try_git!(repo.find_remote(remote); "git-find-remote"; lang);
+    let head = try_git!(repo.head(); "git-head"; lang);
     let name = head.shorthand().unwrap_or("HEAD");
-    try_git!(r.push(&[&format!("refs/heads/{name}:refs/heads/{name}")], None); "push");
+    try_git!(r.push(&[&format!("refs/heads/{name}:refs/heads/{name}")], None); "git-push"; lang);
     Ok(())
 }
 
-pub fn stash_all(repo_root: &str) -> Result<(), String> {
+pub fn stash_all(repo_root: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let mut repo = repo_at(repo_root)?;
     let sig = signature(&repo)?;
-    try_git!(repo.stash_save(&sig, "muster", Some(git2::StashFlags::INCLUDE_UNTRACKED)); "stash");
+    try_git!(repo.stash_save(&sig, "muster", Some(git2::StashFlags::INCLUDE_UNTRACKED)); "git-stash"; lang);
     Ok(())
 }
 
-pub fn stash_pop(repo_root: &str) -> Result<(), String> {
+pub fn stash_pop(repo_root: &str, lang: &str) -> Result<(), String> {
     invalidate_status_cache(repo_root);
     let mut repo = repo_at(repo_root)?;
-    try_git!(repo.stash_pop(0, None); "pop stash");
+    try_git!(repo.stash_pop(0, None); "git-pop-stash"; lang);
     Ok(())
 }
 
@@ -1100,7 +1112,7 @@ mod tests {
         std::fs::write(tmp.0.join("new.txt"), "x\ny").unwrap();
         // Untracked binary file (NUL byte): not counted.
         std::fs::write(tmp.0.join("bin.dat"), [0u8, 1, 2]).unwrap();
-        let info = status(&tmp.root());
+        let info = status(&tmp.root(), "en");
         assert_eq!(info.line_additions, 4);
         assert_eq!(info.line_deletions, 1);
     }
@@ -1111,7 +1123,7 @@ mod tests {
         let root = tmp.root();
         std::fs::write(tmp.0.join("a.txt"), "modified").unwrap();
         let g = guard(&root, &["a.txt".to_string()]);
-        let summary = discard_guarded(&root, "a.txt", &g).unwrap();
+        let summary = discard_guarded(&root, "a.txt", &g, "en").unwrap();
         assert_eq!(summary, "Discarded changes in a.txt");
         assert_eq!(std::fs::read_to_string(tmp.0.join("a.txt")).unwrap(), "one");
     }
@@ -1123,8 +1135,8 @@ mod tests {
         let g = guard(&root, &["a.txt".to_string()]);
         // An agent rewrites the file while the confirmation is open.
         std::fs::write(tmp.0.join("a.txt"), "agent write").unwrap();
-        let err = discard_guarded(&root, "a.txt", &g).unwrap_err();
-        assert_eq!(err, GUARD_MISMATCH);
+        let err = discard_guarded(&root, "a.txt", &g, "en").unwrap_err();
+        assert_eq!(err, "Files changed while the confirmation was open");
         assert_eq!(std::fs::read_to_string(tmp.0.join("a.txt")).unwrap(), "agent write");
     }
 
@@ -1134,8 +1146,8 @@ mod tests {
         let root = tmp.root();
         let g = guard(&root, &["a.txt".to_string()]);
         std::fs::remove_file(tmp.0.join("a.txt")).unwrap();
-        let err = discard_guarded(&root, "a.txt", &g).unwrap_err();
-        assert_eq!(err, GUARD_MISMATCH);
+        let err = discard_guarded(&root, "a.txt", &g, "en").unwrap_err();
+        assert_eq!(err, "Files changed while the confirmation was open");
     }
 
     #[test]
@@ -1143,8 +1155,8 @@ mod tests {
         let tmp = TempRepo::new();
         let root = tmp.root();
         std::fs::write(tmp.0.join("a.txt"), "modified").unwrap();
-        stage(&root, "a.txt").unwrap();
-        unstage_all(&root).unwrap();
+        stage(&root, "a.txt", "en").unwrap();
+        unstage_all(&root, "en").unwrap();
         let repo = Repository::open(&tmp.0).unwrap();
         let entry = repo
             .index()
@@ -1165,8 +1177,8 @@ mod tests {
         let repo = Repository::init(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "one").unwrap();
         let root = dir.to_string_lossy().to_string();
-        stage(&root, "a.txt").unwrap();
-        unstage_all(&root).unwrap();
+        stage(&root, "a.txt", "en").unwrap();
+        unstage_all(&root, "en").unwrap();
         let mut index = repo.index().unwrap();
         index.read(false).unwrap();
         assert_eq!(index.len(), 0);
@@ -1182,8 +1194,8 @@ mod tests {
         // A file not in the guard must not be touched, and a guarded file
         // changing must abort the whole batch.
         std::fs::write(tmp.0.join("a.txt"), "modified").unwrap();
-        let err = discard_all_guarded(&root, &g).unwrap_err();
-        assert_eq!(err, GUARD_MISMATCH);
+        let err = discard_all_guarded(&root, &g, "en").unwrap_err();
+        assert_eq!(err, "Files changed while the confirmation was open");
         assert_eq!(std::fs::read_to_string(tmp.0.join("a.txt")).unwrap(), "modified");
     }
 
@@ -1193,7 +1205,7 @@ mod tests {
         const HOUR: i64 = 60 * MIN;
         const DAY: i64 = 24 * HOUR;
         let now = 1_000_000_000;
-        let at = |ago: i64| relative_date(now, now - ago);
+        let at = |ago: i64| relative_date(now, now - ago, "en");
         assert_eq!(at(0), "0 seconds ago");
         assert_eq!(at(1), "1 second ago");
         assert_eq!(at(59), "59 seconds ago");
@@ -1210,7 +1222,7 @@ mod tests {
         assert_eq!(at(365 * DAY), "1 year ago");
         assert_eq!(at(3 * 365 * DAY), "3 years ago");
         // Future timestamps clamp to zero rather than wrapping.
-        assert_eq!(relative_date(now, now + 10), "0 seconds ago");
+        assert_eq!(relative_date(now, now + 10, "en"), "0 seconds ago");
     }
 
     #[test]
@@ -1269,7 +1281,7 @@ mod tests {
         let second = commit_file(&dir, "a.txt", "two", "second");
         let root = dir.to_string_lossy().to_string();
 
-        let history = file_history(&root, "a.txt");
+        let history = file_history(&root, "a.txt", "en");
         assert_eq!(history.len(), 2, "both commits reported");
         assert_eq!(history[0].hash, first, "oldest first");
         assert_eq!(history[0].parent, None, "root commit has no parent");
@@ -1279,7 +1291,7 @@ mod tests {
         assert_eq!(history[1].subject, "second");
 
         // A path with no history returns nothing.
-        assert!(file_history(&root, "nope.txt").is_empty());
+        assert!(file_history(&root, "nope.txt", "en").is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1293,7 +1305,7 @@ mod tests {
         commit_file(&dir, "a.txt", "one\ntwo changed\n", "second");
         let root = dir.to_string_lossy().to_string();
 
-        let lines = blame(&root, "a.txt").unwrap();
+        let lines = blame(&root, "a.txt", "en").unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].line, 1, "line 1 untouched by the second commit");
         assert_eq!(lines[1].line, 2);
@@ -1340,13 +1352,13 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "one\nplus disk\n").unwrap();
         let root = dir.to_string_lossy().to_string();
 
-        let (old, new) = load_workdir_diff(&root, "a.txt", &first).unwrap();
+        let (old, new) = load_workdir_diff(&root, "a.txt", &first, "en").unwrap();
         assert_eq!(old, "one\n");
         assert_eq!(new, "one\nplus disk\n");
 
         // Deleted worktree file — empty new side.
         std::fs::remove_file(dir.join("a.txt")).unwrap();
-        let (_old, new) = load_workdir_diff(&root, "a.txt", &first).unwrap();
+        let (_old, new) = load_workdir_diff(&root, "a.txt", &first, "en").unwrap();
         assert_eq!(new, "");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1362,12 +1374,12 @@ mod tests {
         let third = commit_file(&dir, "a.txt", "three", "third");
         let root = dir.to_string_lossy().to_string();
 
-        let (old, new) = load_commit_diff(&root, "a.txt", &second, &third).unwrap();
+        let (old, new) = load_commit_diff(&root, "a.txt", &second, &third, "en").unwrap();
         assert_eq!(old, "two");
         assert_eq!(new, "three");
 
         // Empty rev = the file didn't exist on that side (here: root commit ^).
-        let (old, new) = load_commit_diff(&root, "a.txt", "", &second).unwrap();
+        let (old, new) = load_commit_diff(&root, "a.txt", "", &second, "en").unwrap();
         assert_eq!(old, "");
         assert_eq!(new, "two");
 

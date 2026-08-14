@@ -290,6 +290,7 @@ function ThemePicker({
   value: string;
   onChange: (name: string) => void;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -332,7 +333,7 @@ function ThemePicker({
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search..."
+              placeholder={t("settings.themeSearchPlaceholder")}
               className="w-full bg-white/[0.05] px-2 py-1 rounded ui-fs-sm outline-none"
             />
           </div>
@@ -366,7 +367,7 @@ function ThemePicker({
             })}
             {filtered.length === 0 && (
               <div className="px-2.5 py-2 ui-fs-sm text-muster-muted">
-                No themes found
+                {t("settings.noThemesFound")}
               </div>
             )}
           </div>

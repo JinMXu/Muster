@@ -407,16 +407,18 @@ pub fn untrack_session(session_id: Uuid) {
 /// Force-kill a process. Windows has no SIGTERM/SIGKILL distinction — this is
 /// TerminateProcess semantics only — so there is a single kill command and
 /// the frontend labels it "Kill process".
-pub fn kill(pid: u32) -> Result<(), String> {
+pub fn kill(pid: u32, lang: &str) -> Result<(), String> {
     let mut sys = SYSTEM.lock();
     sys.refresh_pids_specifics(&[Pid::from_u32(pid)], ProcessRefreshKind::new());
     let Some(proc_) = sys.process(Pid::from_u32(pid)) else {
-        return Err(format!("no process with pid {pid}"));
+        return Err(crate::services::i18n::translate("no-process-with-pid", lang)
+            .replace("{pid}", &pid.to_string()));
     };
     if proc_.kill() {
         Ok(())
     } else {
-        Err(format!("failed to kill pid {pid}"))
+        Err(crate::services::i18n::translate("failed-to-kill-pid", lang)
+            .replace("{pid}", &pid.to_string()))
     }
 }
 

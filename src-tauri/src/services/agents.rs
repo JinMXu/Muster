@@ -406,6 +406,7 @@ fn notify_changed(
     }
     let Some(s) = shared.get_label(label) else { return };
     let g = s.lock();
+    let lang = crate::services::i18n::effective(&shared.settings().lock().language);
     for (sid, status) in rows {
         let Some(status) = status else { continue };
         let prev_state = prev.get(sid).map(|p| p.state);
@@ -415,7 +416,9 @@ fn notify_changed(
                 if !session.try_mark_agent_notify(NOTIFY_COOLDOWN) {
                     continue;
                 }
-                format!("{} is waiting for input \u{2014} {}", status.agent.label(), session.title())
+                crate::services::i18n::translate("notify-agent-waiting", &lang)
+                    .replace("{agent}", status.agent.label())
+                    .replace("{title}", &session.title())
             }
             AgentState::Done
                 if matches!(prev_state, Some(AgentState::Working) | Some(AgentState::Waiting)) =>
@@ -423,7 +426,9 @@ fn notify_changed(
                 // Record the send so a flapping agent can't re-notify, but
                 // don't gate the `done` notification itself — it fires once.
                 session.try_mark_agent_notify(NOTIFY_COOLDOWN);
-                format!("{} finished \u{2014} {}", status.agent.label(), session.title())
+                crate::services::i18n::translate("notify-agent-done", &lang)
+                    .replace("{agent}", status.agent.label())
+                    .replace("{title}", &session.title())
             }
             _ => continue,
         };

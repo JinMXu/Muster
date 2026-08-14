@@ -623,7 +623,11 @@ fn notify_bell(app: &AppHandle, label: &str, session: &TerminalSession) {
         }
         return;
     }
-    crate::services::notify::send(app, label, session.id, format!("{} \u{2014} Bell", session.title()));
+    let lang = crate::services::i18n::effective(
+        &app.state::<crate::commands::SharedState>().settings().lock().language,
+    );
+    let body = crate::services::i18n::translate("notify-bell", &lang).replace("{title}", &session.title());
+    crate::services::notify::send(app, label, session.id, body);
 }
 
 /// Extract the path component of an OSC 7 `file://host/path` URI.

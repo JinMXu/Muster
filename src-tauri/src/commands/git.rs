@@ -6,6 +6,10 @@ use std::sync::Arc;
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use tauri::State;
+
+use super::SharedState;
+use crate::services::i18n::effective;
 
 /// Per-root serialization for `git_status`. A cold-cache scan of a big repo
 /// can take minutes — without this gate, concurrent polls of the same repo
@@ -16,7 +20,8 @@ use parking_lot::Mutex;
 static STATUS_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
-pub async fn git_status(repo_root: String) -> crate::services::git::GitStatusInfo {
+pub async fn git_status(state: State<'_, SharedState>, repo_root: String) -> Result<crate::services::git::GitStatusInfo, String> {
+    let lang = effective(&state.settings.lock().language);
     let lock = {
         STATUS_LOCKS
             .lock()
@@ -32,10 +37,10 @@ pub async fn git_status(repo_root: String) -> crate::services::git::GitStatusInf
         if let Some(info) = crate::services::git::cached_status(&repo_root) {
             return info;
         }
-        crate::services::git::status(&repo_root)
+        crate::services::git::status(&repo_root, &lang)
     })
     .await
-    .unwrap_or_else(|_| crate::services::git::GitStatusInfo::default())
+    .map_err(|e| e.to_string())
 }
 
 /// Anchor for the right panels: the toplevel of the repo containing `cwd`,
@@ -49,29 +54,33 @@ pub async fn resolve_project_root(cwd: String) -> String {
 }
 
 #[tauri::command]
-pub async fn git_stage(repo_root: String, path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::stage(&repo_root, &path))
+pub async fn git_stage(state: State<'_, SharedState>, repo_root: String, path: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::stage(&repo_root, &path, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_stage_all(repo_root: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::stage_all(&repo_root))
+pub async fn git_stage_all(state: State<'_, SharedState>, repo_root: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::stage_all(&repo_root, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_unstage(repo_root: String, path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::unstage(&repo_root, &path))
+pub async fn git_unstage(state: State<'_, SharedState>, repo_root: String, path: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::unstage(&repo_root, &path, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_unstage_all(repo_root: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::unstage_all(&repo_root))
+pub async fn git_unstage_all(state: State<'_, SharedState>, repo_root: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::unstage_all(&repo_root, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -85,49 +94,57 @@ pub async fn git_guard(repo_root: String, paths: Vec<String>) -> crate::services
 
 #[tauri::command]
 pub async fn git_discard_guarded(
+    state: State<'_, SharedState>,
     repo_root: String,
     path: String,
     guard: crate::services::git::GitGuard,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || crate::services::git::discard_guarded(&repo_root, &path, &guard))
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::discard_guarded(&repo_root, &path, &guard, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn git_discard_all_guarded(
+    state: State<'_, SharedState>,
     repo_root: String,
     guard: crate::services::git::GitGuard,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || crate::services::git::discard_all_guarded(&repo_root, &guard))
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::discard_all_guarded(&repo_root, &guard, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_commit(repo_root: String, message: String, include_all: bool, amend: bool) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || crate::services::git::commit(&repo_root, &message, include_all, amend).map(|oid| oid.to_string()))
+pub async fn git_commit(state: State<'_, SharedState>, repo_root: String, message: String, include_all: bool, amend: bool) -> Result<String, String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::commit(&repo_root, &message, include_all, amend, &lang).map(|oid| oid.to_string()))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_switch_branch(repo_root: String, name: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::switch_branch(&repo_root, &name))
+pub async fn git_switch_branch(state: State<'_, SharedState>, repo_root: String, name: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::switch_branch(&repo_root, &name, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_create_branch(repo_root: String, name: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::create_branch(&repo_root, &name))
+pub async fn git_create_branch(state: State<'_, SharedState>, repo_root: String, name: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::create_branch(&repo_root, &name, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_fetch(repo_root: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::fetch(&repo_root))
+pub async fn git_fetch(state: State<'_, SharedState>, repo_root: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::fetch(&repo_root, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -140,22 +157,25 @@ pub async fn git_pull(repo_root: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn git_push(repo_root: String, remote: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::push(&repo_root, &remote))
+pub async fn git_push(state: State<'_, SharedState>, repo_root: String, remote: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::push(&repo_root, &remote, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_stash_all(repo_root: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::stash_all(&repo_root))
+pub async fn git_stash_all(state: State<'_, SharedState>, repo_root: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::stash_all(&repo_root, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn git_stash_pop(repo_root: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || crate::services::git::stash_pop(&repo_root))
+pub async fn git_stash_pop(state: State<'_, SharedState>, repo_root: String) -> Result<(), String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::stash_pop(&repo_root, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -168,27 +188,31 @@ pub async fn git_init(repo_root: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn git_file_history(repo_root: String, path: String) -> Vec<crate::services::git::FileCommit> {
-    tokio::task::spawn_blocking(move || crate::services::git::file_history(&repo_root, &path))
+pub async fn git_file_history(state: State<'_, SharedState>, repo_root: String, path: String) -> Result<Vec<crate::services::git::FileCommit>, String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::file_history(&repo_root, &path, &lang))
         .await
-        .unwrap_or_default()
+        .map_err(|e| e.to_string())
 }
 
 /// HEAD content of one file, or `None` when it isn't tracked at HEAD — used
 /// by the editor's inline diff gutter (old side vs the live buffer).
 #[tauri::command]
-pub async fn git_head_content(repo_root: String, path: String) -> Result<Option<String>, String> {
-    tokio::task::spawn_blocking(move || crate::services::git::file_at_head(&repo_root, &path))
+pub async fn git_head_content(state: State<'_, SharedState>, repo_root: String, path: String) -> Result<Option<String>, String> {
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::file_at_head(&repo_root, &path, &lang))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn git_blame(
+    state: State<'_, SharedState>,
     repo_root: String,
     path: String,
 ) -> Result<Vec<crate::services::git::BlameLine>, String> {
-    tokio::task::spawn_blocking(move || crate::services::git::blame(&repo_root, &path))
+    let lang = effective(&state.settings.lock().language);
+    tokio::task::spawn_blocking(move || crate::services::git::blame(&repo_root, &path, &lang))
         .await
         .map_err(|e| e.to_string())?
 }

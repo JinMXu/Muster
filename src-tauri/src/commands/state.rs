@@ -59,6 +59,13 @@ pub fn save_settings(app: AppHandle, state: State<SharedState>, settings: Settin
             }
         }
     }
+    // Retitle already-open diff tabs in the new language.
+    for (_, s) in state.all() {
+        let g = s.lock();
+        for d in g.diffs.values() {
+            d.set_lang(&lang);
+        }
+    }
     Ok(())
 }
 

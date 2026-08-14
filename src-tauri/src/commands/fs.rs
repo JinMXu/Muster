@@ -18,8 +18,9 @@ pub async fn list_directory(path: String) -> Vec<explorer::DirEntry> {
 }
 
 #[tauri::command]
-pub fn trash_file(path: String) -> Result<(), String> {
-    explorer::trash(&path)
+pub fn trash_file(state: State<SharedState>, path: String) -> Result<(), String> {
+    let lang = state.settings.lock().language.clone();
+    explorer::trash(&path, &lang)
 }
 
 #[tauri::command]
@@ -74,25 +75,29 @@ pub async fn list_project_files(root: String) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn install_explorer_context_menu() -> Result<(), String> {
+pub fn install_explorer_context_menu(state: State<SharedState>) -> Result<(), String> {
+    let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    explorer::install_context_menu(&exe.to_string_lossy())
+    explorer::install_context_menu(&exe.to_string_lossy(), &lang)
 }
 
 #[tauri::command]
-pub fn add_to_path() -> Result<(), String> {
+pub fn add_to_path(state: State<SharedState>) -> Result<(), String> {
+    let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    crate::services::cli::add_to_path(&exe.to_string_lossy())
+    crate::services::cli::add_to_path(&exe.to_string_lossy(), &lang)
 }
 
 #[tauri::command]
-pub fn remove_from_path() -> Result<(), String> {
+pub fn remove_from_path(state: State<SharedState>) -> Result<(), String> {
+    let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    crate::services::cli::remove_from_path(&exe.to_string_lossy())
+    crate::services::cli::remove_from_path(&exe.to_string_lossy(), &lang)
 }
 
 #[tauri::command]
-pub fn is_on_path() -> Result<bool, String> {
+pub fn is_on_path(state: State<SharedState>) -> Result<bool, String> {
+    let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    crate::services::cli::is_on_path(&exe.to_string_lossy())
+    crate::services::cli::is_on_path(&exe.to_string_lossy(), &lang)
 }

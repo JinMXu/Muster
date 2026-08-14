@@ -75,6 +75,8 @@ const en = {
     themeSystem: "system",
     themeLight: "light",
     themeDark: "dark",
+    themeSearchPlaceholder: "Search\u2026",
+    noThemesFound: "No themes found",
     language: "Language",
     languageSystem: "Follow system",
     languageEn: "English",

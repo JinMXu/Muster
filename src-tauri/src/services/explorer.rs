@@ -12,13 +12,14 @@ use serde::Serialize;
 use super::i18n::translate;
 
 #[cfg(windows)]
-pub fn install_context_menu(exe_path: &str) -> Result<(), String> {
+pub fn install_context_menu(exe_path: &str, lang: &str) -> Result<(), String> {
     // Defer to a reg.exe child process for portability.
+    let label = translate("context-menu-open", lang);
     let args_key_dir = "HKCU\\SOFTWARE\\Classes\\Directory\\shell\\OpenInMuster";
     let args_key_bg = "HKCU\\SOFTWARE\\Classes\\Directory\\Background\\shell\\OpenInMuster";
-    run_reg_add(args_key_dir, "Open in Muster")?;
+    run_reg_add(args_key_dir, label)?;
     run_reg_add_cmd(args_key_dir, exe_path)?;
-    run_reg_add(args_key_bg, "Open in Muster")?;
+    run_reg_add(args_key_bg, label)?;
     run_reg_add_cmd(args_key_bg, exe_path)?;
     Ok(())
 }
@@ -50,13 +51,13 @@ fn run_reg_add_cmd(key: &str, exe_path: &str) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-pub fn install_context_menu(_exe_path: &str) -> Result<(), String> {
+pub fn install_context_menu(_exe_path: &str, _lang: &str) -> Result<(), String> {
     Err("Not supported on this platform".into())
 }
 
 /// Move a file or directory to the Recycle Bin (SHFileOperationW with undo).
 #[cfg(windows)]
-pub fn trash(path: &str) -> Result<(), String> {
+pub fn trash(path: &str, lang: &str) -> Result<(), String> {
     use windows::core::PCWSTR;
     use windows::Win32::UI::Shell::{SHFileOperationW, SHFILEOPSTRUCTW, FO_DELETE};
     // FOF_ALLOWUNDO=0x40, FOF_NOCONFIRMATION=0x10, FOF_SILENT=0x04
@@ -73,11 +74,15 @@ pub fn trash(path: &str) -> Result<(), String> {
         ..Default::default()
     };
     let result = unsafe { SHFileOperationW(&mut op) };
-    if result == 0 { Ok(()) } else { Err(format!("SHFileOperationW failed: {result}")) }
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(translate("trash-failed", lang).replace("{code}", &result.to_string()))
+    }
 }
 
 #[cfg(not(windows))]
-pub fn trash(_path: &str) -> Result<(), String> {
+pub fn trash(_path: &str, _lang: &str) -> Result<(), String> {
     Err("Not supported on this platform".into())
 }
 

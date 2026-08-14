@@ -154,6 +154,8 @@ pub async fn reload_diff(window: Window, state: State<'_, SharedState>, id: Uuid
         g.diffs.get(&id).cloned()
     };
     if let Some(d) = diff {
+        let lang = crate::services::i18n::effective(&state.settings.lock().language);
+        d.set_lang(&lang);
         let _ = tokio::task::spawn_blocking(move || d.reload()).await;
     }
     Ok(())

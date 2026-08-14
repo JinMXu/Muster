@@ -3,10 +3,10 @@
 //! `muster` / `Muster` commands work from any terminal.
 
 #[cfg(windows)]
-pub fn add_to_path(exe_path: &str) -> Result<(), String> {
+pub fn add_to_path(exe_path: &str, lang: &str) -> Result<(), String> {
     let exe_dir = std::path::Path::new(exe_path)
         .parent()
-        .ok_or_else(|| "invalid exe path".to_string())?
+        .ok_or_else(|| crate::services::i18n::translate("invalid-exe-path", lang).to_string())?
         .to_string_lossy()
         .to_string();
 
@@ -24,10 +24,10 @@ pub fn add_to_path(exe_path: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-pub fn remove_from_path(exe_path: &str) -> Result<(), String> {
+pub fn remove_from_path(exe_path: &str, lang: &str) -> Result<(), String> {
     let exe_dir = std::path::Path::new(exe_path)
         .parent()
-        .ok_or_else(|| "invalid exe path".to_string())?
+        .ok_or_else(|| crate::services::i18n::translate("invalid-exe-path", lang).to_string())?
         .to_string_lossy()
         .to_string();
 
@@ -40,10 +40,10 @@ pub fn remove_from_path(exe_path: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-pub fn is_on_path(exe_path: &str) -> Result<bool, String> {
+pub fn is_on_path(exe_path: &str, lang: &str) -> Result<bool, String> {
     let exe_dir = std::path::Path::new(exe_path)
         .parent()
-        .ok_or_else(|| "invalid exe path".to_string())?
+        .ok_or_else(|| crate::services::i18n::translate("invalid-exe-path", lang).to_string())?
         .to_string_lossy()
         .to_string();
     let current = read_user_path()?;
@@ -121,16 +121,16 @@ fn path_list_contains(path_list: &str, entry: &str) -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn add_to_path(_exe_path: &str) -> Result<(), String> {
+pub fn add_to_path(_exe_path: &str, _lang: &str) -> Result<(), String> {
     Err("Not supported on this platform".into())
 }
 
 #[cfg(not(windows))]
-pub fn remove_from_path(_exe_path: &str) -> Result<(), String> {
+pub fn remove_from_path(_exe_path: &str, _lang: &str) -> Result<(), String> {
     Err("Not supported on this platform".into())
 }
 
 #[cfg(not(windows))]
-pub fn is_on_path(_exe_path: &str) -> Result<bool, String> {
+pub fn is_on_path(_exe_path: &str, _lang: &str) -> Result<bool, String> {
     Err("Not supported on this platform".into())
 }

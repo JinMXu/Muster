@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconMinus, IconRestore, IconSquare, IconX } from "./icons";
+import { useT } from "../lib/i18n/context";
 
 /// Windows-style caption buttons for the frameless window (decorations:
 /// false in tauri.conf.json). Rendered flush against the right edge of the
@@ -9,6 +10,7 @@ import { IconMinus, IconRestore, IconSquare, IconX } from "./icons";
 /// backend's CloseRequested flow (last window hides to tray) — no special
 /// handling needed here.
 export default function WindowControls() {
+  const { t } = useT();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -28,21 +30,21 @@ export default function WindowControls() {
     // clickable while the Header's empty space around them drags.
     <div className="flex items-stretch self-stretch flex-shrink-0">
       <button
-        title="Minimize"
+        title={t("window.minimize")}
         onClick={() => getCurrentWindow().minimize()}
         className="w-[46px] flex items-center justify-center text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn"
       >
         <IconMinus size={14} />
       </button>
       <button
-        title={maximized ? "Restore" : "Maximize"}
+        title={maximized ? t("window.restore") : t("window.maximize")}
         onClick={() => getCurrentWindow().toggleMaximize()}
         className="w-[46px] flex items-center justify-center text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn"
       >
         {maximized ? <IconRestore size={12} /> : <IconSquare size={12} />}
       </button>
       <button
-        title="Close"
+        title={t("window.close")}
         onClick={() => getCurrentWindow().close()}
         className="w-[46px] flex items-center justify-center text-muster-muted hover:bg-[#e81123] hover:text-white"
       >

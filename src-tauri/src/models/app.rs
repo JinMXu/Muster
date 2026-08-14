@@ -141,7 +141,11 @@ impl AppState {
 
         for proj_snap in &snapshot.projects {
             self.project_counter += 1;
-            let mut project = Project::new(format!("Project {}", self.project_counter));
+            let lang = crate::services::i18n::effective(&self.settings.lock().language);
+            let mut project = Project::new(
+                crate::services::i18n::translate("project-default-name", &lang)
+                    .replace("{n}", &self.project_counter.to_string()),
+            );
             project.custom_name = proj_snap.custom_name.clone();
             project.custom_directory = proj_snap.custom_directory.clone();
 
@@ -182,8 +186,9 @@ impl AppState {
                                             repo_root.clone(),
                                             path.clone(),
                                             old.clone(),
+                                            &lang,
                                         )),
-                                        None => Arc::new(DiffTab::new_workdir(repo_root.clone(), path.clone())),
+                                        None => Arc::new(DiffTab::new_workdir(repo_root.clone(), path.clone(), &lang)),
                                     }
                                 } else {
                                     match (old_rev, new_rev) {
@@ -192,8 +197,9 @@ impl AppState {
                                             path.clone(),
                                             old.clone(),
                                             new.clone(),
+                                            &lang,
                                         )),
-                                        _ => Arc::new(DiffTab::new(repo_root.clone(), path.clone(), *staged)),
+                                        _ => Arc::new(DiffTab::new(repo_root.clone(), path.clone(), *staged, &lang)),
                                     }
                                 };
                                 let did = diff.id;
@@ -293,7 +299,9 @@ impl AppState {
     pub fn new_project(&mut self, directory: Option<String>) -> Uuid {
         self.bump();
         self.project_counter += 1;
-        let fallback = format!("Project {}", self.project_counter);
+        let lang = crate::services::i18n::effective(&self.settings.lock().language);
+        let fallback = crate::services::i18n::translate("project-default-name", &lang)
+            .replace("{n}", &self.project_counter.to_string());
         let mut project = Project::new(fallback);
         if let Some(dir) = &directory {
             project.custom_directory = Some(dir.clone());
@@ -833,7 +841,8 @@ impl AppState {
 
     pub fn open_diff(&mut self, repo_root: &str, path: &str, staged: bool) -> Option<Uuid> {
         self.bump();
-        let diff = Arc::new(DiffTab::new(repo_root.to_string(), path.to_string(), staged));
+        let lang = crate::services::i18n::effective(&self.settings.lock().language);
+        let diff = Arc::new(DiffTab::new(repo_root.to_string(), path.to_string(), staged, &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));
@@ -846,7 +855,8 @@ impl AppState {
     /// working-tree diffs.
     pub fn open_commit_diff(&mut self, repo_root: &str, path: &str, old_rev: &str, new_rev: &str) -> Option<Uuid> {
         self.bump();
-        let diff = Arc::new(DiffTab::with_revs(repo_root.to_string(), path.to_string(), old_rev.to_string(), new_rev.to_string()));
+        let lang = crate::services::i18n::effective(&self.settings.lock().language);
+        let diff = Arc::new(DiffTab::with_revs(repo_root.to_string(), path.to_string(), old_rev.to_string(), new_rev.to_string(), &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));
@@ -857,7 +867,8 @@ impl AppState {
     /// Open a diff of `path` against its HEAD version (new side = worktree).
     pub fn open_workdir_diff(&mut self, repo_root: &str, path: &str) -> Option<Uuid> {
         self.bump();
-        let diff = Arc::new(DiffTab::new_workdir(repo_root.to_string(), path.to_string()));
+        let lang = crate::services::i18n::effective(&self.settings.lock().language);
+        let diff = Arc::new(DiffTab::new_workdir(repo_root.to_string(), path.to_string(), &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));
@@ -869,7 +880,8 @@ impl AppState {
     /// (the checkpoint panel's "changes since checkpoint" view).
     pub fn open_checkpoint_diff(&mut self, repo_root: &str, path: &str, old_rev: &str) -> Option<Uuid> {
         self.bump();
-        let diff = Arc::new(DiffTab::new_checkpoint(repo_root.to_string(), path.to_string(), old_rev.to_string()));
+        let lang = crate::services::i18n::effective(&self.settings.lock().language);
+        let diff = Arc::new(DiffTab::new_checkpoint(repo_root.to_string(), path.to_string(), old_rev.to_string(), &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));

@@ -26,11 +26,14 @@ pub struct DiffTab {
     /// When true the new side is the live worktree file: `rev` holds the old
     /// side's rev (or is `None` to diff against HEAD).
     pub workdir: bool,
+    /// Effective UI language at construction time; the settings command
+    /// refreshes it when the language changes (`save_settings`).
+    pub lang: Mutex<String>,
     pub content: Mutex<DiffContent>,
 }
 
 impl DiffTab {
-    pub fn new(repo_root: String, path: String, staged: bool) -> Self {
+    pub fn new(repo_root: String, path: String, staged: bool, lang: &str) -> Self {
         let id = Uuid::new_v4();
         let tab = Self {
             id,
@@ -39,13 +42,14 @@ impl DiffTab {
             staged,
             rev: None,
             workdir: false,
+            lang: Mutex::new(lang.to_string()),
             content: Mutex::new(DiffContent { loading: true, ..Default::default() }),
         };
         tab.reload();
         tab
     }
 
-    pub fn with_revs(repo_root: String, path: String, old_rev: String, new_rev: String) -> Self {
+    pub fn with_revs(repo_root: String, path: String, old_rev: String, new_rev: String, lang: &str) -> Self {
         let id = Uuid::new_v4();
         let tab = Self {
             id,
@@ -54,6 +58,7 @@ impl DiffTab {
             staged: false,
             rev: Some((old_rev, new_rev)),
             workdir: false,
+            lang: Mutex::new(lang.to_string()),
             content: Mutex::new(DiffContent { loading: true, ..Default::default() }),
         };
         tab.reload();
@@ -61,7 +66,7 @@ impl DiffTab {
     }
 
     /// Diff of `path` against its HEAD version (new side = worktree).
-    pub fn new_workdir(repo_root: String, path: String) -> Self {
+    pub fn new_workdir(repo_root: String, path: String, lang: &str) -> Self {
         let id = Uuid::new_v4();
         let tab = Self {
             id,
@@ -70,6 +75,7 @@ impl DiffTab {
             staged: false,
             rev: None,
             workdir: true,
+            lang: Mutex::new(lang.to_string()),
             content: Mutex::new(DiffContent { loading: true, ..Default::default() }),
         };
         tab.reload();
@@ -77,7 +83,7 @@ impl DiffTab {
     }
 
     /// Diff of `path` between `old_rev` and the current worktree (checkpoint).
-    pub fn new_checkpoint(repo_root: String, path: String, old_rev: String) -> Self {
+    pub fn new_checkpoint(repo_root: String, path: String, old_rev: String, lang: &str) -> Self {
         let id = Uuid::new_v4();
         let tab = Self {
             id,
@@ -86,6 +92,7 @@ impl DiffTab {
             staged: false,
             rev: Some((old_rev, String::new())),
             workdir: true,
+            lang: Mutex::new(lang.to_string()),
             content: Mutex::new(DiffContent { loading: true, ..Default::default() }),
         };
         tab.reload();
@@ -96,27 +103,39 @@ impl DiffTab {
         PathBuf::from(&self.path).file_name().and_then(|n| n.to_str()).map(str::to_owned).unwrap_or_default()
     }
 
+    pub fn set_lang(&self, lang: &str) {
+        if *self.lang.lock() != lang {
+            *self.lang.lock() = lang.to_string();
+        }
+    }
+
     pub fn title(&self) -> String {
+        let t = crate::services::i18n::translate;
+        let lang = self.lang.lock().clone();
+        let name = self.name();
         if self.workdir {
             let short = |r: &str| -> String {
                 let t: String = r.chars().take(7).collect();
                 if t.is_empty() { "HEAD".into() } else { t }
             };
             if let Some((old, _)) = &self.rev {
-                format!("{} (vs {})", self.name(), short(old))
+                t("diff-vs-rev", &lang).replace("{name}", &name).replace("{rev}", &short(old))
             } else {
-                format!("{} (vs HEAD)", self.name())
+                t("diff-vs-head", &lang).replace("{name}", &name)
             }
         } else if let Some((old, new)) = &self.rev {
             let short = |r: &str| -> String {
                 let t: String = r.chars().take(7).collect();
                 if t.is_empty() { "∅".into() } else { t }
             };
-            format!("{} ({}..{})", self.name(), short(old), short(new))
+            t("diff-revs", &lang)
+                .replace("{name}", &name)
+                .replace("{old}", &short(old))
+                .replace("{new}", &short(new))
         } else if self.staged {
-            format!("{} (Staged)", self.name())
+            t("diff-staged", &lang).replace("{name}", &name)
         } else {
-            self.name()
+            name
         }
     }
 
@@ -149,19 +168,20 @@ impl DiffTab {
         let staged = self.staged;
         let rev = self.rev.clone();
         let workdir = self.workdir;
+        let lang = self.lang.lock().clone();
 
         let result = if workdir {
             let old_rev = match &rev {
                 Some((old, _)) => old.clone(),
                 None => "HEAD".to_string(),
             };
-            crate::services::git::load_workdir_diff(&root, &path, &old_rev)
+            crate::services::git::load_workdir_diff(&root, &path, &old_rev, &lang)
         } else if let Some((old, new)) = rev {
-            crate::services::git::load_commit_diff(&root, &path, &old, &new)
+            crate::services::git::load_commit_diff(&root, &path, &old, &new, &lang)
         } else if staged {
-            crate::services::git::load_staged_diff(&root, &path)
+            crate::services::git::load_staged_diff(&root, &path, &lang)
         } else {
-            crate::services::git::load_unstaged_diff(&root, &path)
+            crate::services::git::load_unstaged_diff(&root, &path, &lang)
         };
         let mut content = self.content.lock();
         content.loading = false;

@@ -75,6 +75,8 @@ const zh = {
     themeSystem: "跟随系统",
     themeLight: "浅色",
     themeDark: "深色",
+    themeSearchPlaceholder: "搜索…",
+    noThemesFound: "未找到主题",
     language: "语言",
     languageSystem: "跟随系统",
     languageEn: "English",

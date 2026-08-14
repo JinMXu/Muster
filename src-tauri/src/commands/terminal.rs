@@ -107,13 +107,14 @@ pub async fn session_processes(session_id: Uuid, shell_pid: u32) -> Vec<crate::s
 /// system processes. Runs on the blocking pool: the validation does a full
 /// process enumeration.
 #[tauri::command]
-pub async fn kill_process(session_id: Uuid, shell_pid: u32, pid: u32) -> Result<(), String> {
+pub async fn kill_process(state: State<'_, SharedState>, session_id: Uuid, shell_pid: u32, pid: u32) -> Result<(), String> {
+    let lang = crate::services::i18n::effective(&state.settings.lock().language);
     tokio::task::spawn_blocking(move || {
         let valid_pids = crate::services::procs::session_pids(session_id, shell_pid);
         if !valid_pids.contains(&pid) {
-            return Err("PID does not belong to this session".to_string());
+            return Err(translate("kill-pid-not-in-session", &lang).to_string());
         }
-        crate::services::procs::kill(pid)
+        crate::services::procs::kill(pid, &lang)
     })
     .await
     .map_err(|e| e.to_string())?

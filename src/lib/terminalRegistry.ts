@@ -20,6 +20,12 @@ interface Entry {
   fit: FitAddon;
   /// Scrollback search, installed per terminal (used by the search bar).
   search: SearchAddon;
+  /// Whether the viewport is pinned to the bottom (following output).
+  /// Tracked via xterm's onScroll so the pty:data write path and the
+  /// resize handler can re-assert following after the viewport's scroll
+  /// metrics are rebuilt (the event that knocks xterm out of "at bottom"
+  /// and makes it stop following streaming output).
+  atBottom: boolean;
 }
 
 /// Terminal instance registry — the "parking lot" for xterm instances.
@@ -64,7 +70,7 @@ export function ensureListeners(): Promise<void> {
       listen<PtyDataPayload>("pty:data", (event) => {
         const entry = registry.get(event.payload.id);
         if (!entry) {
-          // Terminal not yet created — buffer output so it renders when the
+          // Terminal not yet created - buffer output so it renders when the
           // pane mounts. Keep only the tail: drop the oldest chunks once the
           // cap is exceeded.
           let buf = pendingBuffers.get(event.payload.id);
@@ -79,7 +85,18 @@ export function ensureListeners(): Promise<void> {
           }
           return;
         }
-        entry.term.write(base64ToBytes(event.payload.data));
+        // Capture the follow state before the async write. term.write is
+        // time-sliced across animation frames; by the time the callback
+        // fires a resize may have rebuilt the viewport's scroll metrics and
+        // knocked ydisp off the bottom. Re-asserting here keeps the
+        // terminal pinned to new output while the user hasn't scrolled up.
+        const wasAtBottom = entry.atBottom;
+        const id = event.payload.id;
+        entry.term.write(base64ToBytes(event.payload.data), () => {
+          if (wasAtBottom && registry.has(id)) {
+            entry.term.scrollToBottom();
+          }
+        });
       }),
       listen<PtyExitPayload>("pty:exit", (event) => {
         const entry = registry.get(event.payload.id);
@@ -218,7 +235,17 @@ function create(sessionId: string): Entry {
     return true;
   });
 
-  // PTY output → terminal is handled by the module-level listeners above,
+  const entry: Entry = { term, fit, search, atBottom: true };
+
+  // Track whether the viewport is at the bottom so the pty:data write path
+  // and the resize handler (in TerminalPane) know when to re-assert
+  // following. onScroll fires with the new viewportY; comparing it to
+  // baseY tells us if the user is pinned to the bottom or has scrolled up.
+  term.onScroll((viewportY: number) => {
+    entry.atBottom = viewportY === term.buffer.active.baseY;
+  });
+
+  // PTY output -> terminal is handled by the module-level listeners above,
   // which dispatch to this entry via the registry. Keeps buffers in sync
   // even while the pane that hosts this terminal is unmounted.
 
@@ -239,7 +266,7 @@ function create(sessionId: string): Entry {
     pendingBuffers.delete(sessionId);
   }
 
-  return { term, fit, search };
+  return entry;
 }
 
 // ---- path:line link provider (click compiler errors to jump to the file) --

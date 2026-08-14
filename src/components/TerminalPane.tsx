@@ -94,10 +94,22 @@ export default function TerminalPane({
     });
 
     const ro = new ResizeObserver(() => {
+      // resize() rebuilds the viewport's scroll metrics; a scroll event
+      // during that transient state can slam the viewport to the top of
+      // the scrollback (same class of bug as the re-attach case handled
+      // by resyncViewport above). If the user was following output, pin
+      // the viewport back to the bottom after the resize so streaming
+      // content stays visible.
+      const wasAtBottom = entry.atBottom;
       try {
         entry.fit.fit();
         pushSize();
       } catch (_) {}
+      if (wasAtBottom) {
+        resyncViewport(entry.term);
+        entry.term.scrollToBottom();
+        entry.atBottom = true;
+      }
     });
     ro.observe(container);
 

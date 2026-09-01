@@ -99,7 +99,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 
 - Windows 10/11（依赖 WebView2 与 ConPTY）
 - [Node.js](https://nodejs.org/) 18+
-- [Rust](https://rustup.rs/) 1.77+（MSVC 工具链）
+- [Rust](https://rustup.rs/) 1.85+（MSVC 工具链）
 
 ### 开发
 

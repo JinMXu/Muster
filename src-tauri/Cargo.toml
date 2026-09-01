@@ -5,7 +5,7 @@ description = "A native terminal workspace for Windows"
 license = "MIT"
 repository = "https://github.com/JinMXu/Muster"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.85"
 
 [lib]
 name = "muster_lib"

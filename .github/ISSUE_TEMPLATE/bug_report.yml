@@ -1,0 +1,35 @@
+name: Bug 报告 / Bug Report
+description: 报告一个 bug / Report a bug
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / Description
+      description: 发生了什么？期望的行为是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤 / Steps to Reproduce
+      placeholder: |
+        1. 打开 ...
+        2. 执行 ...
+        3. 看到 ...
+  - type: input
+    id: version
+    attributes:
+      label: Muster 版本 / Version
+      placeholder: 0.1.1
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统 / OS
+      placeholder: Windows 11 23H2
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: 如有相关日志或截图请贴在这里
+      render: text

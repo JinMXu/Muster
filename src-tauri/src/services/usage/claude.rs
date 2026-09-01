@@ -209,6 +209,6 @@ mod tests {
     #[test]
     fn decode_cwd_windows_drive() {
         assert_eq!(decode_cwd("D--agents-Foo"), "D:\\agents\\Foo");
-        assert_eq!(decode_cwd("C--Users-xujin"), "C:\\Users\\xujin");
+        assert_eq!(decode_cwd("C--Users-someone"), "C:\\Users\\someone");
     }
 }

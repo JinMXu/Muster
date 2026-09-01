@@ -1,7 +1,15 @@
 {
   "name": "muster",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "description": "A native terminal workspace for Windows — terminal, files, diff and Git in one window",
+  "author": "JinMXu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JinMXu/Muster.git"
+  },
+  "homepage": "https://github.com/JinMXu/Muster",
   "type": "module",
   "scripts": {
     "dev": "vite",

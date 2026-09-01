@@ -8,7 +8,11 @@
 
 基于 **Tauri 2 + React + xterm.js**，Rust 后端直接驱动 ConPTY 与 libgit2。
 
+**📥 [下载最新版安装包（MSI / NSIS）](https://github.com/JinMXu/Muster/releases/latest)**
+
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square&logo=windows)](https://github.com/JinMXu/Muster)
+[![Release](https://img.shields.io/github/v/release/JinMXu/Muster?style=flat-square&color=blue)](https://github.com/JinMXu/Muster/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/JinMXu/Muster/total?style=flat-square&color=brightgreen)](https://github.com/JinMXu/Muster/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-FFC131?style=flat-square&logo=tauri)](https://tauri.app/)
 

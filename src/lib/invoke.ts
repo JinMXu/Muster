@@ -95,6 +95,7 @@ export const api = {
     c<void>("move_pane", { tabId, paneId, targetPaneId, edge }),
   movePaneCrossTab: (sourceTabId: Uuid, paneId: Uuid, targetTabId: Uuid) =>
     c<boolean>("move_pane_cross_tab", { sourceTabId, paneId, targetTabId }),
+  closePane: (tabId: Uuid, paneId: Uuid) => c<boolean>("close_pane", { tabId, paneId }),
   togglePaneZoom: () => c<void>("toggle_pane_zoom"),
   equalizePanes: () => c<void>("equalize_panes"),
 

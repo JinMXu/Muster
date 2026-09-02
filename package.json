@@ -1,7 +1,7 @@
 {
   "name": "muster",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A native terminal workspace for Windows — terminal, files, diff and Git in one window",
   "author": "JinMXu",
   "license": "MIT",

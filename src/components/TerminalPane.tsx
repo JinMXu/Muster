@@ -41,10 +41,12 @@ export default function TerminalPane({
   sessionId,
   focused,
   paneKey,
+  tabId,
 }: {
   sessionId: string;
   focused: boolean;
   paneKey: string;
+  tabId: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   // File-drop highlight: dragenter/dragleave nest (xterm children), so a
@@ -185,6 +187,7 @@ export default function TerminalPane({
             "sep",
             { label: t("terminal.splitRight"), action: () => api.split("right") },
             { label: t("terminal.splitDown"), action: () => api.split("bottom") },
+            { label: t("terminal.closePane"), action: () => api.closePane(tabId, paneKey) },
           ],
         });
       }}

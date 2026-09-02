@@ -374,6 +374,28 @@ export default function App() {
 
   const split = useCallback((edge: "left" | "right" | "top" | "bottom") => api.split(edge), []);
 
+  // Ctrl+Shift+W: close the focused pane (undo a split). The backend closes
+  // the whole tab when the pane is its only one, so this mirrors closeTab.
+  // A focused file pane with unsaved changes gets the same confirmation as
+  // closing a tab.
+  const closeFocusedPane = useCallback(() => {
+    const s = stateRef.current;
+    const project = s?.projects.find((p) => p.id === s.selected_project_id);
+    const tab = project?.tabs.find((t) => t.id === project.selected_tab_id);
+    const pane = tab?.columns.flatMap((c) => c.panes).find((p) => p.id === tab.focused_pane_id);
+    if (!tab || !pane) return;
+    const close = () => api.closePane(tab.id, pane.id);
+    if (pane.content.kind === "file") {
+      api.tabDirtyFiles(tab.id).then((dirty) => {
+        const df = dirty.find((f) => f.id === pane.content.id);
+        if (df) setClosePrompt({ files: [df], proceed: close });
+        else close();
+      });
+      return;
+    }
+    close();
+  }, []);
+
   const saveFile = useCallback(() => api.saveSelectedFile(), []);
 
   const clearTerminal = useCallback(() => {
@@ -486,6 +508,25 @@ export default function App() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [newProjectWithDialog, newSession, closeTab, split, saveFile, clearTerminal, reopenClosedTab]);
+
+  // Ctrl+Shift+W: close the focused pane (undo split). Dedicated capture
+  // listener because NAV_MAP skips INPUT/TEXTAREA targets — xterm keeps a
+  // focused textarea and this must work from the terminal too. Skipped for
+  // other text inputs (editors, rename fields) so they keep Ctrl+Shift+W.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== "w") return;
+      const target = e.target as HTMLElement | null;
+      const inTerminal = !!target?.closest("[data-terminal-pane]");
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) && !inTerminal) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeFocusedPane();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [closeFocusedPane]);
 
   // ---- search shortcuts -----------------------------------------------
   // Ctrl+Shift+F opens the project search overlay; Ctrl+F opens scrollback
@@ -805,6 +846,7 @@ export default function App() {
           onOpenUsage={() => setShowUsage(true)}
           onOpenSearch={() => setShowSearch(true)}
           onReopenClosed={reopenClosedTab}
+          onClosePane={closeFocusedPane}
         />
       )}
       {switcherView && (

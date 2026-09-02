@@ -584,6 +584,37 @@ impl AppState {
         }
     }
 
+    /// Close one pane in a tab — the "undo split" action. When `pane_id` is
+    /// the tab's only pane, this closes the whole tab (same cleanup as
+    /// `close_tab`); otherwise the pane is detached, its session is
+    /// terminated (or its file/diff dropped), and focus moves to a neighbor.
+    /// No-op (returns false) when the pane is not part of `tab_id`.
+    pub fn close_pane(&mut self, tab_id: Uuid, pane_id: Uuid) -> bool {
+        self.bump();
+        let Some(p_idx) = self.project_index_of_tab(tab_id) else { return false };
+        let Some(i) = self.projects[p_idx].tabs.iter().position(|t| t.id == tab_id) else { return false };
+        let present = self.projects[p_idx].tabs[i].all_panes().iter().any(|p| p.id == pane_id);
+        if !present {
+            return false;
+        }
+        if self.projects[p_idx].tabs[i].all_panes().len() <= 1 {
+            // Last pane: closing it closes the tab, like close_tab.
+            self.remove_tab(p_idx, tab_id);
+            return true;
+        }
+        let removed = self.projects[p_idx].tabs[i].detach_pane_allowing_empty(pane_id);
+        if let Some(pane) = removed {
+            match &pane.content {
+                PaneContent::Session(id) => { if let Some(s) = self.sessions.remove(id) { s.terminate(); } }
+                PaneContent::File(id) => { self.files.remove(id); }
+                PaneContent::Diff(id) => { self.diffs.remove(id); }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     /// Drag & drop a pane across tabs: detach `pane_id` from `source_tab_id`
     /// and add it as a new column in `target_tab_id`. When the move empties
     /// the source tab, that tab is closed — every pane was detached first, so
@@ -1166,6 +1197,83 @@ mod tests {
         // session is still alive.
         assert_eq!(state.sessions.len(), 2);
         assert!(state.sessions.contains_key(&session_id));
+    }
+
+    // ---- close_pane --------------------------------------------------------
+
+    /// A fresh state with one project holding one session tab.
+    fn state_with_session_tab() -> AppState {
+        let snapshot = SessionSnapshot {
+            projects: vec![ProjectSnapshot {
+                custom_name: None,
+                custom_directory: None,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    columns: vec![ColumnSnapshot {
+                        panes: vec![session_pane("C:\\work", 1.0)],
+                        weight: 1.0,
+                    }],
+                    focused_column: 0,
+                    focused_row: 0,
+                }],
+                selected_tab_index: Some(0),
+            }],
+            selected_project_index: Some(0),
+            is_left_sidebar_visible: None,
+            is_right_panel_visible: None,
+            right_panel_tab: None,
+        };
+        let mut state = fresh_state();
+        state.restore(&snapshot);
+        state
+    }
+
+    #[test]
+    fn close_pane_removes_pane_and_terminates_session() {
+        let mut state = state_with_session_tab();
+        // Split right -> two columns. Focus is on the new (second) pane.
+        let tab_id = state.selected_tab().unwrap().id;
+        let _ = state.split_with_dir(PaneDropEdge::Right, Some("C:\\work".into()));
+        let project = &state.projects[0];
+        let tab = project.tabs.iter().find(|t| t.id == tab_id).unwrap();
+        let first_pane = tab.columns[0].panes[0].id;
+        let focused = tab.focused_pane_id;
+        assert_ne!(first_pane, focused);
+        assert_eq!(tab.all_panes().len(), 2);
+        let PaneContent::Session(session_id) = tab.columns[1].panes[0].content else { panic!() };
+        assert!(state.sessions.contains_key(&session_id));
+
+        // Close the focused (new) pane: one pane left, session terminated.
+        assert!(state.close_pane(tab_id, focused));
+        let project = &state.projects[0];
+        let tab = project.tabs.iter().find(|t| t.id == tab_id).unwrap();
+        assert_eq!(tab.all_panes().len(), 1);
+        assert_eq!(tab.columns.len(), 1);
+        assert_eq!(tab.focused_pane_id, first_pane);
+        assert!(!state.sessions.contains_key(&session_id));
+    }
+
+    #[test]
+    fn close_pane_last_pane_closes_tab() {
+        let mut state = state_with_session_tab();
+        let tab_id = state.selected_tab().unwrap().id;
+        let pane_id = state.selected_tab().unwrap().focused_pane_id;
+        let PaneContent::Session(session_id) = state.selected_tab().unwrap().focused_pane().unwrap().content else { panic!() };
+
+        // The only pane: close_pane closes the whole tab, terminating the session.
+        assert!(state.close_pane(tab_id, pane_id));
+        assert_eq!(state.projects[0].tabs.len(), 0);
+        assert!(!state.sessions.contains_key(&session_id));
+    }
+
+    #[test]
+    fn close_pane_unknown_pane_is_noop() {
+        let mut state = state_with_session_tab();
+        let tab_id = state.selected_tab().unwrap().id;
+        let unknown = Uuid::new_v4();
+
+        assert!(!state.close_pane(tab_id, unknown));
+        assert_eq!(state.projects[0].tabs[0].all_panes().len(), 1);
     }
 
     #[test]

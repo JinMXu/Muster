@@ -28,12 +28,16 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
     const delta = deltaFrac * total;
     setWeightOverride((prev) => {
       const next = new Map(prev);
+      // Read from `prev` (the updater's own latest state), not the render-
+      // closure `weightOverride`: consecutive drag deltas accumulate instead
+      // of each overwriting the previous one.
+      const w = (id: string, original: number) => prev.get(id) ?? original;
       if (vertical) {
         const a = tab.columns[ci];
         const b = tab.columns[ci + 1];
         if (a && b) {
-          next.set(a.id, getWeight(a.id, a.weight) + delta);
-          next.set(b.id, getWeight(b.id, b.weight) - delta);
+          next.set(a.id, w(a.id, a.weight) + delta);
+          next.set(b.id, w(b.id, b.weight) - delta);
         }
       } else {
         const col = tab.columns[ci];
@@ -41,8 +45,8 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
           const a = col.panes[index];
           const b = col.panes[index + 1];
           if (a && b) {
-            next.set(a.id, getWeight(a.id, a.weight) + delta);
-            next.set(b.id, getWeight(b.id, b.weight) - delta);
+            next.set(a.id, w(a.id, a.weight) + delta);
+            next.set(b.id, w(b.id, b.weight) - delta);
           }
         }
       }
@@ -202,14 +206,18 @@ function DividerHandle({
       onMouseDown={onMouseDown}
       className={`absolute z-10 group ${
         vertical
-          ? "top-0 bottom-0 w-[9px] -translate-x-1/2 cursor-col-resize"
-          : "left-0 right-0 h-[9px] -translate-y-1/2 cursor-row-resize"
+          ? "top-0 bottom-0 w-[11px] -translate-x-1/2 cursor-col-resize"
+          : "left-0 right-0 h-[11px] -translate-y-1/2 cursor-row-resize"
       }`}
       style={style}
     >
+      {/* Always-visible 1px seam so the divider is discoverable; widens and
+          highlights to the accent color on hover / while dragging. */}
       <div
-        className={`group-hover:bg-muster-accent group-active:bg-muster-accent ${
-          vertical ? "w-[2px] h-full mx-auto" : "h-[2px] w-full my-auto"
+        className={`${
+          vertical ? "w-px h-full mx-auto" : "h-px w-full my-auto"
+        } bg-muster-divider group-hover:bg-muster-accent group-active:bg-muster-accent transition-[width,height,background-color] duration-muster ease-muster ${
+          vertical ? "group-hover:w-[3px] group-active:w-[3px]" : "group-hover:h-[3px] group-active:h-[3px]"
         }`}
       />
     </div>
@@ -335,7 +343,7 @@ function Pane({
           className="absolute top-0 left-0 right-0 h-[6px] z-20 cursor-grab active:cursor-grabbing"
         />
       {pane.content.kind === "session" && (
-        <TerminalPane sessionId={pane.content.id} focused={focused} paneKey={paneKey} />
+        <TerminalPane sessionId={pane.content.id} focused={focused} paneKey={paneKey} tabId={tabId} />
       )}
       {pane.content.kind === "file" && (
         <FilePane fileId={pane.content.id} focused={focused} />

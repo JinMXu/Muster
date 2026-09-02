@@ -112,6 +112,18 @@ pub fn move_pane_cross_tab(
     moved
 }
 
+/// Close one pane ("undo split"). When the pane is the tab's only pane, the
+/// whole tab closes instead (same cleanup as close_tab).
+#[tauri::command]
+pub fn close_pane(window: Window, state: State<SharedState>, tab_id: Uuid, pane_id: Uuid) -> bool {
+    let Some(s) = state.get_label(window.label()) else { return false };
+    let closed = s.lock().close_pane(tab_id, pane_id);
+    if closed {
+        emit_state(&window, &s.lock());
+    }
+    closed
+}
+
 #[tauri::command]
 pub fn toggle_pane_zoom(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };

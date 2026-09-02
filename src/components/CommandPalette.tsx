@@ -31,6 +31,7 @@ export default function CommandPalette({
   onOpenUsage,
   onOpenSearch,
   onReopenClosed,
+  onClosePane,
 }: {
   state: AppStateView | null;
   onClose: () => void;
@@ -42,6 +43,7 @@ export default function CommandPalette({
   onOpenUsage: () => void;
   onOpenSearch: () => void;
   onReopenClosed: () => void;
+  onClosePane: () => void;
 }) {
   const { t } = useT();
   // The palette is mounted only while open, so this hook's polling only runs
@@ -97,6 +99,7 @@ export default function CommandPalette({
       { id: "new-project", title: t("commandPalette.newProject"), icon: "◈", shortcut: "Ctrl+N", action: onAskNewProject },
       { id: "close-project", title: t("commandPalette.closeProject"), icon: "⊗", action: onCloseProject },
       { id: "close-tab", title: t("commandPalette.closeTab"), icon: "✕", shortcut: "Ctrl+W", action: () => api.closeSelectedTab() },
+      { id: "close-pane", title: t("commandPalette.closePane"), icon: "⊠", shortcut: "Ctrl+Shift+W", action: onClosePane },
       { id: "toggle-left-sidebar", title: t("commandPalette.toggleLeftSidebar"), icon: "◧", shortcut: "Ctrl+B", action: () => api.toggleLeftSidebar() },
       { id: "toggle-right-sidebar", title: t("commandPalette.toggleRightSidebar"), icon: "◨", shortcut: "Ctrl+Shift+B", action: () => api.toggleRightPanel() },
       { id: "toggle-files", title: t("commandPalette.toggleFilesPanel"), icon: "▤", shortcut: "Ctrl+Shift+E", action: () => api.togglePanel("files") },

@@ -160,6 +160,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             panes::resize_pane_divider,
             panes::move_pane,
             panes::move_pane_cross_tab,
+            panes::close_pane,
             panes::toggle_pane_zoom,
             panes::equalize_panes,
             panes::toggle_left_sidebar,

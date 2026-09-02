@@ -39,6 +39,7 @@ const SHORTCUT_GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
     items: [
       { keys: "Ctrl+T", labelKey: "shortcuts.newSession" },
       { keys: "Ctrl+W", labelKey: "shortcuts.closeTab" },
+      { keys: "Ctrl+Shift+W", labelKey: "shortcuts.closePane" },
       { keys: "Ctrl+Shift+T", labelKey: "shortcuts.reopenClosedTab" },
       { keys: "Ctrl+Tab", labelKey: "shortcuts.tabSwitcher" },
       { keys: "Ctrl+Shift+[ / ]", labelKey: "shortcuts.prevNextTab" },

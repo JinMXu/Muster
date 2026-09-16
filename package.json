@@ -1,7 +1,7 @@
 {
   "name": "muster",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A native terminal workspace for Windows — terminal, files, diff and Git in one window",
   "author": "JinMXu",
   "license": "MIT",
@@ -22,6 +22,8 @@
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-opener": "^2.2.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",
     "@xterm/addon-web-links": "^0.12.0",

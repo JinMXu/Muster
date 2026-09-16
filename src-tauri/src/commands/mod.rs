@@ -18,7 +18,6 @@ use tauri::{Emitter, Window};
 use crate::models::app::AppState;
 use crate::services::agents::AgentCache;
 use crate::services::config::Settings;
-use crate::services::usage::UsageCache;
 
 mod editor;
 mod fs;
@@ -28,7 +27,6 @@ mod project;
 mod state;
 mod tabs;
 mod terminal;
-mod usage;
 mod window;
 
 /// Per-window state registry: each window label owns an independent
@@ -37,7 +35,6 @@ mod window;
 pub struct SharedState {
     states: Mutex<HashMap<String, Arc<Mutex<AppState>>>>,
     settings: Arc<Mutex<Settings>>,
-    pub usage: Arc<Mutex<UsageCache>>,
     pub agents: Arc<Mutex<AgentCache>>,
     /// One-shot UI action queued by a tray menu item while the main window
     /// is being (re)created. The frontend consumes it on mount via
@@ -51,7 +48,6 @@ impl SharedState {
         Self {
             states: Mutex::new(HashMap::new()),
             settings: Arc::new(Mutex::new(settings)),
-            usage: Arc::new(Mutex::new(UsageCache::default())),
             agents: Arc::new(Mutex::new(AgentCache::default())),
             pending_action: Arc::new(Mutex::new(None)),
         }
@@ -212,8 +208,5 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             fs::add_to_path,
             fs::remove_from_path,
             fs::is_on_path,
-            usage::usage_summary,
-            usage::usage_sessions,
-            usage::usage_refresh,
         ])
 }

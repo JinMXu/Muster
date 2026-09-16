@@ -16,6 +16,10 @@
     "fs:default",
     "shell:default",
     "opener:default",
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:allow-restart",
+    "core:app:allow-version",
+    "core:app:allow-name"
   ]
 }

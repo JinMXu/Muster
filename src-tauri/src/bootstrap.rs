@@ -20,6 +20,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Open any directories passed in argv as new projects in the
             // running instance's main window (focus follows the OS launch,
@@ -260,13 +262,6 @@ pub fn run() {
                     }
                 }
             });
-
-            // Usage tracking: background scan loop.
-            {
-                let handle = app.handle().clone();
-                let usage_cache = handle.state::<crate::commands::SharedState>().usage.clone();
-                crate::services::usage::spawn_scan_loop(handle, usage_cache);
-            }
 
             // Agent awareness: background poll loop + the local IPC bridge
             // that the `muster` CLI (and AI agents) talks to.

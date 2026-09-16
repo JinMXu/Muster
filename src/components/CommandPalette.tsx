@@ -28,7 +28,6 @@ export default function CommandPalette({
   onCloseProject,
   onOpenSettings,
   onOpenShortcuts,
-  onOpenUsage,
   onOpenSearch,
   onReopenClosed,
   onClosePane,
@@ -40,7 +39,6 @@ export default function CommandPalette({
   onCloseProject: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
-  onOpenUsage: () => void;
   onOpenSearch: () => void;
   onReopenClosed: () => void;
   onClosePane: () => void;
@@ -120,9 +118,8 @@ export default function CommandPalette({
       { id: "reopen-tab", title: t("commandPalette.reopenClosedTab"), icon: "↺", shortcut: "Ctrl+Shift+T", action: onReopenClosed },
       { id: "open-settings", title: t("commandPalette.openSettings"), icon: "⚙", shortcut: "Ctrl+,", action: onOpenSettings },
       { id: "keyboard-shortcuts", title: t("shortcuts.title"), icon: "⌨", shortcut: "Ctrl+/", action: onOpenShortcuts },
-      { id: "open-usage", title: t("commandPalette.openUsage"), icon: "▤", shortcut: "Ctrl+Shift+U", action: onOpenUsage },
     ],
-    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, onOpenUsage, onOpenSearch, onReopenClosed, t]
+    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, onOpenSearch, onReopenClosed, t]
   );
 
   const fileItems: CommandItem[] = useMemo(() => {

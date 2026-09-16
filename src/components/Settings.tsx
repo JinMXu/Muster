@@ -1,21 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../lib/invoke";
-import { formatTokens } from "../lib/format";
-import type { Settings as SettingsType, ThemeInfo, UsageSummary } from "../lib/types";
+import {
+  createUpdater,
+  type UpdaterController,
+  type UpdaterPhase,
+} from "../lib/updater";
+import type { Settings as SettingsType, ThemeInfo } from "../lib/types";
 import { useT, type TKey } from "../lib/i18n/context";
 import {
-  IconChartBar,
   IconCheck,
   IconChevronDown,
-  IconChevronRight,
-  IconSettings,
+  IconInfo,
   IconKeyboard,
-  IconType,
   IconPlug,
+  IconSettings,
+  IconType,
   IconX,
+  IconArrowUpRight,
 } from "./icons";
 
-export type SettingsTab = "general" | "font" | "shortcuts" | "integrations";
+export type SettingsTab = "general" | "font" | "shortcuts" | "integrations" | "about";
 
 interface ShortcutItem {
   keys: string;
@@ -65,18 +71,17 @@ const SHORTCUT_GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
       { keys: "Ctrl+Shift+I", labelKey: "shortcuts.infoPanel" },
       { keys: "Ctrl+S", labelKey: "shortcuts.saveFile" },
       { keys: "Ctrl+K", labelKey: "shortcuts.clearTerminal" },
-      { keys: "Ctrl+Shift+U", labelKey: "shortcuts.usagePanel" },
     ],
   },
 ];
 
+const GITHUB_URL = "https://github.com/JinMXu/Muster";
+
 export default function Settings({
   onClose,
-  onOpenUsage,
   initialTab = "general",
 }: {
   onClose: () => void;
-  onOpenUsage: () => void;
   initialTab?: SettingsTab;
 }) {
   const [s, setS] = useState<SettingsType | null>(null);
@@ -159,6 +164,12 @@ export default function Settings({
               icon={<IconPlug size={15} />}
               label={t("settings.tabIntegrations")}
             />
+            <TabButton
+              active={tab === "about"}
+              onClick={() => setTab("about")}
+              icon={<IconInfo size={15} />}
+              label={t("settings.tabAbout")}
+            />
           </nav>
 
           {/* Content */}
@@ -168,9 +179,8 @@ export default function Settings({
             )}
             {tab === "font" && <FontTab s={s} update={update} t={t} />}
             {tab === "shortcuts" && <ShortcutsTab t={t} />}
-            {tab === "integrations" && (
-              <IntegrationsTab onOpenUsage={onOpenUsage} t={t} />
-            )}
+            {tab === "integrations" && <IntegrationsTab t={t} />}
+            {tab === "about" && <AboutTab t={t} />}
           </div>
         </div>
 
@@ -195,6 +205,8 @@ export default function Settings({
     </div>
   );
 }
+
+/* ---------- shared building blocks ---------- */
 
 function TabButton({
   active,
@@ -222,19 +234,48 @@ function TabButton({
   );
 }
 
-function Field({
-  label,
+/** Titled group card: all rows inside share one bordered container. */
+function Section({
+  title,
   children,
 }: {
-  label: string;
+  title: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-4">
-      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-1.5">
-        {label}
+    <div className="mb-5 last:mb-0">
+      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-2 px-0.5">
+        {title}
       </div>
-      {children}
+      {/* No overflow-hidden here: dropdown popovers (theme picker) must be
+          able to paint outside the card boundary. */}
+      <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg divide-y divide-white/[0.05]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Standard settings row: title + optional description on the left, control
+ * on the right. Keep all controls visually aligned via this component. */
+function Row({
+  title,
+  desc,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-6 px-3.5 py-2.5 min-h-[52px]">
+      <div className="min-w-0">
+        <div className="ui-fs-base text-muster-fg">{title}</div>
+        {desc && (
+          <div className="ui-fs-xs text-muster-muted mt-0.5">{desc}</div>
+        )}
+      </div>
+      <div className="flex items-center flex-shrink-0">{children}</div>
     </div>
   );
 }
@@ -276,6 +317,34 @@ function Swatch({ background, accent }: { background: string; accent: string }) 
   );
 }
 
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex bg-white/[0.05] rounded-md p-0.5">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`px-2.5 py-1 rounded ui-fs-sm transition-colors duration-muster ease-muster ${
+            value === opt.value
+              ? "bg-muster-accent text-white"
+              : "text-muster-muted hover:text-muster-fg"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const BUILT_IN_THEMES = new Set([
   "Default Dark", "Default Light", "Dracula", "Tokyo Night", "Gruvbox Dark", "Monokai Pro",
 ]);
@@ -293,8 +362,41 @@ function ThemePicker({
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+
+  // Approximate rendered height of the popover (search input + list).
+  const POPOVER_H = 280;
+
+  const toggleOpen = () => {
+    if (open) {
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+    // Open upward when there isn't enough room below inside the nearest
+    // scrollable ancestor (the settings scroll area clips its content).
+    const el = ref.current;
+    if (el) {
+      let p: HTMLElement | null = el.parentElement;
+      while (p) {
+        const s = getComputedStyle(p);
+        if (/(auto|scroll)/.test(s.overflowY)) break;
+        p = p.parentElement;
+      }
+      const rect = el.getBoundingClientRect();
+      if (p) {
+        const pr = p.getBoundingClientRect();
+        const below = pr.bottom - rect.bottom;
+        const above = rect.top - pr.top;
+        setDropUp(below < POPOVER_H && above > below);
+      } else {
+        setDropUp(false);
+      }
+    }
+    setOpen(true);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -318,8 +420,8 @@ function ThemePicker({
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-base outline-none border border-transparent hover:border-white/[0.12] transition-colors"
+        onClick={toggleOpen}
+        className="w-[190px] flex items-center gap-2 bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent hover:border-white/[0.12] transition-colors"
       >
         {selected && <Swatch background={selected.background} accent={selected.accent} />}
         <span className="flex-1 text-left truncate">{value}</span>
@@ -328,7 +430,11 @@ function ThemePicker({
         </span>
       </button>
       {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-muster-bg border border-white/[0.1] rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+        <div
+          className={`absolute z-50 right-0 w-[280px] bg-muster-bg border border-white/[0.1] rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.4)] overflow-hidden ${
+            dropUp ? "bottom-full mb-1" : "top-full mt-1"
+          }`}
+        >
           <div className="p-1.5 border-b border-white/[0.06]">
             <input
               autoFocus
@@ -378,6 +484,46 @@ function ThemePicker({
   );
 }
 
+function SliderRow({
+  title,
+  value,
+  min,
+  max,
+  step = 1,
+  suffix,
+  onChange,
+}: {
+  title: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <Row title={title}>
+      <div className="flex items-center gap-3 w-[220px]">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="flex-1"
+        />
+        <span className="ui-fs-sm w-12 text-right tabular-nums text-muster-muted">
+          {value}
+          {suffix}
+        </span>
+      </div>
+    </Row>
+  );
+}
+
+/* ---------- tabs ---------- */
+
 function GeneralTab({
   s,
   update,
@@ -389,76 +535,59 @@ function GeneralTab({
   themes: ThemeInfo[];
   t: ReturnType<typeof useT>["t"];
 }) {
-  const appearanceOptions: {
-    value: "system" | "light" | "dark";
-    label: string;
-  }[] = [
-    { value: "system", label: t("settings.themeSystem") },
-    { value: "light", label: t("settings.themeLight") },
-    { value: "dark", label: t("settings.themeDark") },
-  ];
-
   return (
     <div>
-      <Field label={t("settings.appearance")}>
-        <div className="flex gap-2">
-          {appearanceOptions.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => update({ theme: opt.value })}
-              className={`flex-1 py-2.5 rounded-lg border ui-fs-sm transition-all duration-muster ease-muster ${
-                s.theme === opt.value
-                  ? "border-muster-accent bg-muster-accent/10 text-muster-fg"
-                  : "border-white/[0.08] text-muster-muted hover:border-white/[0.15] hover:text-muster-fg"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </Field>
+      <Section title={t("settings.appearance")}>
+        <Row title={t("settings.appearanceMode")}>
+          <Segmented
+            value={s.theme}
+            options={[
+              { value: "system", label: t("settings.themeSystem") },
+              { value: "light", label: t("settings.themeLight") },
+              { value: "dark", label: t("settings.themeDark") },
+            ]}
+            onChange={(v) => update({ theme: v })}
+          />
+        </Row>
+        <Row title={t("settings.darkTheme")}>
+          <ThemePicker
+            themes={themes}
+            dark
+            value={s.theme_dark}
+            onChange={(name) => update({ theme_dark: name })}
+          />
+        </Row>
+        <Row title={t("settings.lightTheme")}>
+          <ThemePicker
+            themes={themes}
+            dark={false}
+            value={s.theme_light}
+            onChange={(name) => update({ theme_light: name })}
+          />
+        </Row>
+        <Row title={t("settings.language")}>
+          <select
+            value={s.language}
+            onChange={(e) =>
+              update({ language: e.target.value as SettingsType["language"] })
+            }
+            className="w-[190px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
+          >
+            <option value="system">{t("settings.languageSystem")}</option>
+            <option value="en">{t("settings.languageEn")}</option>
+            <option value="zh">{t("settings.languageZh")}</option>
+          </select>
+        </Row>
+      </Section>
 
-      <Field label={t("settings.language")}>
-        <select
-          value={s.language}
-          onChange={(e) =>
-            update({ language: e.target.value as SettingsType["language"] })
-          }
-          className="w-full bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-base outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
-        >
-          <option value="system">{t("settings.languageSystem")}</option>
-          <option value="en">{t("settings.languageEn")}</option>
-          <option value="zh">{t("settings.languageZh")}</option>
-        </select>
-      </Field>
-
-      <Field label={t("settings.darkTheme")}>
-        <ThemePicker
-          themes={themes}
-          dark
-          value={s.theme_dark}
-          onChange={(name) => update({ theme_dark: name })}
-        />
-      </Field>
-
-      <Field label={t("settings.lightTheme")}>
-        <ThemePicker
-          themes={themes}
-          dark={false}
-          value={s.theme_light}
-          onChange={(name) => update({ theme_light: name })}
-        />
-      </Field>
-
-      <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2.5">
-        <span className="ui-fs-base text-muster-fg">
-          {t("settings.projectPorts")}
-        </span>
-        <Toggle
-          checked={s.project_ports}
-          onChange={(v) => update({ project_ports: v })}
-        />
-      </div>
+      <Section title={t("settings.behavior")}>
+        <Row title={t("settings.projectPorts")}>
+          <Toggle
+            checked={s.project_ports}
+            onChange={(v) => update({ project_ports: v })}
+          />
+        </Row>
+      </Section>
     </div>
   );
 }
@@ -474,77 +603,54 @@ function FontTab({
 }) {
   return (
     <div>
-      <Field label={t("settings.fontFamily")}>
-        <input
-          value={s.font_family}
-          onChange={(e) => update({ font_family: e.target.value })}
-          className="w-full bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-base outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
-          placeholder={t("settings.fontFamilyPlaceholder")}
+      <Section title={t("settings.terminalFont")}>
+        <Row title={t("settings.fontFamily")}>
+          <input
+            value={s.font_family}
+            onChange={(e) => update({ font_family: e.target.value })}
+            className="w-[220px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
+            placeholder={t("settings.fontFamilyPlaceholder")}
+          />
+        </Row>
+        <SliderRow
+          title={t("settings.fontSize")}
+          value={s.font_size}
+          min={8}
+          max={32}
+          suffix="px"
+          onChange={(v) => update({ font_size: v })}
         />
-      </Field>
-
-      <Field label={t("settings.fontSize")}>
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={8}
-            max={32}
-            value={s.font_size}
-            onChange={(e) => update({ font_size: Number(e.target.value) })}
-            className="flex-1"
-          />
-          <span className="ui-fs-base w-10 text-right tabular-nums text-muster-muted">
-            {s.font_size}px
-          </span>
-        </div>
-      </Field>
-
-      <Field label={t("settings.uiFontSize")}>
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={10}
-            max={16}
-            step={0.5}
-            value={s.ui_font_size}
-            onChange={(e) => update({ ui_font_size: Number(e.target.value) })}
-            className="flex-1"
-          />
-          <span className="ui-fs-base w-10 text-right tabular-nums text-muster-muted">
-            {s.ui_font_size}px
-          </span>
-        </div>
-      </Field>
-
-      <div className="space-y-3 mt-2">
-        <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2.5">
-          <span className="ui-fs-base text-muster-fg">
-            {t("settings.thickenFont")}
-          </span>
+        <SliderRow
+          title={t("settings.uiFontSize")}
+          value={s.ui_font_size}
+          min={10}
+          max={16}
+          step={0.5}
+          suffix="px"
+          onChange={(v) => update({ ui_font_size: v })}
+        />
+        <Row title={t("settings.thickenFont")}>
           <Toggle
             checked={s.font_thicken}
             onChange={(v) => update({ font_thicken: v })}
           />
-        </div>
-        <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2.5">
-          <span className="ui-fs-base text-muster-fg">
-            {t("settings.wrapLines")}
-          </span>
+        </Row>
+      </Section>
+
+      <Section title={t("settings.editor")}>
+        <Row title={t("settings.wrapLines")}>
           <Toggle
             checked={s.editor_wrap_lines}
             onChange={(v) => update({ editor_wrap_lines: v })}
           />
-        </div>
-        <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2.5">
-          <span className="ui-fs-base text-muster-fg">
-            {t("settings.diffSideBySide")}
-          </span>
+        </Row>
+        <Row title={t("settings.diffSideBySide")}>
           <Toggle
             checked={s.diff_side_by_side}
             onChange={(v) => update({ diff_side_by_side: v })}
           />
-        </div>
-      </div>
+        </Row>
+      </Section>
     </div>
   );
 }
@@ -553,108 +659,33 @@ function ShortcutsTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
   return (
     <div>
       {SHORTCUT_GROUPS.map((group) => (
-        <div key={group.titleKey} className="mb-4 last:mb-0">
-          <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-2">
-            {t(group.titleKey)}
-          </div>
-          <div className="space-y-0.5">
-            {group.items.map((item) => (
-              <div
-                key={item.keys}
-                className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-white/[0.03] transition-colors"
-              >
-                <span className="ui-fs-base text-muster-fg/80">
-                  {t(item.labelKey)}
-                </span>
-                <kbd className="bg-white/[0.06] rounded px-1.5 py-0.5 ui-fs-sm font-mono text-muster-muted whitespace-nowrap">
-                  {item.keys}
-                </kbd>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Section key={group.titleKey} title={t(group.titleKey)}>
+          {group.items.map((item) => (
+            <div
+              key={item.keys}
+              className="flex items-center justify-between gap-4 px-3.5 py-2"
+            >
+              <span className="ui-fs-sm text-muster-fg/80">
+                {t(item.labelKey)}
+              </span>
+              <kbd className="bg-white/[0.06] rounded px-1.5 py-0.5 ui-fs-xs font-mono text-muster-muted whitespace-nowrap">
+                {item.keys}
+              </kbd>
+            </div>
+          ))}
+        </Section>
       ))}
     </div>
   );
 }
 
-function IntegrationsTab({
-  onOpenUsage,
-  t,
-}: {
-  onOpenUsage: () => void;
-  t: ReturnType<typeof useT>["t"];
-}) {
-  return (
-    <div>
-      <Integrations t={t} />
-      <UsageEntry onOpen={onOpenUsage} t={t} />
-    </div>
-  );
-}
-
-function UsageEntry({
-  onOpen,
-  t,
-}: {
-  onOpen: () => void;
-  t: ReturnType<typeof useT>["t"];
-}) {
-  const [summary, setSummary] = useState<UsageSummary | null>(null);
-
-  useEffect(() => {
-    api.usage.summary().then(setSummary).catch(() => {});
-  }, []);
-
-  const totals = (summary?.tools ?? []).reduce(
-    (acc, ts) => ({
-      tokens: acc.tokens + ts.total_tokens,
-      sessions: acc.sessions + ts.session_count,
-    }),
-    { tokens: 0, sessions: 0 }
-  );
-
-  return (
-    <div className="mt-2">
-      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-1.5">
-        {t("settings.openUsage")}
-      </div>
-      <button
-        onClick={onOpen}
-        className="w-full flex items-center gap-3 bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2.5 text-left hover:bg-white/[0.06] hover:border-white/[0.1] active:scale-[.99] transition-all duration-muster ease-muster"
-      >
-        <span className="w-8 h-8 shrink-0 rounded-md bg-muster-accent/15 text-muster-accent flex items-center justify-center">
-          <IconChartBar size={16} />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block ui-fs-base text-muster-fg">
-            {t("settings.openUsage")}
-          </span>
-          <span className="block ui-fs-xs text-muster-muted mt-0.5 tabular-nums">
-            {totals.sessions > 0
-              ? t("settings.usageTotals", {
-                  tokens: formatTokens(totals.tokens),
-                  sessions: totals.sessions,
-                })
-              : t("settings.usageEmpty")}
-          </span>
-        </span>
-        <span className="text-muster-muted shrink-0">
-          <IconChevronRight size={14} />
-        </span>
-      </button>
-    </div>
-  );
-}
-
-function Integrations({ t }: { t: ReturnType<typeof useT>["t"] }) {
-  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(
-    null
-  );
-  const [pathResult, setPathResult] = useState<{
-    ok: boolean;
-    text: string;
-  } | null>(null);
+function IntegrationsTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
+  const [explorerResult, setExplorerResult] = useState<
+    { ok: boolean; text: string } | null
+  >(null);
+  const [pathResult, setPathResult] = useState<
+    { ok: boolean; text: string } | null
+  >(null);
   const [onPath, setOnPath] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -662,82 +693,188 @@ function Integrations({ t }: { t: ReturnType<typeof useT>["t"] }) {
   }, []);
 
   const installExplorer = () => {
-    setResult(null);
+    setExplorerResult(null);
     api
       .installExplorerContextMenu()
       .then(() =>
-        setResult({ ok: true, text: t("settings.integrationsInstalled") })
+        setExplorerResult({ ok: true, text: t("settings.integrationsInstalled") })
       )
-      .catch((e) => setResult({ ok: false, text: String(e) }));
+      .catch((e) => setExplorerResult({ ok: false, text: String(e) }));
   };
 
   const togglePath = () => {
     setPathResult(null);
-    if (onPath) {
-      api
-        .removeFromPath()
-        .then(() => {
-          setOnPath(false);
-          setPathResult({ ok: true, text: t("settings.integrationsInstalled") });
-        })
-        .catch((e) => setPathResult({ ok: false, text: String(e) }));
-    } else {
-      api
-        .addToPath()
-        .then(() => {
-          setOnPath(true);
-          setPathResult({ ok: true, text: t("settings.integrationsInstalled") });
-        })
-        .catch((e) => setPathResult({ ok: false, text: String(e) }));
-    }
+    const action = onPath ? api.removeFromPath() : api.addToPath();
+    action
+      .then(() => {
+        setOnPath(!onPath);
+        setPathResult({ ok: true, text: t("settings.integrationsInstalled") });
+      })
+      .catch((e) => setPathResult({ ok: false, text: String(e) }));
   };
 
   return (
-    <div className="mb-2">
-      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-1.5">
-        {t("settings.integrationsTitle")}
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 bg-white/[0.03] rounded-lg px-3 py-2.5">
-          <button
+    <div>
+      <Section title={t("settings.systemIntegration")}>
+        <Row title={t("settings.explorerMenu")} desc={t("settings.explorerMenuDesc")}>
+          <ActionStatus
+            label={t("settings.install")}
+            result={explorerResult}
             onClick={installExplorer}
-            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            {t("settings.installExplorerMenu")}
-          </button>
-          {result && (
-            <span
-              className={`ui-fs-sm ${result.ok ? "text-green-400" : "text-red-400"}`}
-            >
-              {result.text}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 bg-white/[0.03] rounded-lg px-3 py-2.5">
-          <button
+            t={t}
+          />
+        </Row>
+        <Row title={t("settings.pathIntegration")} desc={t("settings.pathDesc")}>
+          <ActionStatus
+            label={onPath ? t("settings.removeFromPath") : t("settings.addToPath")}
+            busy={onPath === null}
+            result={pathResult}
             onClick={togglePath}
-            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            {onPath ? t("settings.removeFromPath") : t("settings.addToPath")}
-          </button>
-          {onPath !== null && !pathResult && (
-            <span
-              className={`ui-fs-sm ${onPath ? "text-green-400" : "text-muster-muted"}`}
-            >
-              {onPath
-                ? t("settings.onPathInstalled")
-                : t("settings.pathAvailable")}
-            </span>
-          )}
-          {pathResult && (
-            <span
-              className={`ui-fs-sm ${pathResult.ok ? "text-green-400" : "text-red-400"}`}
-            >
-              {pathResult.text}
-            </span>
-          )}
+            t={t}
+          />
+        </Row>
+      </Section>
+    </div>
+  );
+}
+
+function ActionStatus({
+  label,
+  busy = false,
+  result,
+  onClick,
+  t,
+}: {
+  label: string;
+  busy?: boolean;
+  result: { ok: boolean; text: string } | null;
+  onClick: () => void;
+  t: ReturnType<typeof useT>["t"];
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {result && (
+        <span
+          className={`ui-fs-xs max-w-[140px] truncate ${
+            result.ok ? "text-green-400" : "text-red-400"
+          }`}
+          title={result.text}
+        >
+          {result.ok ? t("settings.integrationsInstalled") : result.text}
+        </span>
+      )}
+      <button
+        onClick={onClick}
+        disabled={busy}
+        className="px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
+      >
+        {label}
+      </button>
+    </div>
+  );
+}
+
+function AboutTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
+  const [version, setVersion] = useState<string | null>(null);
+  const [phase, setPhase] = useState<UpdaterPhase>({ kind: "idle" });
+  const ctrlRef = useRef<UpdaterController | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+    ctrlRef.current = createUpdater(setPhase);
+  }, []);
+
+  const ctrl = ctrlRef.current;
+  const busy = phase.kind === "checking" || phase.kind === "downloading";
+
+  // Status line + action button per updater phase.
+  let statusText: string | null = null;
+  let statusError = false;
+  let button: { label: string; onClick: () => void; primary?: boolean } | null =
+    null;
+  switch (phase.kind) {
+    case "idle":
+      break;
+    case "checking":
+      statusText = t("settings.checkingForUpdates");
+      break;
+    case "none":
+      statusText = t("settings.updateNone");
+      break;
+    case "available":
+      statusText = `${t("settings.updateAvailable")} · v${phase.version}`;
+      button = { label: t("settings.downloadUpdate"), onClick: () => ctrl?.downloadAndInstall(), primary: true };
+      break;
+    case "downloading":
+      statusText = t("settings.updateDownloading");
+      break;
+    case "ready":
+      statusText = t("settings.updateReady");
+      button = { label: t("settings.restartToUpdate"), onClick: () => ctrl?.restartToUpdate(), primary: true };
+      break;
+    case "error":
+      statusText = phase.stage === "check" ? t("settings.updateError") : t("settings.updateInstallError");
+      statusError = true;
+      break;
+  }
+
+  return (
+    <div>
+      {/* App identity */}
+      <div className="flex flex-col items-center gap-1.5 pt-3 pb-6">
+        <img src="app-icon.png" alt="Muster" className="w-16 h-16 rounded-[14px]" />
+        <div className="ui-fs-base font-semibold">Muster</div>
+        <div className="ui-fs-xs text-muster-muted tabular-nums">
+          {version ? t("settings.currentVersion", { version }) : "\u2026"}
         </div>
       </div>
+
+      <Section title={t("settings.updates")}>
+        <Row title={t("settings.updates")} desc={statusText ?? t("settings.updatesDesc")}>
+          <div className={`ui-fs-xs ${statusError ? "text-red-400" : ""}`}>
+            {phase.kind === "downloading" ? (
+              <div className="w-[140px] h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-muster-accent transition-all duration-muster ease-muster"
+                  style={{ width: `${phase.progress}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
+          {button ? (
+            <button
+              onClick={button.onClick}
+              className={`ml-2 px-3 py-1.5 rounded-md ui-fs-sm active:scale-[.97] transition-transform duration-muster ease-muster ${
+                button.primary
+                  ? "bg-muster-accent text-white"
+                  : "bg-white/[0.06] hover:bg-muster-hover-btn"
+              }`}
+            >
+              {button.label}
+            </button>
+          ) : (
+            <button
+              onClick={() => ctrl?.checkForUpdates()}
+              disabled={busy || !ctrl}
+              className="ml-2 px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {busy ? t("settings.checkingForUpdates") : t("settings.checkForUpdates")}
+            </button>
+          )}
+        </Row>
+      </Section>
+
+      <Section title="Muster">
+        <Row title={t("settings.githubRepo")} desc={t("settings.githubRepoDesc")}>
+          <button
+            onClick={() => openUrl(GITHUB_URL)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+          >
+            {t("settings.openOnGithub")}
+            <IconArrowUpRight size={12} />
+          </button>
+        </Row>
+      </Section>
     </div>
   );
 }

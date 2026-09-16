@@ -17,9 +17,6 @@ import type {
   Settings,
   ThemeColors,
   ThemeInfo,
-  ToolKind,
-  UsageSession,
-  UsageSummary,
   Uuid,
 } from "./types";
 import { setPendingReveal, trackDiffTab, trackFileTab } from "./recentFiles";
@@ -182,12 +179,6 @@ export const api = {
     headOid: (repoRoot: string) => c<string | null>("git_head_oid", { repoRoot }),
     checkpointChanges: (repoRoot: string, checkpoint: string) =>
       c<string[]>("git_checkpoint_changes", { repoRoot, checkpoint }),
-  },
-  usage: {
-    summary: () => c<UsageSummary>("usage_summary"),
-    sessions: (opts?: { tool?: ToolKind; since?: number; limit?: number }) =>
-      c<UsageSession[]>("usage_sessions", opts ?? {}),
-    refresh: () => c<void>("usage_refresh"),
   },
   installExplorerContextMenu: () => c<void>("install_explorer_context_menu"),
   addToPath: () => c<void>("add_to_path"),

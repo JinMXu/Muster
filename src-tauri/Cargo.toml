@@ -1,6 +1,6 @@
 [package]
 name = "muster"
-version = "0.1.2"
+version = "0.1.3"
 description = "A native terminal workspace for Windows"
 license = "MIT"
 repository = "https://github.com/JinMXu/Muster"
@@ -27,7 +27,6 @@ git2 = { version = "0.19", default-features = false, features = ["ssh"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt"] }
@@ -40,6 +39,8 @@ dirs = "5"
 once_cell = "1"
 notify = "6"
 ignore = "0.4"
+tauri-plugin-updater = "2.11.0"
+tauri-plugin-process = "2.3.1"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

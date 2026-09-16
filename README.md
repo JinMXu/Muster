@@ -76,8 +76,8 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 | **CLI 工具** | `muster <path>` 从任意终端打开项目，支持 `--cmd` 执行命令 |
 | **剪贴板安全** | 粘贴疑似可执行命令时弹窗确认 |
 | **信息面板** | Shell PID、cwd、Git 分支/远程、进程树、监听端口 |
-| **用量面板** | AI 编程工具 token 用量统计，按日堆叠柱状图 |
 | **资源管理器集成** | 一键安装「在 Muster 中打开」右键菜单 |
+| **自动更新** | 设置 → 关于 Muster 中检查更新，minisign 签名校验，下载进度可视化，一键重启安装 |
 | **无障碍** | 跟随系统 `prefers-reduced-motion` |
 
 ---
@@ -259,7 +259,6 @@ muster ls                              # 列出窗口、项目、标签与 pane
 | `Ctrl+Shift+A` | Agents 总览 |
 | `Ctrl+Shift+G` | Git 面板 |
 | `Ctrl+Shift+I` | 信息面板 |
-| `Ctrl+Shift+U` | 用量面板 |
 | `Ctrl+S` | 保存文件（编辑器中） |
 | `Ctrl+K` | 清空终端 |
 

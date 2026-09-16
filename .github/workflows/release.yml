@@ -31,9 +31,21 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing: TAURI_SIGNING_PRIVATE_KEY must hold the
+          # minisign private key (generated via `npx tauri signer generate`).
+          # The key was created without a password, so the password secret
+          # can stay unset (resolves to empty = no password).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Muster ${{ github.ref_name }}"
-          releaseBody: "Windows 安装包见下方 Assets（MSI 与 NSIS 两种格式）。"
+          releaseBody: "Windows 安装包见下方 Assets（MSI 与 NSIS 两种格式）。
+
+- 内置自动更新（设置 → 关于 Muster）
+- 设置页面重新设计
+- 移除 Token 用量面板
+
+> 注意：旧版本不包含自动更新组件，本次需手动安装，之后的版本即可自动更新。"
           releaseDraft: true
           prerelease: false

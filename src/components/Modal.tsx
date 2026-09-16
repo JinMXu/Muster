@@ -1,6 +1,6 @@
 /// Shared modal overlay: centered card with backdrop, `muster-pop` animation,
 /// and click-outside-to-close. Consistent visual style across Settings,
-/// UsagePanel, PasteWarning, GitPanel discard confirm, and App close prompt.
+/// PasteWarning, GitPanel discard confirm, and App close prompt.
 export default function Modal({
   children,
   onClose,

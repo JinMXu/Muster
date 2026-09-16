@@ -11,5 +11,4 @@ pub mod persist;
 pub mod procs;
 pub mod search;
 pub mod shell;
-pub mod usage;
 pub mod watch;

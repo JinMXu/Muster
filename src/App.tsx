@@ -12,7 +12,6 @@ import CommandPalette from "./components/CommandPalette";
 import TabSwitcher, { type SwitcherTab } from "./components/TabSwitcher";
 import Settings, { type SettingsTab } from "./components/Settings";
 import ContextMenu from "./components/ContextMenu";
-import UsagePanel from "./components/UsagePanel";
 import SearchPanel from "./components/SearchPanel";
 import PasteWarning, { looksDangerousPaste } from "./components/PasteWarning";
 import DiffHosts from "./components/DiffHosts";
@@ -46,7 +45,6 @@ export default function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
-  const [showUsage, setShowUsage] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [agentBarOpen, setAgentBarOpen] = useState(false);
   const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
@@ -477,7 +475,6 @@ export default function App() {
       "ctrl+k": clearTerminal,
       "ctrl+shift+t": reopenClosedTab,
       "ctrl+,": () => { setSettingsTab("general"); setShowSettings(true); },
-      "ctrl+shift+u": () => setShowUsage(true),
       "ctrl+shift+a": () => setAgentBarOpen((v) => !v),
     };
     const onKey = (e: KeyboardEvent) => {
@@ -843,7 +840,6 @@ export default function App() {
           onCloseProject={closeSelectedProject}
           onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
           onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
-          onOpenUsage={() => setShowUsage(true)}
           onOpenSearch={() => setShowSearch(true)}
           onReopenClosed={reopenClosedTab}
           onClosePane={closeFocusedPane}
@@ -868,10 +864,8 @@ export default function App() {
         <Settings
           initialTab={settingsTab}
           onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }}
-          onOpenUsage={() => { setShowSettings(false); setShowUsage(true); }}
         />
       )}
-      {showUsage && <UsagePanel onClose={() => setShowUsage(false)} />}
       {showSearch && <SearchPanel state={stateView} onClose={() => setShowSearch(false)} />}
       <ContextMenu />
       {closePrompt && (

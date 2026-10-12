@@ -42,10 +42,10 @@ jobs:
           releaseName: "Muster ${{ github.ref_name }}"
           releaseBody: "Windows installers below (MSI and NSIS).
 
-- Rotating snapshot backups with automatic recovery from a corrupt layout
-- Staggered PTY startup when restoring multi-pane sessions
-- Confirmation before closing tabs, panes or projects with a live coding agent
-- Command palette sessions show agent status and working directory
+- Fixed a dead strip left in a split column after closing or dragging panes away
+- Silenced PSReadLine's 'ListView prediction disabled' warning spam in narrow panes (inline prediction while narrow, restored automatically)
+- Git panel rows now show per-file +N -M line counts
+- Settings: font family is now a dropdown with common monospace presets; terminal font size is a hand-filled input
 
 > Note: versions without the updater component must install this release manually; auto-updates work from 0.1.3 onwards."
           releaseDraft: true

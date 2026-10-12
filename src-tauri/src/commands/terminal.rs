@@ -8,6 +8,16 @@ use super::{emit_state, unknown_window, SharedState};
 use crate::models::session::SessionInfo;
 use crate::services::i18n::translate;
 
+/// Shells offered by the Settings dialog's default-shell picker, resolved
+/// live against PATH (a freshly installed shell shows up without an app
+/// restart). Runs on the blocking pool: the PATH scan spawns lookups.
+#[tauri::command]
+pub async fn list_shells() -> Vec<crate::services::shell::ShellOption> {
+    tokio::task::spawn_blocking(crate::services::shell::available_shells)
+        .await
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn spawn_session(
     window: Window,

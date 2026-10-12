@@ -1,24 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../lib/invoke";
 import {
   createUpdater,
   type UpdaterController,
   type UpdaterPhase,
 } from "../lib/updater";
-import type { Settings as SettingsType, ThemeInfo } from "../lib/types";
+import type { Settings as SettingsType, ShellOption, ThemeInfo } from "../lib/types";
 import { useT, type TKey } from "../lib/i18n/context";
 import {
+  IconArrowUpRight,
   IconCheck,
   IconChevronDown,
   IconInfo,
   IconKeyboard,
   IconPlug,
+  IconSearch,
   IconSettings,
   IconType,
   IconX,
-  IconArrowUpRight,
 } from "./icons";
 
 export type SettingsTab = "general" | "font" | "shortcuts" | "integrations" | "about";
@@ -76,6 +77,50 @@ const SHORTCUT_GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
 ];
 
 const GITHUB_URL = "https://github.com/JinMXu/Muster";
+const ISSUES_URL = `${GITHUB_URL}/issues`;
+const RELEASES_URL = `${GITHUB_URL}/releases`;
+const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
+
+const TABS: { id: SettingsTab; labelKey: TKey; icon: React.ReactNode }[] = [
+  { id: "general", labelKey: "settings.tabGeneral", icon: <IconSettings size={15} /> },
+  { id: "font", labelKey: "settings.tabFont", icon: <IconType size={15} /> },
+  { id: "shortcuts", labelKey: "settings.tabShortcuts", icon: <IconKeyboard size={15} /> },
+  { id: "integrations", labelKey: "settings.tabIntegrations", icon: <IconPlug size={15} /> },
+  { id: "about", labelKey: "settings.tabAbout", icon: <IconInfo size={15} /> },
+];
+
+/// OS/arch for the About tab. WebView2 exposes the Chromium User-Agent
+/// Client Hints API; fall back to parsing the UA string for anything else.
+async function osInfo(): Promise<{ os: string; arch: string }> {
+  try {
+    const uad = (
+      navigator as Navigator & {
+        userAgentData?: {
+          getHighEntropyValues: (hints: string[]) => Promise<Record<string, string>>;
+        };
+      }
+    ).userAgentData;
+    if (uad?.getHighEntropyValues) {
+      const v = await uad.getHighEntropyValues([
+        "platform",
+        "platformVersion",
+        "architecture",
+        "bitness",
+      ]);
+      const os = [v.platform ?? "Windows", v.platformVersion ? `v${v.platformVersion}` : null]
+        .filter(Boolean)
+        .join(" ");
+      const arch = [v.architecture ?? "", v.bitness ? `${v.bitness}-bit` : ""]
+        .filter(Boolean)
+        .join(" ");
+      if (os || arch) return { os: os || "—", arch: arch || "—" };
+    }
+  } catch {
+    // fall through to UA sniffing
+  }
+  const nt = navigator.userAgent.match(/Windows NT ([\d.]+)/);
+  return { os: nt ? `Windows NT ${nt[1]}` : navigator.platform, arch: "x64" };
+}
 
 export default function Settings({
   onClose,
@@ -84,53 +129,87 @@ export default function Settings({
   onClose: () => void;
   initialTab?: SettingsTab;
 }) {
-  const [s, setS] = useState<SettingsType | null>(null);
+  // `saved` is the persisted snapshot the draft is diffed against; `draft` is
+  // what the controls edit. Save persists the draft, Reset reloads defaults
+  // into the draft — neither applies until Save.
+  const [saved, setSaved] = useState<SettingsType | null>(null);
+  const [draft, setDraft] = useState<SettingsType | null>(null);
   const [themes, setThemes] = useState<ThemeInfo[]>([]);
   const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [version, setVersion] = useState("");
+  // Updater lives here (not in AboutTab) so its phase survives tab switches.
+  const [phase, setPhase] = useState<UpdaterPhase>({ kind: "idle" });
+  const ctrlRef = useRef<UpdaterController | null>(null);
   const { t } = useT();
 
   useEffect(() => {
-    api.settings().then(setS);
+    api.settings().then((s) => {
+      setSaved(s);
+      setDraft(s);
+    });
     api.availableThemesWithInfo().then(setThemes);
+    getVersion().then(setVersion).catch(() => {});
+    ctrlRef.current = createUpdater(setPhase);
   }, []);
+
+  const dirty = useMemo(
+    () => !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved),
+    [draft, saved],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (confirmDiscard) setConfirmDiscard(false);
+      else if (dirty) setConfirmDiscard(true);
+      else onClose();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [confirmDiscard, dirty, onClose]);
 
-  if (!s) return null;
-
-  const update = (patch: Partial<SettingsType>) => setS({ ...s, ...patch });
-  const save = () => {
-    if (s) api.saveSettings(s).then(onClose);
+  const requestClose = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
   };
+
+  if (!draft || !saved) return null;
+
+  const update = (patch: Partial<SettingsType>) =>
+    setDraft((d) => (d ? { ...d, ...patch } : d));
+  const save = () => {
+    if (!dirty) return;
+    api.saveSettings(draft).then(onClose);
+  };
+  const reset = () => api.defaultSettings().then(setDraft);
 
   return (
     <div
       className="fixed inset-0 z-40 bg-black/35 flex items-center justify-center"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
         role="dialog"
         aria-modal="true"
-        className="bg-muster-bg border border-white/[0.08] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop flex flex-col overflow-hidden"
-        style={{ width: 680, maxHeight: 600 }}
+        aria-labelledby="settings-title"
+        /* Fixed size on purpose: the dialog must not resize when switching
+           tabs — only the content area scrolls. */
+        className="relative bg-muster-bg border border-white/[0.08] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop flex flex-col overflow-hidden"
+        style={{ width: 760, height: "min(600px, calc(100vh - 48px))" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/[0.06] flex-shrink-0">
-          <h2 className="ui-fs-base font-semibold">{t("settings.title")}</h2>
+        <div className="flex items-center justify-between pl-5 pr-3 py-3 border-b border-white/[0.06] flex-shrink-0">
+          <h2 id="settings-title" className="ui-fs-base font-semibold">
+            {t("settings.title")}
+          </h2>
           <button
-            onClick={onClose}
-            className="text-muster-muted hover:text-muster-fg transition-colors duration-muster ease-muster"
+            onClick={requestClose}
+            aria-label={t("common.close")}
+            className="p-1 rounded-md text-muster-muted hover:text-muster-fg hover:bg-muster-hover transition-colors duration-muster ease-muster"
           >
             <IconX size={16} />
           </button>
@@ -138,69 +217,102 @@ export default function Settings({
 
         {/* Body: sidebar + content */}
         <div className="flex flex-1 min-h-0">
-          {/* Left sidebar */}
-          <nav className="w-[160px] flex-shrink-0 py-3 px-2 border-r border-white/[0.06] flex flex-col gap-0.5">
-            <TabButton
-              active={tab === "general"}
-              onClick={() => setTab("general")}
-              icon={<IconSettings size={15} />}
-              label={t("settings.tabGeneral")}
-            />
-            <TabButton
-              active={tab === "font"}
-              onClick={() => setTab("font")}
-              icon={<IconType size={15} />}
-              label={t("settings.tabFont")}
-            />
-            <TabButton
-              active={tab === "shortcuts"}
-              onClick={() => setTab("shortcuts")}
-              icon={<IconKeyboard size={15} />}
-              label={t("settings.tabShortcuts")}
-            />
-            <TabButton
-              active={tab === "integrations"}
-              onClick={() => setTab("integrations")}
-              icon={<IconPlug size={15} />}
-              label={t("settings.tabIntegrations")}
-            />
-            <TabButton
-              active={tab === "about"}
-              onClick={() => setTab("about")}
-              icon={<IconInfo size={15} />}
-              label={t("settings.tabAbout")}
-            />
+          <nav className="w-[192px] flex-shrink-0 py-3 px-2.5 border-r border-white/[0.06] flex flex-col">
+            <div className="flex flex-col gap-0.5">
+              {TABS.map((item) => (
+                <TabButton
+                  key={item.id}
+                  active={tab === item.id}
+                  onClick={() => setTab(item.id)}
+                  icon={item.icon}
+                  label={t(item.labelKey)}
+                />
+              ))}
+            </div>
+            <div className="mt-auto px-2 pb-1 ui-fs-2xs text-muster-muted tabular-nums select-none">
+              Muster{version ? ` · v${version}` : ""}
+            </div>
           </nav>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div
+            key={tab}
+            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-6 py-5 muster-fade"
+          >
             {tab === "general" && (
-              <GeneralTab s={s} update={update} themes={themes} t={t} />
+              <GeneralTab s={draft} update={update} themes={themes} t={t} />
             )}
-            {tab === "font" && <FontTab s={s} update={update} t={t} />}
+            {tab === "font" && <FontTab s={draft} update={update} t={t} />}
             {tab === "shortcuts" && <ShortcutsTab t={t} />}
             {tab === "integrations" && <IntegrationsTab t={t} />}
-            {tab === "about" && <AboutTab t={t} />}
+            {tab === "about" && (
+              <AboutTab t={t} version={version} phase={phase} ctrl={ctrlRef.current} />
+            )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-white/[0.06] flex-shrink-0">
-          <button
-            onClick={() => {
-              api.defaultSettings().then(setS);
-            }}
-            className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            {t("settings.reset")}
-          </button>
-          <button
-            onClick={save}
-            className="px-3 py-1.5 rounded-md bg-muster-accent text-white ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            {t("settings.save")}
-          </button>
+        <div className="flex items-center px-5 py-3 border-t border-white/[0.06] flex-shrink-0">
+          <div className="flex items-center gap-1.5 ui-fs-xs min-w-0">
+            {dirty && (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                <span className="text-muster-muted truncate">
+                  {t("settings.unsavedChanges")}
+                </span>
+              </>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 ml-auto">
+            <button
+              onClick={reset}
+              className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+            >
+              {t("settings.reset")}
+            </button>
+            <button
+              onClick={save}
+              disabled={!dirty}
+              className="px-4 py-1.5 rounded-md bg-muster-accent text-white ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {t("settings.save")}
+            </button>
+          </div>
         </div>
+
+        {/* Discard-changes confirm */}
+        {confirmDiscard && (
+          <div
+            className="absolute inset-0 z-10 bg-black/45 flex items-center justify-center"
+            onClick={() => setConfirmDiscard(false)}
+          >
+            <div
+              className="bg-muster-bg border border-white/[0.1] rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.4)] muster-pop w-[320px] px-5 py-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="ui-fs-base font-semibold mb-1">
+                {t("settings.discardTitle")}
+              </div>
+              <div className="ui-fs-sm text-muster-muted mb-4">
+                {t("settings.discardBody")}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setConfirmDiscard(false)}
+                  className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+                >
+                  {t("settings.keepEditing")}
+                </button>
+                <button
+                  onClick={onClose}
+                  className="px-3 py-1.5 rounded-md bg-red-500/90 text-white ui-fs-sm hover:bg-red-500 active:scale-[.97] transition-transform duration-muster ease-muster"
+                >
+                  {t("settings.discard")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -222,12 +334,15 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 px-3 py-2 rounded-md ui-fs-sm transition-colors duration-muster ease-muster ${
+      className={`relative flex items-center gap-2.5 px-3 py-2 rounded-md ui-fs-sm transition-colors duration-muster ease-muster ${
         active
           ? "bg-white/[0.09] text-muster-fg"
           : "text-muster-muted hover:bg-muster-hover hover:text-muster-fg"
       }`}
     >
+      {active && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2.5px] h-4 rounded-full bg-muster-accent" />
+      )}
       <span className="flex items-center">{icon}</span>
       <span>{label}</span>
     </button>
@@ -272,7 +387,9 @@ function Row({
       <div className="min-w-0">
         <div className="ui-fs-base text-muster-fg">{title}</div>
         {desc && (
-          <div className="ui-fs-xs text-muster-muted mt-0.5">{desc}</div>
+          <div className="ui-fs-xs text-muster-muted mt-0.5 truncate" title={desc}>
+            {desc}
+          </div>
         )}
       </div>
       <div className="flex items-center flex-shrink-0">{children}</div>
@@ -535,6 +652,18 @@ function GeneralTab({
   themes: ThemeInfo[];
   t: ReturnType<typeof useT>["t"];
 }) {
+  // Available shells for the default-shell picker, resolved live on open
+  // (a shell installed after Muster started shows up on the next open).
+  const [shells, setShells] = useState<ShellOption[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.listShells().then((list) => {
+      if (!cancelled) setShells(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <div>
       <Section title={t("settings.appearance")}>
@@ -581,6 +710,33 @@ function GeneralTab({
       </Section>
 
       <Section title={t("settings.behavior")}>
+        <Row title={t("settings.rightClick")} desc={t("settings.rightClickDesc")}>
+          <Segmented
+            value={s.terminal_right_click}
+            options={[
+              { value: "menu", label: t("settings.rightClickMenu") },
+              { value: "smart", label: t("settings.rightClickSmart") },
+            ]}
+            onChange={(v) => update({ terminal_right_click: v })}
+          />
+        </Row>
+        <Row title={t("settings.defaultShell")} desc={t("settings.defaultShellDesc")}>
+          <select
+            value={s.default_shell}
+            onChange={(e) => update({ default_shell: e.target.value })}
+            title={shells?.find((sh) => sh.id === s.default_shell)?.path || undefined}
+            className="w-[190px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
+          >
+            <option value="auto">{t("settings.shellAuto")}</option>
+            {(shells ?? [])
+              .filter((sh) => sh.id !== "auto" && (sh.available || sh.id === s.default_shell))
+              .map((sh) => (
+                <option key={sh.id} value={sh.id}>
+                  {sh.available ? sh.name : `${sh.name} (${t("settings.shellNotInstalled")})`}
+                </option>
+              ))}
+          </select>
+        </Row>
         <Row title={t("settings.projectPorts")}>
           <Toggle
             checked={s.project_ports}
@@ -603,6 +759,23 @@ function FontTab({
 }) {
   return (
     <div>
+      {/* Live preview: reacts to family/size/thicken as they are edited. */}
+      <div className="mb-5 rounded-lg border border-white/[0.06] bg-black/20 px-4 py-3">
+        <div className="ui-fs-xs text-muster-muted mb-1.5">
+          {t("settings.fontPreview")}
+        </div>
+        <div
+          className="font-mono whitespace-nowrap overflow-hidden text-ellipsis"
+          style={{
+            fontFamily: s.font_family ? `'${s.font_family}', monospace` : undefined,
+            fontSize: s.font_size,
+            fontWeight: s.font_thicken ? 600 : 400,
+          }}
+        >
+          ABCabc 0123456789 -&gt; =&gt; != {"{()[]}"} $VAR ~/src #
+        </div>
+      </div>
+
       <Section title={t("settings.terminalFont")}>
         <Row title={t("settings.fontFamily")}>
           <input
@@ -656,9 +829,39 @@ function FontTab({
 }
 
 function ShortcutsTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+
+  const groups = useMemo(
+    () =>
+      q
+        ? SHORTCUT_GROUPS.map((g) => ({
+            ...g,
+            items: g.items.filter(
+              (it) =>
+                t(it.labelKey).toLowerCase().includes(q) ||
+                it.keys.toLowerCase().includes(q),
+            ),
+          })).filter((g) => g.items.length > 0)
+        : SHORTCUT_GROUPS,
+    [q, t],
+  );
+
   return (
     <div>
-      {SHORTCUT_GROUPS.map((group) => (
+      <div className="relative mb-4">
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muster-muted flex items-center">
+          <IconSearch size={13} />
+        </span>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t("settings.searchShortcuts")}
+          className="w-full bg-white/[0.05] border border-transparent focus:border-muster-accent/30 pl-8 pr-3 py-1.5 rounded-md ui-fs-sm outline-none transition-colors"
+        />
+      </div>
+
+      {groups.map((group) => (
         <Section key={group.titleKey} title={t(group.titleKey)}>
           {group.items.map((item) => (
             <div
@@ -675,6 +878,12 @@ function ShortcutsTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
           ))}
         </Section>
       ))}
+
+      {groups.length === 0 && (
+        <div className="py-12 text-center ui-fs-sm text-muster-muted">
+          {t("settings.noShortcutsFound")}
+        </div>
+      )}
     </div>
   );
 }
@@ -774,17 +983,53 @@ function ActionStatus({
   );
 }
 
-function AboutTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
-  const [version, setVersion] = useState<string | null>(null);
-  const [phase, setPhase] = useState<UpdaterPhase>({ kind: "idle" });
-  const ctrlRef = useRef<UpdaterController | null>(null);
+function LinkRow({
+  title,
+  desc,
+  url,
+  t,
+}: {
+  title: string;
+  desc: string;
+  url: string;
+  t: ReturnType<typeof useT>["t"];
+}) {
+  return (
+    <Row title={title} desc={desc}>
+      <button
+        onClick={() => openUrl(url)}
+        className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+      >
+        {t("settings.openOnGithub")}
+        <IconArrowUpRight size={12} />
+      </button>
+    </Row>
+  );
+}
+
+function AboutTab({
+  t,
+  version,
+  phase,
+  ctrl,
+}: {
+  t: ReturnType<typeof useT>["t"];
+  version: string;
+  phase: UpdaterPhase;
+  ctrl: UpdaterController | null;
+}) {
+  const [os, setOs] = useState("");
+  const [arch, setArch] = useState("");
+  const [configFile, setConfigFile] = useState("");
 
   useEffect(() => {
-    getVersion().then(setVersion).catch(() => {});
-    ctrlRef.current = createUpdater(setPhase);
+    osInfo().then((i) => {
+      setOs(i.os);
+      setArch(i.arch);
+    });
+    api.configPath().then(setConfigFile).catch(() => {});
   }, []);
 
-  const ctrl = ctrlRef.current;
   const busy = phase.kind === "checking" || phase.kind === "downloading";
 
   // Status line + action button per updater phase.
@@ -822,59 +1067,89 @@ function AboutTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
     <div>
       {/* App identity */}
       <div className="flex flex-col items-center gap-1.5 pt-3 pb-6">
-        <img src="app-icon.png" alt="Muster" className="w-16 h-16 rounded-[14px]" />
-        <div className="ui-fs-base font-semibold">Muster</div>
-        <div className="ui-fs-xs text-muster-muted tabular-nums">
-          {version ? t("settings.currentVersion", { version }) : "\u2026"}
+        <img src="app-icon.png" alt="Muster" className="w-16 h-16 rounded-[14px] shadow-[0_4px_16px_rgba(0,0,0,0.35)]" />
+        <div className="ui-fs-md font-semibold mt-1">Muster</div>
+        <div className="ui-fs-xs text-muster-muted">{t("settings.tagline")}</div>
+        <div className="ui-fs-xs text-muster-muted/80 tabular-nums mt-0.5">
+          v{version || "…"}
         </div>
       </div>
 
       <Section title={t("settings.updates")}>
-        <Row title={t("settings.updates")} desc={statusText ?? t("settings.updatesDesc")}>
-          <div className={`ui-fs-xs ${statusError ? "text-red-400" : ""}`}>
+        <Row title={t("settings.updates")} desc={t("settings.updatesDesc")}>
+          <div className="flex items-center gap-2.5">
             {phase.kind === "downloading" ? (
-              <div className="w-[140px] h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+              <div className="w-[120px] h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
                 <div
                   className="h-full rounded-full bg-muster-accent transition-all duration-muster ease-muster"
                   style={{ width: `${phase.progress}%` }}
                 />
               </div>
+            ) : statusText ? (
+              <span
+                className={`ui-fs-xs max-w-[200px] truncate ${statusError ? "text-red-400" : "text-muster-muted"}`}
+                title={statusText}
+              >
+                {statusText}
+              </span>
             ) : null}
+            {button ? (
+              <button
+                onClick={button.onClick}
+                className={`px-3 py-1.5 rounded-md ui-fs-sm active:scale-[.97] transition-transform duration-muster ease-muster ${
+                  button.primary
+                    ? "bg-muster-accent text-white"
+                    : "bg-white/[0.06] hover:bg-muster-hover-btn"
+                }`}
+              >
+                {button.label}
+              </button>
+            ) : (
+              <button
+                onClick={() => ctrl?.checkForUpdates()}
+                disabled={busy || !ctrl}
+                className="px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
+              >
+                {busy ? t("settings.checkingForUpdates") : t("settings.checkForUpdates")}
+              </button>
+            )}
           </div>
-          {button ? (
-            <button
-              onClick={button.onClick}
-              className={`ml-2 px-3 py-1.5 rounded-md ui-fs-sm active:scale-[.97] transition-transform duration-muster ease-muster ${
-                button.primary
-                  ? "bg-muster-accent text-white"
-                  : "bg-white/[0.06] hover:bg-muster-hover-btn"
-              }`}
-            >
-              {button.label}
-            </button>
-          ) : (
-            <button
-              onClick={() => ctrl?.checkForUpdates()}
-              disabled={busy || !ctrl}
-              className="ml-2 px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
-            >
-              {busy ? t("settings.checkingForUpdates") : t("settings.checkForUpdates")}
-            </button>
-          )}
         </Row>
       </Section>
 
-      <Section title="Muster">
-        <Row title={t("settings.githubRepo")} desc={t("settings.githubRepoDesc")}>
+      <Section title={t("settings.links")}>
+        <LinkRow title={t("settings.githubRepo")} desc={t("settings.githubRepoDesc")} url={GITHUB_URL} t={t} />
+        <LinkRow title={t("settings.issues")} desc={t("settings.issuesDesc")} url={ISSUES_URL} t={t} />
+        <LinkRow title={t("settings.releases")} desc={t("settings.releasesDesc")} url={RELEASES_URL} t={t} />
+        <LinkRow title={t("settings.license")} desc={t("settings.licenseDesc")} url={LICENSE_URL} t={t} />
+      </Section>
+
+      <Section title={t("settings.systemInfo")}>
+        <Row title={t("settings.versionLabel")}>
+          <span className="ui-fs-sm text-muster-muted tabular-nums">
+            v{version || "…"}
+          </span>
+        </Row>
+        <Row title={t("settings.osLabel")}>
+          <span className="ui-fs-sm text-muster-muted">{os || "…"}</span>
+        </Row>
+        <Row title={t("settings.archLabel")}>
+          <span className="ui-fs-sm text-muster-muted">{arch || "…"}</span>
+        </Row>
+        <Row title={t("settings.configFile")} desc={configFile || undefined}>
           <button
-            onClick={() => openUrl(GITHUB_URL)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+            onClick={() => configFile && revealItemInDir(configFile)}
+            disabled={!configFile}
+            className="px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
           >
-            {t("settings.openOnGithub")}
-            <IconArrowUpRight size={12} />
+            {t("common.revealInExplorer")}
           </button>
         </Row>
       </Section>
+
+      <div className="pt-1 pb-2 text-center ui-fs-xs text-muster-muted/70 select-none">
+        {t("settings.copyright")}
+      </div>
     </div>
   );
 }

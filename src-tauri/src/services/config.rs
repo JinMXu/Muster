@@ -40,6 +40,16 @@ pub struct Settings {
     /// session), not just the session's own process tree.
     #[serde(default)]
     pub project_ports: bool,
+    /// Terminal right-click behavior: "menu" opens the context menu, "smart"
+    /// copies the selection (or pastes when nothing is selected) Windows
+    /// Terminal style. Shift+right-click always opens the menu.
+    #[serde(default = "default_right_click")]
+    pub terminal_right_click: String,
+    /// Default shell for new sessions: "auto" (detect pwsh → powershell →
+    /// wsl → cmd) or a specific shell id from `shell::available_shells`.
+    /// Falls back to auto when the named shell is not installed.
+    #[serde(default = "default_shell_pref")]
+    pub default_shell: String,
     #[serde(default = "default_language")]
     pub language: String,
 }
@@ -57,6 +67,8 @@ impl Default for Settings {
             editor_wrap_lines: false,
             diff_side_by_side: true,
             project_ports: false,
+            terminal_right_click: "menu".into(),
+            default_shell: "auto".into(),
             language: "system".into(),
         }
     }
@@ -118,6 +130,8 @@ fn default_font_size() -> f64 { Settings::DEFAULT_FONT_SIZE }
 fn default_ui_font_size() -> f64 { Settings::DEFAULT_UI_FONT_SIZE }
 fn default_language() -> String { "system".into() }
 fn default_diff_side_by_side() -> bool { true }
+fn default_right_click() -> String { "menu".into() }
+fn default_shell_pref() -> String { "auto".into() }
 
 #[cfg(test)]
 mod tests {
@@ -179,6 +193,8 @@ mod tests {
         assert!(s.font_family.is_empty());
         assert!(!s.editor_wrap_lines);
         assert!(s.diff_side_by_side);
+        assert_eq!(s.terminal_right_click, "menu");
+        assert_eq!(s.default_shell, "auto");
         fs::remove_dir_all(&dir).ok();
     }
 

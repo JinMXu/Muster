@@ -21,6 +21,13 @@ pub fn get_settings(state: State<SharedState>) -> Settings {
     state.settings.lock().clone()
 }
 
+/// Absolute path of the persisted config.toml — the Settings dialog's
+/// "config file" row reveals it in Explorer.
+#[tauri::command]
+pub fn config_path() -> String {
+    crate::services::config::config_path().to_string_lossy().into_owned()
+}
+
 /// Consume a one-shot UI action queued by the tray (e.g. "open-settings"
 /// while the main window was being recreated). Called once by a window's
 /// frontend right after mount; returns `None` when nothing is pending.

@@ -15,6 +15,7 @@ import type {
   SearchMatch,
   SessionInfo,
   Settings,
+  ShellOption,
   ThemeColors,
   ThemeInfo,
   Uuid,
@@ -32,6 +33,7 @@ const c = <T>(name: string, args?: Record<string, unknown>): Promise<T> => invok
 export const api = {
   state: () => c<AppStateView>("get_state"),
   settings: () => c<Settings>("get_settings"),
+  configPath: () => c<string>("config_path"),
   takePendingAction: () => c<string | null>("take_pending_action"),
   defaultSettings: () => c<Settings>("default_settings"),
   saveSettings: (s: Settings) => c<void>("save_settings", { settings: s }),
@@ -58,6 +60,7 @@ export const api = {
     c<void>("set_project_directory", { id, directory }),
 
   spawnSession: () => c<SessionInfo>("spawn_session", { directory: null }),
+  listShells: () => c<ShellOption[]>("list_shells"),
   sendText: (id: Uuid, text: string) => c<void>("send_text", { id, text }),
   resizeTerminal: (id: Uuid, cols: number, rows: number) =>
     c<void>("resize_terminal", { id, cols, rows }),

@@ -41,6 +41,10 @@ pub struct TerminalSession {
     pub title: Mutex<String>,
     pub working_directory: Mutex<Option<String>>,
     pub shell_name: String,
+    /// The resolved shell (path + args) this session will spawn. Resolved
+    /// once at construction from the user's `default_shell` preference, so
+    /// `new()` and `spawn()` can never disagree about which shell to launch.
+    shell: crate::services::shell::ShellSpec,
     pub launch_directory: String,
     pub has_exited: Mutex<bool>,
     /// Whether `attach_read_loop` has taken the reader for this session
@@ -82,14 +86,14 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
-    pub fn new(project_id: Uuid, directory: String) -> Self {
-        let shell = crate::services::shell::detect_default_shell();
+    pub fn new(project_id: Uuid, directory: String, shell: crate::services::shell::ShellSpec) -> Self {
         Self {
             id: Uuid::new_v4(),
             project_id,
             title: Mutex::new(shell.name.clone()),
             working_directory: Mutex::new(Some(directory.clone())),
-            shell_name: shell.name,
+            shell_name: shell.name.clone(),
+            shell,
             launch_directory: directory,
             has_exited: Mutex::new(false),
             read_loop_started: Mutex::new(false),
@@ -109,7 +113,7 @@ impl TerminalSession {
     pub fn spawn(self: &Arc<Self>, cols: u16, rows: u16) -> std::io::Result<()> {
         let mut conpty = ConPty::create(cols, rows)?;
 
-        let shell = crate::services::shell::detect_default_shell();
+        let shell = &self.shell;
         let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
         env.insert("TERM".into(), "alacritty".into());
         env.insert("COLORTERM".into(), "truecolor".into());
@@ -871,7 +875,11 @@ mod tests {
 
     #[test]
     fn scrollback_ring_keeps_last_lines_and_pending_tail() {
-        let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        let s = TerminalSession::new(
+            uuid::Uuid::new_v4(),
+            "C:\\work".into(),
+            crate::services::shell::detect_default_shell(),
+        );
         // Activate capture (a consumer read the scrollback), then feed.
         assert!(s.scrollback_lines(1000).is_empty());
         for _ in 0..10 {
@@ -891,7 +899,11 @@ mod tests {
 
     #[test]
     fn scrollback_dedups_line_redraws() {
-        let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        let s = TerminalSession::new(
+            uuid::Uuid::new_v4(),
+            "C:\\work".into(),
+            crate::services::shell::detect_default_shell(),
+        );
         // Activate capture first: without a consumer the ring stays dormant.
         assert!(s.scrollback_lines(1000).is_empty());
         // Per-keystroke line redraws (`\r`-rewritten): each extends the last.
@@ -909,7 +921,11 @@ mod tests {
 
     #[test]
     fn record_output_updates_last_output_at() {
-        let s = TerminalSession::new(uuid::Uuid::new_v4(), "C:\\work".into());
+        let s = TerminalSession::new(
+            uuid::Uuid::new_v4(),
+            "C:\\work".into(),
+            crate::services::shell::detect_default_shell(),
+        );
         s.record_output(b"x");
         // The elapsed time since the write is near zero.
         assert!(s.idle_for() < Duration::from_secs(1));

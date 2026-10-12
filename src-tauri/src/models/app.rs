@@ -165,7 +165,11 @@ impl AppState {
                                 } else {
                                     working_directory.clone()
                                 };
-                                let session = Arc::new(TerminalSession::new(project.id, dir));
+                                let session = Arc::new(TerminalSession::new(
+                                    project.id,
+                                    dir,
+                                    self.resolved_shell(),
+                                ));
                                 let sid = session.id;
                                 self.sessions.insert(sid, session);
                                 PaneContent::Session(sid)
@@ -412,6 +416,13 @@ impl AppState {
 
     // ---- Sessions / Tabs --------------------------------------------------
 
+    /// The shell to spawn for a new session: the user's `default_shell`
+    /// preference resolved against PATH, falling back to the system default
+    /// when the preference is "auto" or names an uninstalled shell.
+    fn resolved_shell(&self) -> crate::services::shell::ShellSpec {
+        crate::services::shell::resolve_shell(&self.settings.lock().default_shell)
+    }
+
     pub fn spawn_session_in_selected(&mut self, directory: Option<String>) -> Option<Uuid> {
         self.bump();
         let project_id = self.selected_project_id?;
@@ -422,7 +433,7 @@ impl AppState {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| ".".to_string())
             });
-        let session = Arc::new(TerminalSession::new(project_id, initial_dir));
+        let session = Arc::new(TerminalSession::new(project_id, initial_dir, self.resolved_shell()));
         let session_id = session.id;
         self.insert_session_tab_after_selected(project_id, PaneContent::Session(session_id));
         self.sessions.insert(session_id, session);
@@ -544,7 +555,7 @@ impl AppState {
         let dir = dir.or_else(|| self.compute_session_dir()).unwrap_or_else(|| {
             dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| ".".into())
         });
-        let session = Arc::new(TerminalSession::new(project_id, dir));
+        let session = Arc::new(TerminalSession::new(project_id, dir, self.resolved_shell()));
         let session_id = session.id;
         let pane = Pane::new(PaneContent::Session(session_id));
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {

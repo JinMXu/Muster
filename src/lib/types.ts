@@ -17,7 +17,20 @@ export interface Settings {
   editor_wrap_lines: boolean;
   diff_side_by_side: boolean;
   project_ports: boolean;
+  /** Terminal right-click: "menu" opens the context menu, "smart" copies the
+   * selection (or pastes when nothing is selected) Windows Terminal style. */
+  terminal_right_click: "menu" | "smart";
+  /** Default shell for new sessions: "auto" or an id from list_shells. */
+  default_shell: string;
   language: "system" | "en" | "zh";
+}
+
+/** One entry of the default-shell picker (backend `list_shells`). */
+export interface ShellOption {
+  id: string;
+  name: string;
+  path: string;
+  available: boolean;
 }
 
 export type PaneContentKind = "session" | "file" | "diff";

@@ -9,6 +9,7 @@ import { useProjectCwd } from "../lib/useProjectCwd";
 import { shellQuotePath } from "../lib/shellEscape";
 import { getFocusedSessionId, getFocusedFileId } from "../lib/sessionUtils";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
+import FileIcon from "./FileIcon";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -548,7 +549,7 @@ function Row({
         <span className="w-2" />
       )}
       <span className={`flex items-center ${node.is_directory ? "text-muster-accent/80" : "text-muster-muted"}`}>
-        {node.is_directory ? <IconFolder size={12} /> : <IconFile size={12} />}
+        {node.is_directory ? <IconFolder size={12} /> : <FileIcon name={node.name} size={12} />}
       </span>
       {isRenaming ? (
         <input
@@ -563,7 +564,9 @@ function Row({
           className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 ui-fs-sm outline-none text-muster-fg"
         />
       ) : (
-        <span className="flex-1 truncate">{node.name}</span>
+        <span className={`flex-1 truncate ${!node.is_directory && badge ? badge.className : ""}`}>
+          {node.name}
+        </span>
       )}
       {!isRenaming && badge && (
         <span className={`flex-shrink-0 ui-fs-xs ${badge.className}`}>{badge.letter}</span>

@@ -36,6 +36,7 @@
 .ui-fs-sm   { font-size: calc(11px * var(--ui-font-scale)); line-height: 1.4; }
 .ui-fs-xs   { font-size: calc(10px * var(--ui-font-scale)); line-height: 1.35; }
 .ui-fs-2xs  { font-size: calc(9px  * var(--ui-font-scale)); line-height: 1.3; }
+.ui-fs-md   { font-size: calc(15px * var(--ui-font-scale)); line-height: 1.35; }
 
 html,
 body,
@@ -112,6 +113,22 @@ select option {
 }
 .muster-pop {
   animation: muster-pop var(--muster-motion);
+}
+
+/* Panel switch inside a modal (Settings tabs): quick fade-up, transform and
+   opacity only so it never disturbs the dialog's fixed size. */
+@keyframes muster-fade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.muster-fade {
+  animation: muster-fade var(--muster-motion);
 }
 
 /* Editor inline diff gutter (FilePane): green/red hairline + tinted line

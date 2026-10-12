@@ -26,6 +26,87 @@ pub fn detect_default_shell() -> ShellSpec {
     ShellSpec { path: comspec, args: vec![], name: "cmd".into() }
 }
 
+/// One entry of the Settings dialog's default-shell picker: a stable id
+/// (stored in `Settings::default_shell`), a display name, and whether the
+/// shell is actually installed on this machine.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ShellOption {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub available: bool,
+}
+
+/// Shells the user can pick as the default, in preference order. `available`
+/// is resolved live (PATH scan) on every call — the Settings dialog calls it
+/// once per open, so the cost is irrelevant, and a freshly installed shell
+/// shows up without an app restart.
+#[cfg(windows)]
+pub fn available_shells() -> Vec<ShellOption> {
+    let found = |exe: &str| which::which(exe).ok().map(|p| p.to_string_lossy().to_string());
+    let opt = |id: &str, name: &str, exe: &str| {
+        let path = found(exe).unwrap_or_default();
+        ShellOption { id: id.into(), name: name.into(), path: path.clone(), available: !path.is_empty() }
+    };
+    vec![
+        ShellOption { id: "auto".into(), name: "System default".into(), path: String::new(), available: true },
+        opt("pwsh", "PowerShell", "pwsh.exe"),
+        opt("powershell", "Windows PowerShell", "powershell.exe"),
+        opt("nushell", "Nushell", "nu.exe"),
+        opt("wsl", "WSL", "wsl.exe"),
+        opt("cmd", "Command Prompt", "cmd.exe"),
+    ]
+}
+
+#[cfg(not(windows))]
+pub fn available_shells() -> Vec<ShellOption> {
+    vec![ShellOption { id: "auto".into(), name: "System default".into(), path: String::new(), available: true }]
+}
+
+/// Resolve the user's preferred shell: "auto" (or anything unrecognized /
+/// not installed) falls back to `detect_default_shell`, a specific id picks
+/// that shell. Falls back rather than failing — a stale preference for an
+/// uninstalled shell must never block spawning a terminal.
+#[cfg(windows)]
+pub fn resolve_shell(pref: &str) -> ShellSpec {
+    // `which` appends PATHEXT on Windows, so bare names find pwsh.exe etc.
+    let found = |exe: &str| which::which(exe);
+    match pref {
+        "pwsh" => {
+            if let Ok(p) = found("pwsh") {
+                return powershell_spec(p.to_string_lossy().to_string(), "pwsh");
+            }
+        }
+        "powershell" => {
+            if let Ok(p) = found("powershell") {
+                return powershell_spec(p.to_string_lossy().to_string(), "PowerShell");
+            }
+        }
+        "nushell" => {
+            if let Ok(p) = found("nu") {
+                return ShellSpec { path: p.to_string_lossy().to_string(), args: vec![], name: "nu".into() };
+            }
+        }
+        "wsl" => {
+            if let Ok(p) = found("wsl") {
+                return ShellSpec { path: p.to_string_lossy().to_string(), args: vec![], name: "wsl".into() };
+            }
+        }
+        "cmd" => {
+            let comspec = std::env::var("COMSPEC")
+                .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".into());
+            return ShellSpec { path: comspec, args: vec![], name: "cmd".into() };
+        }
+        _ => {}
+    }
+    detect_default_shell()
+}
+
+#[cfg(not(windows))]
+pub fn resolve_shell(_pref: &str) -> ShellSpec {
+    detect_default_shell()
+}
+
 /// PowerShell spec with shell integration: spawn via a small script that
 /// dot-sources the user profile and wraps `prompt` to report the cwd through
 /// OSC 9;9, which the PTY read loop picks up to keep the session's working
@@ -147,7 +228,23 @@ fn expand_env_vars(s: &str) -> String {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::expand_env_vars;
+    use super::{expand_env_vars, resolve_shell};
+
+    #[test]
+    fn resolve_shell_falls_back_for_unknown_pref() {
+        // An unrecognized (or stale, uninstalled) preference must never fail
+        // a spawn: it degrades to the system default.
+        let s = resolve_shell("not-a-shell");
+        assert!(!s.path.is_empty());
+        assert!(!s.name.is_empty());
+    }
+
+    #[test]
+    fn resolve_cmd_uses_comspec() {
+        let s = resolve_shell("cmd");
+        assert_eq!(s.name, "cmd");
+        assert!(s.path.to_lowercase().ends_with("cmd.exe"));
+    }
 
     #[test]
     fn expands_known_keeps_unknown_and_plain() {

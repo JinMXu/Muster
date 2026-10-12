@@ -109,6 +109,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
         .invoke_handler(tauri::generate_handler![
             state::get_state,
             state::get_settings,
+            state::config_path,
             state::take_pending_action,
             state::default_settings,
             state::save_settings,
@@ -130,6 +131,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             project::move_project,
             project::rename_project,
             project::set_project_directory,
+            terminal::list_shells,
             terminal::spawn_session,
             terminal::send_text,
             terminal::resize_terminal,

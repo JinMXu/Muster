@@ -7,6 +7,7 @@ import { shellQuotePath } from "../lib/shellEscape";
 import { openMenu } from "../lib/menuStore";
 import { useT } from "../lib/i18n/context";
 import { getTerminalSearchState, subscribeTerminalSearch } from "../lib/terminalSearch";
+import { useSettings } from "../lib/settingsStore";
 import PasteWarning, { looksDangerousPaste } from "./PasteWarning";
 import TerminalSearchBar from "./TerminalSearchBar";
 
@@ -55,6 +56,7 @@ export default function TerminalPane({
   const dragDepth = useRef(0);
   const [pasteWarning, setPasteWarning] = useState<string | null>(null);
   const { t } = useT();
+  const settings = useSettings();
   // Whether the scrollback search bar is open for THIS pane's session.
   const searchState = useSyncExternalStore(subscribeTerminalSearch, getTerminalSearchState);
   const searchOpen = searchState.sessionId === sessionId;
@@ -168,6 +170,21 @@ export default function TerminalPane({
       onContextMenu={(e) => {
         e.preventDefault();
         const { term } = acquire(sessionId);
+        // Windows Terminal-style smart right-click: copy when there is a
+        // selection, paste when there isn't. Shift+right-click (or the
+        // "menu" setting) always opens the full menu, so split/close stay
+        // reachable.
+        const smart = !e.shiftKey && settings?.terminal_right_click === "smart";
+        if (smart) {
+          const sel = term.getSelection();
+          if (sel) {
+            navigator.clipboard.writeText(sel);
+            term.clearSelection();
+          } else {
+            doPaste();
+          }
+          return;
+        }
         openMenu({
           x: e.clientX,
           y: e.clientY,

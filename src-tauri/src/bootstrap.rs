@@ -623,19 +623,35 @@ pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>
         }
         return;
     }
-    // Several sessions (startup restore, multi-tab): spawn concurrently. Each
-    // session's PTY setup (CreateProcess + ConPTY init) is independent, so N
-    // sessions come up in roughly one round-trip instead of N sequential ones.
-    // The `is_spawned` gate above keeps re-entry idempotent.
+    // Several sessions (startup restore, multi-tab): spawn concurrently, but
+    // paced — each spawn start is staggered so a full-window restore doesn't
+    // launch every PowerShell (profile, modules, customizations included) in
+    // the same instant. The pacing gate below is global across workers, so N
+    // sessions come up spread over ~N×STAGGER ms while still overlapping 4
+    // at a time. The `is_spawned` gate above keeps re-entry idempotent.
     const MAX_WORKERS: usize = 4;
+    const SPAWN_STAGGER_MS: u64 = 100;
     let queue = Arc::new(Mutex::new(VecDeque::from(pending)));
+    let next_start = Arc::new(Mutex::new(std::time::Instant::now()));
     let workers = queue.lock().len().min(MAX_WORKERS);
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
         let queue = queue.clone();
+        let next_start = next_start.clone();
         handles.push(std::thread::spawn(move || loop {
             let next = queue.lock().pop_front();
             let Some(session) = next else { break };
+            {
+                // Serialize on the pacing gate: wait until this spawn's slot,
+                // then reserve the next one. Holding the lock across the
+                // sleep is the point — it queues the other workers.
+                let mut slot = next_start.lock();
+                let now = std::time::Instant::now();
+                if *slot > now {
+                    std::thread::sleep(*slot - now);
+                }
+                *slot = std::time::Instant::now() + std::time::Duration::from_millis(SPAWN_STAGGER_MS);
+            }
             match session.spawn(80, 24) {
                 Ok(()) => log::info!("spawn_pending: session {} spawned ok", session.id),
                 Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", session.id, e),

@@ -79,6 +79,11 @@ pub struct AgentCache {
 const WAITING_AFTER: Duration = Duration::from_secs(10);
 /// Notify at most once per session per minute about a waiting agent.
 const NOTIFY_COOLDOWN: Duration = Duration::from_secs(60);
+/// No system notifications during the launch window. Restored sessions spawn
+/// fresh shells and their first status transitions carry no signal — this
+/// keeps a restart from ever opening with a burst of agent pings (mirrors
+/// herdr's "don't mis-report on session restore" fixes).
+const STARTUP_NOTIFY_GRACE: Duration = Duration::from_secs(20);
 
 /// Marker → agent kind table, in detection priority order. Compound CLI
 /// names (`claude-code`, `kimi-code`) get their own markers — the generic
@@ -172,14 +177,17 @@ fn token_matches(token: &str, marker: &str) -> bool {
 /// cache, emits changes per window, and sends throttled notifications for
 /// agents that turned waiting.
 pub fn spawn_poll_loop(app: AppHandle) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(3));
-        let shared = app.state::<SharedState>();
-        poll_once(&app, &shared);
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_secs(3));
+            let shared = app.state::<SharedState>();
+            poll_once(&app, &shared, started);
+        }
     });
 }
 
-fn poll_once(app: &AppHandle, shared: &SharedState) {
+fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant) {
     // Fast path: nothing live to track. Skip the full-system process
     // enumeration (the most expensive step of the poll) entirely when no
     // window has a live spawned session - e.g. the app is sitting in the
@@ -348,7 +356,9 @@ fn poll_once(app: &AppHandle, shared: &SharedState) {
             }).collect::<Vec<_>>(),
         });
         let _ = app.emit_to(&label, "agent-status-changed", payload);
-        notify_changed(app, &label, shared, &prev, &rows);
+        if started.elapsed() >= STARTUP_NOTIFY_GRACE {
+            notify_changed(app, &label, shared, &prev, &rows);
+        }
     }
 
     // Push all changed rows (across windows) to any live `muster watch` IPC
@@ -434,6 +444,39 @@ fn notify_changed(
         };
         crate::services::notify::send(app, label, *sid, body);
     }
+}
+
+/// One row of the `agent_status_snapshot` command: the live detection for a
+/// session, plus its display title so UI lists (close confirmation, command
+/// palette) don't need a second round-trip.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionAgentStatus {
+    pub session_id: Uuid,
+    pub agent: AgentKind,
+    pub state: AgentState,
+    pub title: String,
+}
+
+/// Flatten the live agent cache into rows enriched with session titles.
+/// Each session lives in exactly one window, so ids can't collide across the
+/// per-window scans. Entries whose session has since closed are skipped.
+pub fn snapshot_rows(shared: &SharedState) -> Vec<SessionAgentStatus> {
+    let cache = shared.agents.lock();
+    let mut rows = Vec::with_capacity(cache.statuses.len());
+    for (_, s) in shared.all() {
+        let g = s.lock();
+        for (sid, status) in &cache.statuses {
+            if let Some(session) = g.sessions.get(sid) {
+                rows.push(SessionAgentStatus {
+                    session_id: *sid,
+                    agent: status.agent,
+                    state: status.state,
+                    title: session.title(),
+                });
+            }
+        }
+    }
+    rows
 }
 
 #[cfg(test)]

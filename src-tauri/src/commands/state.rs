@@ -102,6 +102,15 @@ pub fn list_all_sessions(window: Window, state: State<SharedState>) -> Vec<Sessi
         .unwrap_or_default()
 }
 
+/// Current agent detection for every session (all windows), read straight
+/// from the poller's cache — an on-demand alternative to waiting for the
+/// next `agent-status-changed` push. Consumed by the command palette and the
+/// close-with-running-agents confirmation.
+#[tauri::command]
+pub fn agent_status_snapshot(state: State<SharedState>) -> Vec<crate::services::agents::SessionAgentStatus> {
+    crate::services::agents::snapshot_rows(&state)
+}
+
 #[tauri::command]
 pub fn file_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<crate::models::file::FileTabInfo> {
     state.get_label(window.label()).and_then(|s| s.lock().file_info(id))

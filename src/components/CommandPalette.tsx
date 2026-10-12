@@ -3,7 +3,7 @@ import { api } from "../lib/invoke";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { getRecentFiles, subscribeRecentFiles } from "../lib/recentFiles";
 import { useProjectCwd } from "../lib/useProjectCwd";
-import type { AppStateView, SessionInfo } from "../lib/types";
+import type { AgentState, AppStateView, SessionInfo, Uuid } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 import { IconFile, IconSearch } from "./icons";
 
@@ -12,11 +12,20 @@ interface CommandItem {
   title: string;
   icon: React.ReactNode;
   shortcut?: string;
+  /// Dimmed right-aligned note (e.g. a session's working directory).
+  hint?: string;
   action: () => void;
 }
 
 /// File-row glyph reused for both project files and recent files.
 const fileIcon = <IconFile size={12} />;
+
+/// Agent status dot colors, matching the AgentMiniBar.
+const AGENT_DOT: Record<AgentState, string> = {
+  working: "bg-emerald-400",
+  waiting: "bg-amber-400 animate-pulse",
+  done: "bg-sky-400",
+};
 
 /// Centered Ctrl+P overlay: project-file quick open (VS Code style) + app
 /// actions + open sessions, all fuzzy-filtered. Recent files surface first.
@@ -26,6 +35,7 @@ export default function CommandPalette({
   onAskNewProject,
   onClearTerminal,
   onCloseProject,
+  onCloseTab,
   onOpenSettings,
   onOpenShortcuts,
   onOpenSearch,
@@ -37,6 +47,7 @@ export default function CommandPalette({
   onAskNewProject: () => void;
   onClearTerminal: () => void;
   onCloseProject: () => void;
+  onCloseTab: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenSearch: () => void;
@@ -50,12 +61,21 @@ export default function CommandPalette({
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [agentStates, setAgentStates] = useState<Record<Uuid, AgentState>>({});
   const [projectFiles, setProjectFiles] = useState<string[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recent = useSyncExternalStore(subscribeRecentFiles, getRecentFiles);
 
   useEffect(() => {
     api.listAllSessions().then(setSessions);
+    // On-demand read of the detection cache so session rows show their agent
+    // dot immediately (the push events only fire on changes, so a fresh
+    // palette mount would otherwise render without any dots).
+    api.agentStatusSnapshot().then((rows) => {
+      const map: Record<Uuid, AgentState> = {};
+      for (const r of rows) map[r.session_id] = r.state;
+      setAgentStates(map);
+    }).catch(() => {});
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
@@ -96,7 +116,7 @@ export default function CommandPalette({
       { id: "save-file", title: t("commandPalette.saveFile"), icon: "⤓", shortcut: "Ctrl+S", action: () => api.saveSelectedFile() },
       { id: "new-project", title: t("commandPalette.newProject"), icon: "◈", shortcut: "Ctrl+N", action: onAskNewProject },
       { id: "close-project", title: t("commandPalette.closeProject"), icon: "⊗", action: onCloseProject },
-      { id: "close-tab", title: t("commandPalette.closeTab"), icon: "✕", shortcut: "Ctrl+W", action: () => api.closeSelectedTab() },
+      { id: "close-tab", title: t("commandPalette.closeTab"), icon: "✕", shortcut: "Ctrl+W", action: onCloseTab },
       { id: "close-pane", title: t("commandPalette.closePane"), icon: "⊠", shortcut: "Ctrl+Shift+W", action: onClosePane },
       { id: "toggle-left-sidebar", title: t("commandPalette.toggleLeftSidebar"), icon: "◧", shortcut: "Ctrl+B", action: () => api.toggleLeftSidebar() },
       { id: "toggle-right-sidebar", title: t("commandPalette.toggleRightSidebar"), icon: "◨", shortcut: "Ctrl+Shift+B", action: () => api.toggleRightPanel() },
@@ -119,7 +139,7 @@ export default function CommandPalette({
       { id: "open-settings", title: t("commandPalette.openSettings"), icon: "⚙", shortcut: "Ctrl+,", action: onOpenSettings },
       { id: "keyboard-shortcuts", title: t("shortcuts.title"), icon: "⌨", shortcut: "Ctrl+/", action: onOpenShortcuts },
     ],
-    [onAskNewProject, onClearTerminal, onCloseProject, onOpenSettings, onOpenShortcuts, onOpenSearch, onReopenClosed, t]
+    [onAskNewProject, onClearTerminal, onCloseProject, onCloseTab, onOpenSettings, onOpenShortcuts, onOpenSearch, onReopenClosed, t]
   );
 
   const fileItems: CommandItem[] = useMemo(() => {
@@ -143,14 +163,24 @@ export default function CommandPalette({
     [recent]
   );
 
-  const sessionItems: CommandItem[] = sessions.map((s) => ({
-    id: `session-${s.id}`,
-    title: s.title,
-    icon: ">",
-    action: () => {
-      api.selectProject(s.project_id);
-    },
-  }));
+  const sessionItems: CommandItem[] = sessions.map((s) => {
+    const st = agentStates[s.id];
+    return {
+      id: `session-${s.id}`,
+      title: s.title,
+      icon: st ? (
+        <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${AGENT_DOT[st]}`} />
+      ) : (
+        ">"
+      ),
+      hint: s.working_directory || undefined,
+      action: () => {
+        // Jump to the session itself (project + tab + pane), like a
+        // notification click does, not just to its project.
+        api.focusAgentSession(s.id);
+      },
+    };
+  });
 
   const filtered = useMemo(() => {
     const all = [...recentItems, ...fileItems, ...commands, ...sessionItems];
@@ -224,6 +254,7 @@ export default function CommandPalette({
                 {cmd.icon}
               </span>
               <span className="flex-1 truncate">{cmd.title}</span>
+              {cmd.hint && <span className="ui-fs-sm text-muster-muted/60 truncate max-w-[220px]">{cmd.hint}</span>}
               {cmd.shortcut && <span className="ui-fs-sm text-muster-muted/80">{cmd.shortcut}</span>}
             </button>
           ))}

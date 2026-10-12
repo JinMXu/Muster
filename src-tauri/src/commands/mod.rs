@@ -118,6 +118,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             state::theme_colors,
             state::session_info,
             state::list_all_sessions,
+            state::agent_status_snapshot,
             state::file_info,
             state::diff_info,
             state::focus_agent_session,

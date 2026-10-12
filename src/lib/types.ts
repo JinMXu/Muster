@@ -284,3 +284,12 @@ export interface AgentStatusRow {
 export interface AgentStatusEvent {
   sessions: AgentStatusRow[];
 }
+
+/// One row of the `agent_status_snapshot` invoke (Rust SessionAgentStatus):
+/// the live detection for a session plus its display title.
+export interface SessionAgentStatus {
+  session_id: Uuid;
+  agent: AgentKind;
+  state: AgentState;
+  title: string;
+}

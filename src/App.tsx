@@ -29,7 +29,8 @@ import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/con
 import { getFocusedSessionId } from "./lib/sessionUtils";
 import { openTerminalSearch } from "./lib/terminalSearch";
 import type { Lang } from "./lib/i18n/types";
-import type { AppStateView, DirtyFile, PaneContentKind, ProjectView, TabView, Uuid } from "./lib/types";
+import type { AgentKind, AppStateView, DirtyFile, PaneContentKind, ProjectView, TabView, Uuid } from "./lib/types";
+import { agentLabel } from "./hooks/useAgentStatus";
 
 /// Kind of a tab = its focused pane's content kind (first pane as fallback).
 function tabKind(tab: TabView): PaneContentKind | null {
@@ -38,6 +39,13 @@ function tabKind(tab: TabView): PaneContentKind | null {
     tab.columns[0]?.panes[0]?.content.kind ??
     null
   );
+}
+
+/// An agent that closing would terminate: still alive (working/waiting).
+/// `done` agents have exited already, so they don't block a close.
+interface BusyAgent {
+  agent: AgentKind;
+  title: string;
 }
 
 export default function App() {
@@ -263,21 +271,60 @@ export default function App() {
     await api.spawnSession();
   }, []);
 
-  const [closePrompt, setClosePrompt] = useState<{ files: DirtyFile[]; proceed: () => void } | null>(null);
+  const [closePrompt, setClosePrompt] = useState<{
+    files: DirtyFile[];
+    agents: BusyAgent[];
+    proceed: () => void;
+  } | null>(null);
 
-  // Close one specific tab, with the unsaved-files confirmation. The backend
-  // `close_tab` command closes the given tab atomically (no select-then-close).
+  // Session ids hosted by the given tabs, from the latest state view.
+  const sessionIdsOfTabs = useCallback((tabIds: Uuid[]): Uuid[] => {
+    const s = stateRef.current;
+    if (!s || tabIds.length === 0) return [];
+    const wanted = new Set(tabIds);
+    const ids: Uuid[] = [];
+    for (const p of s.projects) {
+      for (const t of p.tabs) {
+        if (!wanted.has(t.id)) continue;
+        for (const col of t.columns) {
+          for (const pane of col.panes) {
+            if (pane.content.kind === "session") ids.push(pane.content.id);
+          }
+        }
+      }
+    }
+    return ids;
+  }, []);
+
+  // Live (working/waiting) coding agents among `sessionIds`, read from the
+  // backend's detection cache. Closing their tab would kill them mid-run, so
+  // they join the close confirmation alongside dirty files.
+  const busyAgentsOf = useCallback(async (sessionIds: Uuid[]): Promise<BusyAgent[]> => {
+    if (sessionIds.length === 0) return [];
+    const wanted = new Set(sessionIds);
+    const rows = await api.agentStatusSnapshot().catch(() => []);
+    return rows
+      .filter((r) => wanted.has(r.session_id) && (r.state === "working" || r.state === "waiting"))
+      .map((r) => ({ agent: r.agent, title: r.title }));
+  }, []);
+
+  // Close one specific tab, with the unsaved-files / running-agent
+  // confirmation. The backend `close_tab` command closes the given tab
+  // atomically (no select-then-close).
   const closeTabById = useCallback(async (tabId: Uuid) => {
     const proceed = () => {
       api.closeTab(tabId);
     };
-    const dirty = await api.tabDirtyFiles(tabId);
-    if (dirty.length > 0) {
-      setClosePrompt({ files: dirty, proceed });
+    const [dirty, agents] = await Promise.all([
+      api.tabDirtyFiles(tabId),
+      busyAgentsOf(sessionIdsOfTabs([tabId])),
+    ]);
+    if (dirty.length > 0 || agents.length > 0) {
+      setClosePrompt({ files: dirty, agents, proceed });
       return;
     }
     proceed();
-  }, []);
+  }, [busyAgentsOf, sessionIdsOfTabs]);
 
   const closeTab = useCallback(async () => {
     const s = stateRef.current;
@@ -304,14 +351,17 @@ export default function App() {
 
   const closeTabsWithPrompt = useCallback(
     async (affected: Uuid[], proceed: () => void) => {
-      const dirty = await dirtyFilesForTabs(affected);
-      if (dirty.length > 0) {
-        setClosePrompt({ files: dirty, proceed });
+      const [dirty, agents] = await Promise.all([
+        dirtyFilesForTabs(affected),
+        busyAgentsOf(sessionIdsOfTabs(affected)),
+      ]);
+      if (dirty.length > 0 || agents.length > 0) {
+        setClosePrompt({ files: dirty, agents, proceed });
         return;
       }
       proceed();
     },
-    [dirtyFilesForTabs]
+    [busyAgentsOf, dirtyFilesForTabs, sessionIdsOfTabs]
   );
 
   const tabsOfProjectWith = useCallback(
@@ -357,13 +407,19 @@ export default function App() {
   );
 
   const closeProject = useCallback(async (id: Uuid) => {
-    const dirty = await api.projectDirtyFiles(id);
-    if (dirty.length > 0) {
-      setClosePrompt({ files: dirty, proceed: () => api.closeProject(id) });
+    const project = stateRef.current?.projects.find((p) => p.id === id);
+    const sessionIds = project
+      ? project.tabs.flatMap((t) =>
+          t.columns.flatMap((c) => c.panes.flatMap((p) => (p.content.kind === "session" ? [p.content.id] : [])))
+        )
+      : [];
+    const [dirty, agents] = await Promise.all([api.projectDirtyFiles(id), busyAgentsOf(sessionIds)]);
+    if (dirty.length > 0 || agents.length > 0) {
+      setClosePrompt({ files: dirty, agents, proceed: () => api.closeProject(id) });
       return;
     }
     api.closeProject(id);
-  }, []);
+  }, [busyAgentsOf]);
 
   const closeSelectedProject = useCallback(() => {
     const sid = stateRef.current?.selected_project_id;
@@ -375,7 +431,7 @@ export default function App() {
   // Ctrl+Shift+W: close the focused pane (undo a split). The backend closes
   // the whole tab when the pane is its only one, so this mirrors closeTab.
   // A focused file pane with unsaved changes gets the same confirmation as
-  // closing a tab.
+  // closing a tab; a session pane with a live agent gets the agent warning.
   const closeFocusedPane = useCallback(() => {
     const s = stateRef.current;
     const project = s?.projects.find((p) => p.id === s.selected_project_id);
@@ -386,13 +442,20 @@ export default function App() {
     if (pane.content.kind === "file") {
       api.tabDirtyFiles(tab.id).then((dirty) => {
         const df = dirty.find((f) => f.id === pane.content.id);
-        if (df) setClosePrompt({ files: [df], proceed: close });
+        if (df) setClosePrompt({ files: [df], agents: [], proceed: close });
+        else close();
+      });
+      return;
+    }
+    if (pane.content.kind === "session") {
+      busyAgentsOf([pane.content.id]).then((agents) => {
+        if (agents.length > 0) setClosePrompt({ files: [], agents, proceed: close });
         else close();
       });
       return;
     }
     close();
-  }, []);
+  }, [busyAgentsOf]);
 
   const saveFile = useCallback(() => api.saveSelectedFile(), []);
 
@@ -838,6 +901,7 @@ export default function App() {
           onAskNewProject={newProjectWithDialog}
           onClearTerminal={clearTerminal}
           onCloseProject={closeSelectedProject}
+          onCloseTab={closeTab}
           onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
           onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
           onOpenSearch={() => setShowSearch(true)}
@@ -877,13 +941,29 @@ export default function App() {
             className="w-[380px] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] p-4 muster-pop"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="ui-fs-base font-medium mb-1">{t("app.unsavedChangesTitle")}</div>
-            <div className="ui-fs-sm text-muster-muted mb-2">
-              {closePrompt.files.length === 1
-                ? t("app.unsavedChangesSingular")
-                : t("app.unsavedChangesPlural", { n: closePrompt.files.length })}
+            <div className="ui-fs-base font-medium mb-1">
+              {closePrompt.files.length > 0 ? t("app.unsavedChangesTitle") : t("app.confirmCloseTitle")}
             </div>
+            {closePrompt.files.length > 0 && (
+              <div className="ui-fs-sm text-muster-muted mb-2">
+                {closePrompt.files.length === 1
+                  ? t("app.unsavedChangesSingular")
+                  : t("app.unsavedChangesPlural", { n: closePrompt.files.length })}
+              </div>
+            )}
+            {closePrompt.agents.length > 0 && (
+              <div className="ui-fs-sm text-muster-muted mb-2">
+                {closePrompt.agents.length === 1
+                  ? t("app.runningAgentSingular")
+                  : t("app.runningAgentsPlural", { n: closePrompt.agents.length })}
+              </div>
+            )}
             <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
+              {closePrompt.agents.map((a, i) => (
+                <div key={`agent-${i}`} className="ui-fs-base text-muster-fg/80 truncate">
+                  • {agentLabel(a.agent)} — {a.title}
+                </div>
+              ))}
               {closePrompt.files.map((f) => (
                 <div key={f.id} className="ui-fs-base text-muster-fg/80 truncate">
                   • {f.name}
@@ -897,31 +977,46 @@ export default function App() {
               >
                 {t("common.cancel")}
               </button>
-              <button
-                className="px-2.5 py-1 rounded-md text-red-400 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-                onClick={() => {
-                  const p = closePrompt;
-                  setClosePrompt(null);
-                  p.proceed();
-                }}
-              >
-                {t("app.dontSave")}
-              </button>
-              <button
-                className="px-2.5 py-1 rounded-md bg-muster-accent text-white active:scale-[.97] transition-transform duration-muster ease-muster"
-                onClick={async () => {
-                  const p = closePrompt;
-                  setClosePrompt(null);
-                  await Promise.all(p.files.map((f) => {
-                    const text = getLatestText(f.id);
-                    if (text !== undefined) clearLatestText(f.id);
-                    return api.saveFile(f.id, text);
-                  }));
-                  p.proceed();
-                }}
-              >
-                {t("app.saveAndClose")}
-              </button>
+              {closePrompt.files.length > 0 ? (
+                <>
+                  <button
+                    className="px-2.5 py-1 rounded-md text-red-400 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+                    onClick={() => {
+                      const p = closePrompt;
+                      setClosePrompt(null);
+                      p.proceed();
+                    }}
+                  >
+                    {t("app.dontSave")}
+                  </button>
+                  <button
+                    className="px-2.5 py-1 rounded-md bg-muster-accent text-white active:scale-[.97] transition-transform duration-muster ease-muster"
+                    onClick={async () => {
+                      const p = closePrompt;
+                      setClosePrompt(null);
+                      await Promise.all(p.files.map((f) => {
+                        const text = getLatestText(f.id);
+                        if (text !== undefined) clearLatestText(f.id);
+                        return api.saveFile(f.id, text);
+                      }));
+                      p.proceed();
+                    }}
+                  >
+                    {t("app.saveAndClose")}
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="px-2.5 py-1 rounded-md text-red-400 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+                  onClick={() => {
+                    const p = closePrompt;
+                    setClosePrompt(null);
+                    p.proceed();
+                  }}
+                >
+                  {t("app.closeAnyway")}
+                </button>
+              )}
             </div>
           </div>
         </div>

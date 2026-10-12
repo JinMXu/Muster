@@ -107,6 +107,11 @@ impl PaneTab {
         let pane = self.columns[ci].panes.remove(ri);
         if self.columns[ci].panes.is_empty() {
             self.columns.remove(ci);
+        } else {
+            // The surviving siblings must fill the whole column: renormalize
+            // their weights to 1.0, or the column renders with a dead strip
+            // where the closed pane used to be.
+            Self::renormalize_panes(&mut self.columns[ci]);
         }
         // Adjust weights so columns sum to 1.0 after the drop.
         let total: f32 = self.columns.iter().map(|c| c.weight).sum();
@@ -121,6 +126,16 @@ impl PaneTab {
         }
         self.is_zoomed = false;
         Some(pane)
+    }
+
+    /// Scale one column's pane weights so they sum to 1.0.
+    fn renormalize_panes(col: &mut PaneColumn) {
+        let total: f32 = col.panes.iter().map(|p| p.weight).sum();
+        if total > 0.0 {
+            for p in &mut col.panes {
+                p.weight /= total;
+            }
+        }
     }
 
     /// Add `pane` as a new single-pane column in this tab (so dropped panes
@@ -192,9 +207,9 @@ impl PaneTab {
 
     /// Move an existing pane to an edge of another pane (drag & drop
     /// rearrange within one tab). No-op when source == target or either id
-    /// is missing. Unlike `split`, no space is taken from the target: the
-    /// moved pane keeps its weight and the target's weights are left alone
-    /// (the user can drag dividers to rebalance). A source column emptied by
+    /// is missing. No space is taken from the target on arrival: the moved
+    /// pane keeps its weight and the affected columns are renormalized so
+    /// every column still fills its full height. A source column emptied by
     /// the move is dropped; focus follows the moved pane.
     pub fn move_pane(&mut self, pane_id: Uuid, target_pane_id: Uuid, edge: PaneDropEdge) {
         if pane_id == target_pane_id {
@@ -212,6 +227,11 @@ impl PaneTab {
         let Some((tc, tr)) = locate(&self.columns, target_pane_id) else { return };
         self.is_zoomed = false;
         let pane = self.columns[sc].panes.remove(sr);
+        // The source column's survivors must still fill its height — same
+        // renormalization as closing a pane, or a dead strip is left behind.
+        if !self.columns[sc].panes.is_empty() {
+            Self::renormalize_panes(&mut self.columns[sc]);
+        }
         // Removal shifts the target's coordinates: its row when both panes
         // shared a column and the source sat above, its column when the
         // emptied source column (left of the target) is dropped below.
@@ -230,10 +250,23 @@ impl PaneTab {
             PaneDropEdge::Left | PaneDropEdge::Right => {
                 let insert_at = if edge == PaneDropEdge::Left { tc } else { tc + 1 };
                 self.columns.insert(insert_at, PaneColumn::one(pane));
+                // The new column arrives with weight 1.0; rescale every
+                // column so the tab sums to 1.0 again. Rendering already
+                // divides by the total, so proportions are unchanged — this
+                // only keeps the stored weights normalized.
+                let total: f32 = self.columns.iter().map(|c| c.weight).sum();
+                if total > 0.0 {
+                    for c in &mut self.columns {
+                        c.weight /= total;
+                    }
+                }
             }
             PaneDropEdge::Top | PaneDropEdge::Bottom => {
                 let insert_at = if edge == PaneDropEdge::Top { tr } else { tr + 1 };
                 self.columns[tc].panes.insert(insert_at, pane);
+                // The inserted pane kept its old weight, so the column's sum
+                // is now off; renormalize to keep the column fully filled.
+                Self::renormalize_panes(&mut self.columns[tc]);
             }
         }
         self.focused_pane_id = pane_id;
@@ -522,6 +555,43 @@ mod tests {
         assert_eq!(tab.focused_pane_id, new_id);
     }
 
+    // ---- detach (close pane) ------------------------------------------------
+
+    #[test]
+    fn detach_renormalizes_surviving_panes_in_column() {
+        let mut tab = single_tab();
+        let first = tab.focused_pane_id;
+        tab.split(session_pane(), PaneDropEdge::Bottom);
+        let second = tab.focused_pane_id;
+        tab.split(session_pane(), PaneDropEdge::Bottom);
+        // Three stacked panes at 1/3 each.
+        assert!((tab.columns[0].panes.iter().map(|p| p.weight).sum::<f32>() - 1.0).abs() < 1e-6);
+
+        // Close the middle pane: the two survivors must again fill the column.
+        tab.detach_pane_allowing_empty(second);
+
+        assert_eq!(tab.columns[0].panes.len(), 2);
+        let sum: f32 = tab.columns[0].panes.iter().map(|p| p.weight).sum();
+        assert!((sum - 1.0).abs() < 1e-6, "surviving pane weights must sum to 1.0, got {sum}");
+        assert_eq!(tab.columns[0].panes[0].id, first);
+    }
+
+    #[test]
+    fn detach_dropping_whole_column_keeps_other_columns_panes_normalized() {
+        let mut tab = single_tab();
+        tab.split(session_pane(), PaneDropEdge::Bottom); // column 0: two panes
+        tab.split(session_pane(), PaneDropEdge::Right); // new column 1
+
+        // Move the sole pane of column 1 out of the tab entirely (detach it):
+        // column 1 is dropped, column 0's panes must remain summing to 1.0.
+        let moved = tab.columns[1].panes[0].id;
+        tab.detach_pane_allowing_empty(moved);
+
+        assert_eq!(tab.columns.len(), 1);
+        let sum: f32 = tab.columns[0].panes.iter().map(|p| p.weight).sum();
+        assert!((sum - 1.0).abs() < 1e-6);
+    }
+
     // ---- resize_divider ----------------------------------------------------
 
     #[test]
@@ -591,6 +661,44 @@ mod tests {
     // ---- move_pane ----------------------------------------------------------
 
     #[test]
+    fn move_pane_renormalizes_source_column_and_tab() {
+        let mut tab = single_tab();
+        let a = tab.focused_pane_id;
+        tab.split(session_pane(), PaneDropEdge::Bottom); // col0: a over b
+        let b = tab.focused_pane_id;
+        tab.split(session_pane(), PaneDropEdge::Right); // col1: c
+        let c = tab.focused_pane_id;
+
+        // Drag b to the right edge of c: b leaves col0, which must still be
+        // fully filled by a, and the tab's column weights must sum to 1.
+        tab.move_pane(b, c, PaneDropEdge::Right);
+
+        assert_eq!(tab.columns.len(), 3);
+        assert_eq!(tab.columns[0].panes.len(), 1);
+        assert_eq!(tab.columns[0].panes[0].id, a);
+        assert!((tab.columns[0].panes[0].weight - 1.0).abs() < 1e-6);
+        let col_sum: f32 = tab.columns.iter().map(|col| col.weight).sum();
+        assert!((col_sum - 1.0).abs() < 1e-6, "column weights must sum to 1.0, got {col_sum}");
+    }
+
+    #[test]
+    fn move_pane_into_column_keeps_target_filled() {
+        let mut tab = single_tab();
+        tab.split(session_pane(), PaneDropEdge::Bottom); // col0: two stacked
+        tab.split(session_pane(), PaneDropEdge::Right); // col1: c
+        let c = tab.focused_pane_id;
+        let moved_id = tab.columns[0].panes[1].id;
+
+        // Drop a 0.5-weight pane into c's column: the column must end up
+        // summing to 1.0 (no overflow, no dead strip).
+        tab.move_pane(moved_id, c, PaneDropEdge::Bottom);
+
+        let sum: f32 = tab.columns[1].panes.iter().map(|p| p.weight).sum();
+        assert!((sum - 1.0).abs() < 1e-6, "target column panes must sum to 1.0, got {sum}");
+    }
+
+
+    #[test]
     fn move_pane_within_same_column_shifts_insert_index() {
         let mut tab = single_tab();
         let a = tab.focused_pane_id;
@@ -625,21 +733,22 @@ mod tests {
     }
 
     #[test]
-    fn move_pane_onto_bottom_of_other_column_keeps_target_weights() {
+    fn move_pane_onto_bottom_of_other_column_renormalizes_target() {
         let mut tab = single_tab();
         let a = tab.focused_pane_id;
         let b = session_pane();
         let b_id = b.id;
         tab.split(b, PaneDropEdge::Right);
-        let b_weight = tab.columns[1].panes[0].weight;
         // Move a below b: column 0 empties and is dropped.
         tab.move_pane(a, b_id, PaneDropEdge::Bottom);
 
         assert_eq!(tab.columns.len(), 1);
         let ids: Vec<Uuid> = tab.columns[0].panes.iter().map(|p| p.id).collect();
         assert_eq!(ids, vec![b_id, a]);
-        // Unlike split, no space is taken from the target.
-        assert_eq!(tab.columns[0].panes[0].weight, b_weight);
+        // No space is taken from the target on arrival, but the column is
+        // renormalized so it still fills its full height.
+        assert_eq!(tab.columns[0].panes[0].weight, 0.5);
+        assert_eq!(tab.columns[0].panes[1].weight, 0.5);
         assert_eq!(tab.focused_pane_id, a);
     }
 

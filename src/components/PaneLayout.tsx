@@ -24,6 +24,11 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
 
   const getWeight = (id: string, original: number) => weightOverride.get(id) ?? original;
 
+  // Render weights as a share of their actual sum, not of 1.0: snapshots
+  // saved by versions that didn't renormalize after closing a pane (or any
+  // future drift) still fill the container instead of leaving a dead strip.
+  const pct = (weight: number, total: number) => `${(weight / (total || 1)) * 100}%`;
+
   const applyResize = (vertical: boolean, ci: number, index: number, deltaFrac: number, total: number) => {
     const delta = deltaFrac * total;
     setWeightOverride((prev) => {
@@ -94,7 +99,7 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
           <div
             key={col.id}
             className="relative flex flex-col min-w-0 gap-[2px]"
-            style={{ flexBasis: `${getWeight(col.id, col.weight) * 100}%` }}
+            style={{ flexBasis: pct(getWeight(col.id, col.weight), colTotal) }}
           >
             {col.panes.map((pane, pi) => {
               paneCum += getWeight(pane.id, pane.weight);
@@ -104,7 +109,7 @@ export default function PaneLayout({ project }: { project: ProjectView }) {
                   <div
                     className="min-h-0 bg-muster-bg"
                     style={{
-                      flexBasis: `${getWeight(pane.id, pane.weight) * 100}%`,
+                      flexBasis: pct(getWeight(pane.id, pane.weight), paneTotal),
                       zIndex: pane.id === tab.focused_pane_id ? 2 : 1,
                     }}
                   >

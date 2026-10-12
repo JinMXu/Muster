@@ -752,6 +752,13 @@ function Section({
             {e.orig_path && <span className="text-muster-muted">{e.orig_path} → </span>}
             {e.path}
           </span>
+          {(e.additions > 0 || e.deletions > 0) && (
+            <span className="ui-fs-2xs font-mono flex-shrink-0">
+              {e.additions > 0 && <span className="text-green-400">+{e.additions}</span>}
+              {e.additions > 0 && e.deletions > 0 && " "}
+              {e.deletions > 0 && <span className="text-red-400">−{e.deletions}</span>}
+            </span>
+          )}
           {onDiscard && (
             <button
               onClick={() => onDiscard(e)}

@@ -154,6 +154,10 @@ export interface GitStatusEntry {
   is_untracked: boolean;
   is_conflict: boolean;
   orig_path: string | null;
+  /// Per-row line counts (staged rows: HEAD→index; changed rows:
+  /// index→workdir; untracked rows: the file's line count as additions).
+  additions: number;
+  deletions: number;
 }
 
 export interface RecentCommit {

@@ -16,6 +16,14 @@ pub struct GitStatusEntry {
     pub is_untracked: bool,
     pub is_conflict: bool,
     pub orig_path: Option<String>,
+    /// Per-file line counts for the row badge. Semantics follow the section:
+    /// staged rows count HEAD→index, changed rows count index→workdir
+    /// (untracked rows count the file's lines as additions). 0/0 for binary
+    /// files, conflicts, and anything that couldn't be counted.
+    #[serde(default)]
+    pub additions: usize,
+    #[serde(default)]
+    pub deletions: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -212,13 +220,17 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
 
     // Old paths for staged renames: StatusEntry doesn't carry them, so run a
     // HEAD→index diff with similarity detection to collect old → new pairs.
+    // The same diff yields the per-file line counts shown on staged rows.
     let mut renamed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut staged_stats: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
     if let Ok(head) = repo.head() {
         if let Ok(tree) = head.peel_to_tree() {
             if let Ok(mut diff) = repo.diff_tree_to_index(Some(&tree), None, None) {
                 let mut find_opts = git2::DiffFindOptions::new();
                 find_opts.renames(true);
                 if diff.find_similar(Some(&mut find_opts)).is_ok() {
+                    staged_stats = per_file_line_stats(&diff);
                     for delta in diff.deltas() {
                         if delta.status() == git2::Delta::Renamed {
                             if let (Some(old), Some(new)) =
@@ -253,6 +265,8 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
                 is_untracked: is_untracked || (staged == '?' && unstaged == '?'),
                 is_conflict,
                 orig_path,
+                additions: 0,
+                deletions: 0,
             };
             if is_conflict {
                 info.merge_entries.push(entry_info);
@@ -274,7 +288,29 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
             info.line_deletions = stats.deletions();
         }
     }
-    info.line_additions += untracked_line_additions(&info.changed_entries, &repo_root);
+    // Per-row badges: staged rows count HEAD→index, changed rows count
+    // index→workdir (so each row says what committing/staging it produces);
+    // untracked files count their lines as additions.
+    let unstaged_stats = repo
+        .diff_index_to_workdir(None, None)
+        .map(|diff| per_file_line_stats(&diff))
+        .unwrap_or_default();
+    let untracked_counts = untracked_line_counts(&info.changed_entries, &repo_root);
+    info.line_additions += untracked_counts.values().sum::<usize>();
+    for e in info.staged_entries.iter_mut() {
+        if let Some((add, del)) = staged_stats.get(&e.path) {
+            e.additions = *add;
+            e.deletions = *del;
+        }
+    }
+    for e in info.changed_entries.iter_mut() {
+        if e.is_untracked {
+            e.additions = untracked_counts.get(&e.path).copied().unwrap_or(0);
+        } else if let Some((add, del)) = unstaged_stats.get(&e.path) {
+            e.additions = *add;
+            e.deletions = *del;
+        }
+    }
 
     if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
         info.branches = branches
@@ -332,10 +368,35 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
     info
 }
 
+/// Per-file (insertions, deletions) for every delta in `diff`, keyed by the
+/// workdir-side path (falling back to the old path for deletions, whose
+/// new-file side carries no path). Binary deltas have no text diff — they
+/// count 0/0, mirroring `git diff --numstat` printing "-" for binaries.
+fn per_file_line_stats(diff: &git2::Diff) -> std::collections::HashMap<String, (usize, usize)> {
+    let mut map = std::collections::HashMap::new();
+    for idx in 0..diff.deltas().len() {
+        let Some(delta) = diff.get_delta(idx) else { continue };
+        let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+            continue;
+        };
+        let key = path.to_string_lossy().to_string();
+        if let Ok(Some(patch)) = git2::Patch::from_diff(diff, idx) {
+            if let Ok((_, add, del)) = patch.line_stats() {
+                map.insert(key, (add, del));
+                continue;
+            }
+        }
+        map.entry(key).or_insert((0, 0));
+    }
+    map
+}
+
 /// Git's numstat output has no representation for untracked files, so mirror
-/// its new-text-file behavior: sum the logical line counts of untracked
-/// entries (untracked directories collapse into one status entry, hence the
-/// recursion). Symlink content is its destination path — one added line.
+/// its new-text-file behavior: count the logical lines of each untracked
+/// entry as additions (untracked directories collapse into one status entry,
+/// hence the recursion). Symlink content is its destination path — one added
+/// line. Returns path → line count so the row badges and the total summary
+/// share one scan.
 ///
 /// Counting means reading every untracked file from disk, which on a big
 /// fresh repo (or one with a huge untracked directory) is unbounded I/O, so
@@ -344,17 +405,20 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
 /// `UNTRACKED_COUNT_MAX_FILE_BYTES` is skipped. Past the budget the count
 /// is silently truncated — the additions number is a stat for the UI, not
 /// exact data.
-fn untracked_line_additions(entries: &[GitStatusEntry], repo_root: &str) -> usize {
+fn untracked_line_counts(
+    entries: &[GitStatusEntry],
+    repo_root: &str,
+) -> std::collections::HashMap<String, usize> {
     let root = std::path::Path::new(repo_root);
     let mut budget = LineCountBudget::default();
     entries
         .iter()
         .filter(|e| e.is_untracked)
-        .map(|e| text_line_count(&root.join(&e.path), &mut budget))
-        .sum()
+        .map(|e| (e.path.clone(), text_line_count(&root.join(&e.path), &mut budget)))
+        .collect()
 }
 
-/// Files/bytes budget for `untracked_line_additions` (see its doc comment).
+/// Files/bytes budget for `untracked_line_counts` (see its doc comment).
 const UNTRACKED_COUNT_MAX_FILES: usize = 1000;
 const UNTRACKED_COUNT_MAX_BYTES: u64 = 32 << 20;
 const UNTRACKED_COUNT_MAX_FILE_BYTES: u64 = 1 << 20;
@@ -1251,6 +1315,36 @@ mod tests {
         let sig = signature(&repo).unwrap();
         assert_eq!(sig.name(), Some("Muster"));
         assert_eq!(sig.email(), Some("muster@local"));
+    }
+
+    #[test]
+    fn status_entries_carry_per_file_line_counts() {
+        let tmp = TempRepo::new();
+        let dir = &tmp.0;
+
+        // a.txt: modify in workdir (index→workdir counts the change);
+        // b.txt: stage a new file (HEAD→index counts the staging);
+        // c.txt: leave untracked (lines counted as additions).
+        std::fs::write(dir.join("a.txt"), "ONE\ntwo\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "x\ny\n").unwrap();
+        {
+            let repo = Repository::open(dir).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("b.txt")).unwrap();
+            index.write().unwrap();
+        }
+        std::fs::write(dir.join("c.txt"), "new\n").unwrap();
+
+        let repo = Repository::open(dir).unwrap();
+        let info = compute_status(&repo, dir.to_string_lossy().as_ref(), "en");
+
+        let a = info.changed_entries.iter().find(|e| e.path == "a.txt").expect("a.txt in changes");
+        assert_eq!((a.additions, a.deletions), (2, 1));
+        let b = info.staged_entries.iter().find(|e| e.path == "b.txt").expect("b.txt in staged");
+        assert_eq!((b.additions, b.deletions), (2, 0));
+        let c = info.changed_entries.iter().find(|e| e.path == "c.txt").expect("c.txt in changes");
+        assert_eq!(c.additions, 1);
+        assert_eq!(c.deletions, 0);
     }
 
     fn commit_file(dir: &std::path::Path, name: &str, content: &str, message: &str) -> String {

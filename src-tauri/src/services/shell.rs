@@ -162,6 +162,27 @@ function global:prompt {
     $esc = [char]27
     $cwd = $executionContext.SessionState.Path.CurrentLocation.ProviderPath
     [Console]::Write("$esc]9;9;`"$cwd`"$esc\")
+    # PSReadLine prints its "prediction 'ListView' is temporarily disabled"
+    # warning on every prompt while the pane is too small for the ListView
+    # prediction (needs width >= 50 and height >= 5), which floods narrow
+    # splits. Downgrade to the inline view while small and restore the
+    # user's own style once the pane grows back. The size check runs on
+    # every prompt but PSReadLine is only touched when the threshold is
+    # crossed. A host without a real console throws on the size read; treat
+    # that as "not small" so the prompt keeps working everywhere.
+    $small = try { $Host.UI.RawUI.WindowSize.Width -lt 50 -or $Host.UI.RawUI.WindowSize.Height -lt 5 } catch { $false }
+    if ($small -ne $global:__muster_pane_small) {
+        $global:__muster_pane_small = $small
+        if (Get-Module PSReadLine) {
+            if ($small) {
+                $global:__muster_saved_view = (Get-PSReadLineOption).PredictionViewStyle
+                if ($global:__muster_saved_view -eq 'ListView') { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue }
+            } elseif ($global:__muster_saved_view -eq 'ListView') {
+                Set-PSReadLineOption -PredictionViewStyle ListView -ErrorAction SilentlyContinue
+                $global:__muster_saved_view = $null
+            }
+        }
+    }
     if ($global:__muster_inner_prompt) { & $global:__muster_inner_prompt } else { "PS $cwd$('>' * ($nestedPromptLevel + 1)) " }
 }
 "#;

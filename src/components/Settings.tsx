@@ -601,6 +601,68 @@ function ThemePicker({
   );
 }
 
+/// Common monospace families offered in the font dropdown (bundled default
+/// first, then Windows built-ins and popular coding/CJK fonts). The input
+/// stays free-typable for anything not on the list.
+const MONO_FONT_PRESETS = [
+  "JetBrains Mono",
+  "Cascadia Code",
+  "Cascadia Mono",
+  "Consolas",
+  "Courier New",
+  "Sarasa Mono SC",
+  "Maple Mono",
+  "LXGW WenKai Mono",
+  "Fira Code",
+  "Source Code Pro",
+  "IBM Plex Mono",
+  "DejaVu Sans Mono",
+];
+
+/// Numeric setting as a hand-filled input. Typing stays in local text state
+/// (so "1" on the way to "14" isn't clamped mid-keystroke) and commits —
+/// rounded and clamped to [min, max] — on blur or Enter.
+function NumberRow({
+  title,
+  value,
+  min,
+  max,
+  suffix,
+  onChange,
+}: {
+  title: string;
+  value: number;
+  min: number;
+  max: number;
+  suffix: string;
+  onChange: (v: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const v = Math.round(Number(text));
+    if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
+    else setText(String(value));
+  };
+  return (
+    <Row title={title}>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+          className="w-[72px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors tabular-nums"
+        />
+        <span className="ui-fs-sm text-muster-muted">{suffix}</span>
+      </div>
+    </Row>
+  );
+}
+
 function SliderRow({
   title,
   value,
@@ -778,14 +840,22 @@ function FontTab({
 
       <Section title={t("settings.terminalFont")}>
         <Row title={t("settings.fontFamily")}>
+          {/* Datalist dropdown: common monospace presets on click, but a
+              family outside the list can still be typed by hand. */}
           <input
+            list="muster-mono-fonts"
             value={s.font_family}
             onChange={(e) => update({ font_family: e.target.value })}
             className="w-[220px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
             placeholder={t("settings.fontFamilyPlaceholder")}
           />
+          <datalist id="muster-mono-fonts">
+            {MONO_FONT_PRESETS.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
         </Row>
-        <SliderRow
+        <NumberRow
           title={t("settings.fontSize")}
           value={s.font_size}
           min={8}

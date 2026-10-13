@@ -266,7 +266,8 @@ export type AgentKind =
   | "kimi_code"
   | "aider"
   | "gemini"
-  | "goose";
+  | "goose"
+  | "atomcode";
 
 /// Two-state heuristic: working (output recently) or waiting (quiet).
 export type AgentState = "working" | "waiting" | "done";

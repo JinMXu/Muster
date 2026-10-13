@@ -34,6 +34,7 @@ pub enum AgentKind {
     Aider,
     Gemini,
     Goose,
+    Atomcode,
 }
 
 impl AgentKind {
@@ -48,6 +49,7 @@ impl AgentKind {
             AgentKind::Aider => "aider",
             AgentKind::Gemini => "Gemini CLI",
             AgentKind::Goose => "Goose",
+            AgentKind::Atomcode => "AtomCode",
         }
     }
 }
@@ -96,6 +98,7 @@ const MARKERS: &[(AgentKind, &[&str])] = &[
     (AgentKind::Aider, &["aider"]),
     (AgentKind::Gemini, &["gemini"]),
     (AgentKind::Goose, &["goose"]),
+    (AgentKind::Atomcode, &["atomcode", "atom-code"]),
 ];
 
 /// Which coding agent the process tree `pids` belongs to, if any. The image
@@ -494,6 +497,8 @@ mod tests {
         assert_eq!(match_name("aider"), Some(AgentKind::Aider));
         assert_eq!(match_name("gemini"), Some(AgentKind::Gemini));
         assert_eq!(match_name("goose"), Some(AgentKind::Goose));
+        assert_eq!(match_name("atomcode"), Some(AgentKind::Atomcode));
+        assert_eq!(match_name("atomcode.exe"), Some(AgentKind::Atomcode));
         assert_eq!(match_name("powershell.exe"), None);
         assert_eq!(match_name("node.exe"), None);
     }

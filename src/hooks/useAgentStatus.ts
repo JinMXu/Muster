@@ -43,5 +43,7 @@ export function agentLabel(agent: AgentKind): string {
       return "Gemini CLI";
     case "goose":
       return "Goose";
+    case "atomcode":
+      return "AtomCode";
   }
 }

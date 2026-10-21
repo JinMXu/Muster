@@ -1,6 +1,6 @@
 [package]
 name = "muster"
-version = "0.1.6"
+version = "0.1.7"
 # `tauri dev` runs bare `cargo run`; without this it refuses to choose between
 # the app binary and the bindings-export helper.
 default-run = "muster"

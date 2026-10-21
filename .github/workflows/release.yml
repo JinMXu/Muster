@@ -42,10 +42,13 @@ jobs:
           releaseName: "Muster ${{ github.ref_name }}"
           releaseBody: "Windows installers below (MSI and NSIS).
 
-- Fixed a dead strip left in a split column after closing or dragging panes away
-- Silenced PSReadLine's 'ListView prediction disabled' warning spam in narrow panes (inline prediction while narrow, restored automatically)
-- Git panel rows now show per-file +N -M line counts
-- Settings: font family is now a dropdown with common monospace presets; terminal font size is a hand-filled input
+- Performance: visibility-aware polling, event-driven git status, cancellable search and PTY output backpressure
+- Monaco and file-type icons now load on demand; settings/search/command-palette overlays are lazy-loaded
+- Typed IPC: commands, events and DTOs are generated from the Rust definitions and checked in CI
+- Settings changes now apply immediately in every open window
+- Fixed a duplicate full git-status fetch on first load
+- Security: the local IPC token file is restricted to the current user
+- CI/release workflows updated to GitHub Actions v5 and Node 22
 
 > Note: versions without the updater component must install this release manually; auto-updates work from 0.1.3 onwards."
           releaseDraft: true

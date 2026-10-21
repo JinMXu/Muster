@@ -1,8 +1,13 @@
 /// Case-insensitive subsequence fuzzy match, mirroring the app's own scorer:
 /// word-boundary hits and consecutive matches score higher.
-function fuzzyScore(candidate: string, pattern: string): number | null {
-  const chars = Array.from(candidate.toLowerCase());
-  const pat = Array.from(pattern.toLowerCase());
+///
+/// Candidates are prepared once (`prepareFuzzyText`) so scoring a large list
+/// on every keystroke doesn't re-lowercase and re-split each title.
+export function prepareFuzzyText(text: string): string[] {
+  return Array.from(text.toLowerCase());
+}
+
+export function fuzzyScore(chars: readonly string[], pat: readonly string[]): number | null {
   let score = 0;
   let index = 0;
   let lastMatch = -1;
@@ -27,14 +32,4 @@ function fuzzyScore(candidate: string, pattern: string): number | null {
     if (!found) return null;
   }
   return score;
-}
-
-export function fuzzyFilter<T>(items: T[], pattern: string, getText: (item: T) => string): T[] {
-  const trimmed = pattern.trim();
-  if (!trimmed) return items;
-  return items
-    .map((item) => ({ item, score: fuzzyScore(getText(item), trimmed) }))
-    .filter((rec): rec is { item: T; score: number } => rec.score !== null)
-    .sort((a, b) => b.score - a.score)
-    .map((r) => r.item);
 }

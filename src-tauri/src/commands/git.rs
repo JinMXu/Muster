@@ -20,8 +20,13 @@ use crate::services::i18n::effective;
 static STATUS_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
-pub async fn git_status(state: State<'_, SharedState>, repo_root: String) -> Result<crate::services::git::GitStatusInfo, String> {
+pub async fn git_status(
+    state: State<'_, SharedState>,
+    repo_root: String,
+    force: Option<bool>,
+) -> Result<crate::services::git::GitStatusInfo, String> {
     let lang = effective(&state.settings.lock().language);
+    let force = force.unwrap_or(false);
     let lock = {
         STATUS_LOCKS
             .lock()
@@ -33,14 +38,30 @@ pub async fn git_status(state: State<'_, SharedState>, repo_root: String) -> Res
         let _guard = lock.lock();
         // Double-check after acquiring the lock: while this call was queued,
         // the holder may have just recomputed, so its fresh cache entry
-        // serves this call too.
-        if let Some(info) = crate::services::git::cached_status(&repo_root) {
-            return info;
+        // serves this call too. A forced call (working-tree edit) must skip
+        // the TTL cache, which only tracks index/HEAD movement.
+        if !force {
+            if let Some(info) = crate::services::git::cached_status(&repo_root) {
+                return info;
+            }
         }
-        crate::services::git::status(&repo_root, &lang)
+        if force {
+            crate::services::git::status_forced(&repo_root, &lang)
+        } else {
+            crate::services::git::status(&repo_root, &lang)
+        }
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Cheap index/HEAD fingerprint for `repo_root`; the frontend compares it
+/// between polls and only requests a full `git_status` when it changes.
+#[tauri::command]
+pub async fn git_status_revision(repo_root: String) -> String {
+    tokio::task::spawn_blocking(move || crate::services::git::status_revision(&repo_root))
+        .await
+        .unwrap_or_default()
 }
 
 /// Anchor for the right panels: the toplevel of the repo containing `cwd`,

@@ -201,6 +201,9 @@ export interface GitStatusInfo {
   stash_count: number;
   error: string | null;
   is_worktree: boolean;
+  /// Cheap index/HEAD fingerprint; lets the store skip full-status transfers
+  /// while nothing in git state moved.
+  revision: string;
 }
 
 export interface DirEntry {

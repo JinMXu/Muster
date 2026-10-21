@@ -185,6 +185,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             fs::search_files,
             fs::list_project_files,
             git::git_status,
+            git::git_status_revision,
             git::resolve_project_root,
             git::git_stage,
             git::git_stage_all,

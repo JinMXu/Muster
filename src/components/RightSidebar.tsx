@@ -11,7 +11,8 @@ import { IconFolder, IconGitBranch, IconInfo } from "./icons";
 /// Right sidebar with Files / Git / Info tabs, anchored to the selected
 /// project's directory (its custom_directory, or the cwd of its session).
 /// All three panels stay mounted (hidden via CSS) so switching tabs doesn't
-/// lose expansion state, git info, or kill/restart polling intervals.
+/// lose expansion state; hidden panels get `active={false}` so their polls
+/// pause instead of running in the background.
 ///
 /// The top row mirrors the main Header's height and hosts only the window
 /// caption buttons, flush to the window's top-right corner (Header skips its
@@ -40,13 +41,13 @@ export default function RightSidebar({ state, width }: { state: AppStateView | n
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full" style={{ display: tab === "files" ? "block" : "none" }}>
-          <FileTree state={state} />
+          <FileTree state={state} active={tab === "files"} />
         </div>
         <div className="h-full" style={{ display: tab === "git" ? "block" : "none" }}>
-          <GitPanel state={state} />
+          <GitPanel state={state} active={tab === "git"} />
         </div>
         <div className="h-full" style={{ display: tab === "info" ? "block" : "none" }}>
-          <InfoPanel state={state} />
+          <InfoPanel state={state} active={tab === "info"} />
         </div>
       </div>
     </aside>

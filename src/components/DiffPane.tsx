@@ -1,10 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, type MonacoDiffEditor } from "@monaco-editor/react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
 import { useSettings, updateSettings } from "../lib/settingsStore";
 import type { DiffTabInfo } from "../lib/types";
 import { useT } from "../lib/i18n/context";
+
+/// Absolute path of the file a diff describes (diff paths are repo-relative).
+function diffAbsPath(diff: DiffTabInfo): string {
+  if (/^[A-Za-z]:[\\/]/.test(diff.path)) return diff.path;
+  const root = diff.repo_root.replace(/[\\/]+$/, "");
+  return `${root}\\${diff.path.replace(/\//g, "\\")}`;
+}
+
+/// Parent directory of a path, normalized for case-insensitive comparison
+/// with the backend's `fs-changed` payload.
+function parentDirLower(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
+  const dir = idx > 0 ? trimmed.slice(0, idx) : trimmed;
+  return dir.replace(/\//g, "\\").toLowerCase();
+}
 
 /// Monaco diff view. Side-by-side by default, with a toolbar toggle for the
 /// unified (inline) view and a reload button that re-reads the file from disk.
@@ -12,8 +29,8 @@ import { useT } from "../lib/i18n/context";
 ///
 /// Rendered once per visited diff by DiffHosts (see diffViewRegistry), not by
 /// the pane slot, so tab/zoom/project switches keep it mounted. `visible` is
-/// false while parked (host element detached): polling pauses and state is
-/// kept as-is until the pane is shown again.
+/// false while parked (host element detached): change listeners pause and
+/// state is kept as-is until the pane is shown again.
 export default function DiffPane({ diffId, visible }: { diffId: string; visible: boolean }) {
   const [diff, setDiff] = useState<DiffTabInfo | null>(null);
   const [monacoReady, setMonacoReady] = useState(false);
@@ -31,26 +48,62 @@ export default function DiffPane({ diffId, visible }: { diffId: string; visible:
     wordWrap: (settings?.editor_wrap_lines ? "on" : "off") as "on" | "off",
   }), [settings?.font_size, settings?.font_family, settings?.editor_wrap_lines]);
 
+  // Refresh target for the change listeners: the file's directory and
+  // whether this diff is pinned to two commits (fixed content, no reload).
+  const refreshTargetRef = useRef<{ dir: string; fixed: boolean } | null>(null);
   useEffect(() => {
-    if (!visible) return; // parked: keep the fetched diff, don't poll
+    refreshTargetRef.current = diff
+      ? { dir: parentDirLower(diffAbsPath(diff)), fixed: !!diff.old_rev && !!diff.new_rev }
+      : null;
+  }, [diff]);
+
+  useEffect(() => {
+    if (!visible) return; // parked: keep the fetched diff, do no work
     let alive = true;
-    const tick = () =>
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const load = () =>
       api.diffInfo(diffId).then((d) => {
         if (!alive) return;
         // Skip the state update (and the re-render it causes) when the
-        // content is unchanged — most polls return an identical diff.
+        // content is unchanged.
         setDiff((prev) =>
           prev && d && prev.old === d.old && prev.new === d.new &&
           prev.loading === d.loading && prev.error === d.error
             ? prev
             : d
         );
-      });
-    tick();
-    const interval = setInterval(tick, 3000);
+      }).catch(() => {});
+    // The backend only recomputes diff content on an explicit reload, so
+    // refresh on file events instead of re-transferring both sides on a timer.
+    const reload = () => {
+      timer = null;
+      api
+        .reloadDiff(diffId)
+        .then(() => { if (alive) load(); })
+        .catch(() => {});
+    };
+    const schedule = () => {
+      if (document.hidden || timer) return;
+      timer = setTimeout(reload, 700);
+    };
+    const onFsChanged = (event: { payload: { dir: string } }) => {
+      const target = refreshTargetRef.current;
+      if (!target || target.fixed) return;
+      const dir = event.payload.dir.replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+      if (dir === target.dir) schedule();
+    };
+    const onFileSaved = () => {
+      if (refreshTargetRef.current && !refreshTargetRef.current.fixed) schedule();
+    };
+    load();
+    const unlisteners: Promise<UnlistenFn>[] = [
+      listen<{ dir: string }>("fs-changed", onFsChanged),
+      listen("file-saved", onFileSaved),
+    ];
     return () => {
       alive = false;
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
+      for (const p of unlisteners) p.then((u) => u()).catch(() => {});
     };
   }, [diffId, visible]);
 

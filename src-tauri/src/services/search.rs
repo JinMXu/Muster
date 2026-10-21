@@ -8,6 +8,7 @@
 //! pathological projects can't hang the panel.
 
 use serde::Serialize;
+use std::borrow::Cow;
 use std::path::Path;
 
 /// Cap on individual file size: minified bundles and lock files larger than
@@ -162,40 +163,46 @@ fn looks_binary(bytes: &[u8]) -> bool {
 /// Find all case-appropriate occurrences of `needle` in `line`. Returns
 /// (char_start, char_len) pairs. Char-based throughout so the offsets never
 /// diverge from the char indices the frontend highlights with.
+///
+/// The line is lowered once and searched with the standard substring search
+/// instead of a per-position char comparison: this runs for every line of
+/// every file on each (debounced) keystroke, so the constant factors matter.
 fn find_occurrences(line: &str, needle: &str, case_sensitive: bool) -> Vec<(usize, usize)> {
-    let chars: Vec<char> = line.chars().collect();
-    let needle_chars: Vec<char> = needle.chars().collect();
-    if needle_chars.is_empty() || needle_chars.len() > chars.len() {
+    if needle.is_empty() {
         return Vec::new();
     }
-    // Pre-fold the needle once; per-position folding of the haystack char is
-    // cheap enough for the short lines we actually search.
-    let folded: Vec<char> = if case_sensitive {
-        needle_chars
+    let hay: Cow<'_, str>;
+    let pat: Cow<'_, str>;
+    if case_sensitive {
+        hay = Cow::Borrowed(line);
+        pat = Cow::Borrowed(needle);
     } else {
-        needle_chars.iter().map(fold).collect()
-    };
+        hay = Cow::Owned(line.to_lowercase());
+        pat = Cow::Owned(needle.to_lowercase());
+    }
+    let pat_chars = pat.chars().count();
     let mut out = Vec::new();
-    for i in 0..=(chars.len() - folded.len()) {
-        let mut ok = true;
-        for (k, n) in folded.iter().enumerate() {
-            let c = if case_sensitive { chars[i + k] } else { fold(&chars[i + k]) };
-            if c != *n {
-                ok = false;
-                break;
-            }
+    let mut from = 0usize;
+    // Char offset of `from`, advanced incrementally so each match only counts
+    // the chars between it and the previous match.
+    let mut base_chars = 0usize;
+    let mut base_byte = 0usize;
+    while from <= hay.len() {
+        let Some(rel) = hay[from..].find(pat.as_ref()) else { break };
+        let byte = from + rel;
+        let char_start = base_chars + hay[base_byte..byte].chars().count();
+        out.push((char_start, pat_chars));
+        if out.len() >= MAX_RESULTS {
+            break;
         }
-        if ok {
-            out.push((i, folded.len()));
-        }
+        base_chars = char_start;
+        base_byte = byte;
+        // Advance one char (not the whole match) so overlapping occurrences
+        // are still reported.
+        let step = hay[byte..].chars().next().map(char::len_utf8).unwrap_or(1);
+        from = byte + step;
     }
     out
-}
-
-/// Lowercase fold (single char). Handles CJK/ASCII correctly; exotic
-/// multi-char folds (e.g. `İ`) only fold their first char.
-fn fold(c: &char) -> char {
-    c.to_lowercase().next().unwrap_or(*c)
 }
 
 /// Clip `line` to `MAX_LINE_CHARS` chars around the match at `start`, so a
@@ -296,6 +303,15 @@ mod tests {
         assert_eq!(search_in_project(&root, "HELLO", false).unwrap().len(), 2);
         assert_eq!(search_in_project(&root, "hello", true).unwrap().len(), 1);
         assert_eq!(search_in_project(&root, "HELLO", true).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn reports_overlapping_matches_with_char_columns() {
+        let dir = write_project(&[("a.txt", "aaaa\n")]);
+        let root = dir.path().to_string_lossy().to_string();
+        let res = search_in_project(&root, "aa", false).unwrap();
+        let columns: Vec<u32> = res.iter().map(|m| m.column).collect();
+        assert_eq!(columns, vec![1, 2, 3]);
     }
 
     #[test]

@@ -153,7 +153,8 @@ export const api = {
     c<SearchMatch[]>("search_files", { root, query, caseSensitive }),
   listProjectFiles: (root: string) => c<string[]>("list_project_files", { root }),
 
-  gitStatus: (repoRoot: string) => c<GitStatusInfo>("git_status", { repoRoot }),
+  gitStatus: (repoRoot: string, force = false) => c<GitStatusInfo>("git_status", { repoRoot, force }),
+  gitStatusRevision: (repoRoot: string) => c<string>("git_status_revision", { repoRoot }),
   gitGuard: (repoRoot: string, paths: string[]) => c<GitGuard>("git_guard", { repoRoot, paths }),
   resolveProjectRoot: (cwd: string) => c<string>("resolve_project_root", { cwd }),
   git: {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { AppStateView, DirEntry, GitStatusEntry } from "../lib/types";
@@ -55,7 +55,7 @@ function gitBadge(e: GitStatusEntry): GitBadge {
 /// changes (backend watches every loaded directory and emits `fs-changed`).
 /// Loaded children are cached per directory path; the root listing lives
 /// under the project directory key.
-export default function FileTree({ state }: { state: AppStateView | null }) {
+export default function FileTree({ state, active }: { state: AppStateView | null; active: boolean }) {
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
   // Panels anchor to the pinned directory or the containing repo's toplevel,
   // so `cd` inside a repo does not reset the tree.
@@ -67,10 +67,19 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ parentDir: string; isDirectory: boolean } | null>(null);
   const { t } = useT();
+  // Long-lived handlers below are passed to memoized rows; refs keep the
+  // closures current without re-creating (and re-rendering) every row.
+  const tRef = useRef(t);
+  tRef.current = t;
+  const childrenRef = useRef(children);
+  childrenRef.current = children;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
 
   // Git status decorations from the shared poller (gitStatusStore); null
-  // until the first fetch resolves or when the project is not a repo.
-  const gitInfo = useGitStatus(root);
+  // until the first fetch resolves or when the project is not a repo. The
+  // hidden Files tab drops to the store's slow cadence.
+  const gitInfo = useGitStatus(root, active);
 
   // Decorations keyed by lowercased absolute path (Windows is case-
   // insensitive): files get a status letter, directories containing any
@@ -168,16 +177,16 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
 
   // Re-list every directory that is currently loaded (after mutations).
   const refresh = useCallback(() => {
-    for (const dir of Object.keys(children)) loadDir(dir);
-  }, [children, loadDir]);
+    for (const dir of Object.keys(childrenRef.current)) void loadDir(dir);
+  }, [loadDir]);
 
   const toggle = async (node: Node) => {
     if (!node.is_directory) return;
-    if (expanded[node.path]) {
+    if (expandedRef.current[node.path]) {
       setExpanded((prev) => ({ ...prev, [node.path]: false }));
     } else {
-      if (!children[node.path]) await loadDir(node.path);
-      setExpanded((prev) => ({ ...prev, [node.path]: true }));
+      if (!childrenRef.current[node.path]) await loadDir(node.path);
+      setExpanded((prev) => (prev[node.path] ? prev : { ...prev, [node.path]: true }));
     }
   };
 
@@ -191,7 +200,7 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
   // draft row is visible. Enter/blur commits, Escape cancels.
   const startCreate = async (parentDir: string, isDirectory: boolean) => {
     if (!parentDir) return;
-    if (!children[parentDir]) await loadDir(parentDir);
+    if (!childrenRef.current[parentDir]) await loadDir(parentDir);
     setExpanded((prev) => ({ ...prev, [parentDir]: true }));
     setRenaming(null);
     setDraft({ parentDir, isDirectory });
@@ -208,7 +217,7 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
       await loadDir(d.parentDir);
       if (!d.isDirectory) api.openFile(created, false);
     } catch (err) {
-      window.alert(t("fileTree.createFailed", { msg: String(err) }));
+      window.alert(tRef.current("fileTree.createFailed", { msg: String(err) }));
     }
   };
 
@@ -245,12 +254,12 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
       remapTreeState(node.path, to);
       refresh();
     } catch (err) {
-      window.alert(t("fileTree.renameFailed", { msg: String(err) }));
+      window.alert(tRef.current("fileTree.renameFailed", { msg: String(err) }));
     }
   };
 
   const onTrash = async (node: Node) => {
-    if (!window.confirm(t("fileTree.trashConfirm", { name: node.name }))) return;
+    if (!window.confirm(tRef.current("fileTree.trashConfirm", { name: node.name }))) return;
     try {
       await api.trashFile(node.path);
       // Drop any cached state for the removed subtree.
@@ -266,13 +275,16 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
       });
       refresh();
     } catch (err) {
-      window.alert(t("fileTree.trashFailed", { msg: String(err) }));
+      window.alert(tRef.current("fileTree.trashFailed", { msg: String(err) }));
     }
   };
 
   // Focused terminal session (selected tab -> focused pane), used by the
-  // "cd Here" menu item. Omitted when no terminal is focused.
+  // "cd Here" menu item. Omitted when no terminal is focused. Kept in a ref
+  // so memoized rows' context-menu closures see the current session.
   const focusedSessionId = getFocusedSessionId(state);
+  const focusedSessionIdRef = useRef(focusedSessionId);
+  focusedSessionIdRef.current = focusedSessionId;
 
   // Focused file tab (selected tab -> focused pane), used to keep the
   // tree's selection in sync with the file open in the focused pane.
@@ -331,39 +343,44 @@ export default function FileTree({ state }: { state: AppStateView | null }) {
       ? node.path
       : node.path.slice(0, node.path.length - node.name.length).replace(/[\\/]+$/, "");
     const items: MenuEntry[] = [];
+    const tk = tRef.current;
     if (!node.is_directory) {
-      items.push({ label: t("fileTree.open"), action: () => onOpenFile(node.path) });
-      items.push({ label: t("fileTree.openToSide"), action: () => api.openFile(node.path, true) });
+      items.push({ label: tk("fileTree.open"), action: () => onOpenFile(node.path) });
+      items.push({ label: tk("fileTree.openToSide"), action: () => api.openFile(node.path, true) });
     }
-    items.push({ label: t("fileTree.openInDefaultApp"), action: () => openPath(node.path) });
-    items.push({ label: t("common.revealInExplorer"), action: () => revealItemInDir(node.path) });
-    items.push({ label: t("common.copyPath"), action: () => navigator.clipboard.writeText(node.path) });
-    if (focusedSessionId) {
-      const sessionId = focusedSessionId;
-      items.push({ label: t("fileTree.cdHere"), action: () => api.sendText(sessionId, `cd ${shellQuotePath(targetDir)}\r`) });
+    items.push({ label: tk("fileTree.openInDefaultApp"), action: () => openPath(node.path) });
+    items.push({ label: tk("common.revealInExplorer"), action: () => revealItemInDir(node.path) });
+    items.push({ label: tk("common.copyPath"), action: () => navigator.clipboard.writeText(node.path) });
+    const sessionId = focusedSessionIdRef.current;
+    if (sessionId) {
+      items.push({ label: tk("fileTree.cdHere"), action: () => api.sendText(sessionId, `cd ${shellQuotePath(targetDir)}\r`) });
     }
     items.push("sep");
-    items.push({ label: t("fileTree.newFile"), action: () => startCreate(targetDir, false) });
-    items.push({ label: t("fileTree.newFolder"), action: () => startCreate(targetDir, true) });
-    items.push({ label: t("common.rename"), action: () => setRenaming(node.path) });
+    items.push({ label: tk("fileTree.newFile"), action: () => startCreate(targetDir, false) });
+    items.push({ label: tk("fileTree.newFolder"), action: () => startCreate(targetDir, true) });
+    items.push({ label: tk("common.rename"), action: () => setRenaming(node.path) });
     items.push("sep");
-    items.push({ label: t("fileTree.moveToTrash"), danger: true, action: () => onTrash(node) });
+    items.push({ label: tk("fileTree.moveToTrash"), danger: true, action: () => onTrash(node) });
     openMenu({ x, y, items });
   };
 
   // Flatten the visible tree depth-first; a draft row sits at the top of
-  // its parent directory's child list.
-  const flattened: Node[] = [];
-  const walk = (dir: string, depth: number) => {
-    if (draft && draft.parentDir === dir) {
-      flattened.push({ name: "", path: `${dir}\\__draft__`, is_directory: draft.isDirectory, depth, draft: true });
-    }
-    for (const e of children[dir] ?? []) {
-      flattened.push({ ...e, depth });
-      if (e.is_directory && expanded[e.path]) walk(e.path, depth + 1);
-    }
-  };
-  if (cwd) walk(cwd, 0);
+  // its parent directory's child list. Memoized: this is O(visible rows) on
+  // every render (state updates from tab switches, git polls, ...).
+  const flattened = useMemo(() => {
+    const out: Node[] = [];
+    const walk = (dir: string, depth: number) => {
+      if (draft && draft.parentDir === dir) {
+        out.push({ name: "", path: `${dir}\\__draft__`, is_directory: draft.isDirectory, depth, draft: true });
+      }
+      for (const e of children[dir] ?? []) {
+        out.push({ ...e, depth });
+        if (e.is_directory && expanded[e.path]) walk(e.path, depth + 1);
+      }
+    };
+    if (cwd) walk(cwd, 0);
+    return out;
+  }, [children, expanded, draft, cwd]);
 
   return (
     <div className="h-full overflow-y-auto px-2 py-2">
@@ -481,23 +498,7 @@ function DraftRow({
   );
 }
 
-function Row({
-  node,
-  isExpanded,
-  isSelected,
-  isRenaming,
-  badge,
-  dirty,
-  onToggle,
-  onOpen,
-  onStartRename,
-  onRename,
-  onCancelRename,
-  onTrash,
-  onNewFile,
-  onNewFolder,
-  onContextMenu,
-}: {
+interface RowProps {
   node: Node;
   isExpanded: boolean;
   isSelected: boolean;
@@ -515,7 +516,44 @@ function Row({
   onNewFile: () => void;
   onNewFolder: () => void;
   onContextMenu: (x: number, y: number) => void;
-}) {
+}
+
+/// Rows are memoized: the tree can hold thousands of nodes and the parent
+/// re-renders on every app-state / git-status update. Callbacks are excluded
+/// from the comparison on purpose — they are re-created per render but read
+/// current state through refs (see `childrenRef`/`expandedRef`/`tRef` above).
+function rowPropsEqual(a: RowProps, b: RowProps): boolean {
+  return (
+    a.node.path === b.node.path &&
+    a.node.name === b.node.name &&
+    a.node.depth === b.node.depth &&
+    a.node.is_directory === b.node.is_directory &&
+    a.isExpanded === b.isExpanded &&
+    a.isSelected === b.isSelected &&
+    a.isRenaming === b.isRenaming &&
+    a.badge?.letter === b.badge?.letter &&
+    a.badge?.className === b.badge?.className &&
+    a.dirty === b.dirty
+  );
+}
+
+const Row = memo(function Row({
+  node,
+  isExpanded,
+  isSelected,
+  isRenaming,
+  badge,
+  dirty,
+  onToggle,
+  onOpen,
+  onStartRename,
+  onRename,
+  onCancelRename,
+  onTrash,
+  onNewFile,
+  onNewFolder,
+  onContextMenu,
+}: RowProps) {
   const { t } = useT();
   return (
     <div
@@ -598,7 +636,7 @@ function Row({
       )}
     </div>
   );
-}
+}, rowPropsEqual);
 
 function RowButton({
   title,

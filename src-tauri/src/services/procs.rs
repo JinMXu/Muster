@@ -8,12 +8,20 @@
 //! and only session-owned ports are shown.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, System, UpdateKind};
 use uuid::Uuid;
+
+/// Full process snapshots are expensive (CPU%, memory, exe and command line
+/// for every process). Concurrent callers in the same tick — the Info panel's
+/// PROCESSES poll and a kill/validation command — reuse the snapshot taken
+/// moments ago instead of enumerating the whole system again.
+const SNAPSHOT_REUSE: Duration = Duration::from_millis(1000);
 
 /// One row of the PROCESSES section.
 #[derive(Serialize)]
@@ -55,6 +63,10 @@ pub fn quiet_command(program: &str) -> std::process::Command {
 /// above its minimum CPU update interval).
 static SYSTEM: Lazy<Mutex<System>> = Lazy::new(|| Mutex::new(System::new()));
 
+/// Last full snapshot, reused by callers within `SNAPSHOT_REUSE`.
+static SNAPSHOT_CACHE: Lazy<Mutex<Option<(Instant, Arc<ProcSnapshot>)>>> =
+    Lazy::new(|| Mutex::new(None));
+
 /// One-shot refresh of the shared sysinfo cache. Call once per poll cycle
 /// (or per command invocation) and then use the `_with_sys` variants; CPU%
 /// is measured against the previous call of this, so the best cadence is
@@ -78,6 +90,50 @@ pub struct ProcSnapshot {
     parents: HashMap<u32, u32>,
     /// pid -> (image name, joined command line).
     cmdline: HashMap<u32, (String, String)>,
+    /// parent -> children index, built lazily on the first descendant walk so
+    /// a poll that only reads Job Objects never pays for it. Sharing one
+    /// index across all sessions keeps the fallback at O(processes) per poll
+    /// instead of O(sessions × processes).
+    children: OnceCell<HashMap<u32, Vec<u32>>>,
+}
+
+impl ProcSnapshot {
+    fn children(&self) -> &HashMap<u32, Vec<u32>> {
+        self.children.get_or_init(|| {
+            let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+            for (&pid, &parent) in &self.parents {
+                children.entry(parent).or_default().push(pid);
+            }
+            for kids in children.values_mut() {
+                kids.sort_unstable();
+            }
+            children
+        })
+    }
+}
+
+fn build_snapshot(sys: &System) -> ProcSnapshot {
+    let mut snap = ProcSnapshot {
+        alive: HashSet::with_capacity(sys.processes().len()),
+        parents: HashMap::with_capacity(sys.processes().len()),
+        cmdline: HashMap::with_capacity(sys.processes().len()),
+        children: OnceCell::new(),
+    };
+    for (pid, proc_) in sys.processes() {
+        let pid = pid.as_u32();
+        snap.alive.insert(pid);
+        if let Some(parent) = proc_.parent() {
+            snap.parents.insert(pid, parent.as_u32());
+        }
+        snap.cmdline.insert(pid, (proc_.name().to_string(), proc_.cmd().join(" ")));
+    }
+    snap
+}
+
+fn cached_snapshot() -> Option<Arc<ProcSnapshot>> {
+    let cache = SNAPSHOT_CACHE.lock();
+    let (at, snap) = cache.as_ref()?;
+    (at.elapsed() < SNAPSHOT_REUSE).then(|| snap.clone())
 }
 
 /// Refresh the shared `System` cache and copy out a `ProcSnapshot`, dropping
@@ -85,50 +141,37 @@ pub struct ProcSnapshot {
 /// pass `&snapshot` to the `_with_sys` variants so they don't re-lock
 /// (parking_lot's Mutex is NOT reentrant, so locking `SYSTEM` again inside a
 /// callee while the caller holds it would deadlock).
-pub fn refresh_and_snapshot() -> ProcSnapshot {
-    let mut sys = SYSTEM.lock();
-    sys.refresh_processes_specifics(ProcessRefreshKind::everything());
-    let mut snap = ProcSnapshot {
-        alive: HashSet::with_capacity(sys.processes().len()),
-        parents: HashMap::with_capacity(sys.processes().len()),
-        cmdline: HashMap::with_capacity(sys.processes().len()),
-    };
-    for (pid, proc_) in sys.processes() {
-        let pid = pid.as_u32();
-        snap.alive.insert(pid);
-        if let Some(parent) = proc_.parent() {
-            snap.parents.insert(pid, parent.as_u32());
-        }
-        snap.cmdline.insert(pid, (proc_.name().to_string(), proc_.cmd().join(" ")));
+///
+/// Callers within `SNAPSHOT_REUSE` share the previous snapshot instead of
+/// enumerating every process again.
+pub fn refresh_and_snapshot() -> Arc<ProcSnapshot> {
+    if let Some(snap) = cached_snapshot() {
+        return snap;
     }
+    let snap = {
+        let mut sys = SYSTEM.lock();
+        sys.refresh_processes_specifics(ProcessRefreshKind::everything());
+        Arc::new(build_snapshot(&sys))
+    };
+    *SNAPSHOT_CACHE.lock() = Some((Instant::now(), snap.clone()));
     snap
 }
 
 /// Same as `refresh_and_snapshot` but refreshes only the fields the agent
 /// poller reads: pids, parent links, image names and command lines. CPU%,
-/// memory and exe paths are skipped (the PROCESSES panel requests those
-/// itself via `refresh_global`/`session_pids`), which makes this markedly
-/// cheaper on machines with many processes. The process list itself is
-/// always enumerated by sysinfo, so pids/parents stay accurate.
-pub fn refresh_and_snapshot_light() -> ProcSnapshot {
+/// memory and exe paths are skipped, which makes this markedly cheaper on
+/// machines with many processes. A recent full snapshot (from the Info
+/// panel's poll) is reused when available; light snapshots are not cached,
+/// since PROCESSES needs the fuller refresh.
+pub fn refresh_and_snapshot_light() -> Arc<ProcSnapshot> {
+    if let Some(snap) = cached_snapshot() {
+        return snap;
+    }
     let mut sys = SYSTEM.lock();
     sys.refresh_processes_specifics(
         ProcessRefreshKind::new().with_cmd(UpdateKind::OnlyIfNotSet),
     );
-    let mut snap = ProcSnapshot {
-        alive: HashSet::with_capacity(sys.processes().len()),
-        parents: HashMap::with_capacity(sys.processes().len()),
-        cmdline: HashMap::with_capacity(sys.processes().len()),
-    };
-    for (pid, proc_) in sys.processes() {
-        let pid = pid.as_u32();
-        snap.alive.insert(pid);
-        if let Some(parent) = proc_.parent() {
-            snap.parents.insert(pid, parent.as_u32());
-        }
-        snap.cmdline.insert(pid, (proc_.name().to_string(), proc_.cmd().join(" ")));
-    }
-    snap
+    Arc::new(build_snapshot(&sys))
 }
 
 /// The pids belonging to a session: every process in its Windows Job Object
@@ -223,11 +266,7 @@ pub fn process_cmdline_with_sys(sys: &ProcSnapshot, pid: u32) -> Option<(String,
 /// shell, so they silently drop out of the list. Used only as the fallback
 /// when a session has no Job Object.
 fn descendant_pids(sys: &ProcSnapshot, shell_pid: u32) -> Vec<u32> {
-    // parent -> children index for the BFS.
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for (&pid, &parent) in &sys.parents {
-        children.entry(parent).or_default().push(pid);
-    }
+    let children = sys.children();
 
     // BFS from the shell, remembering each pid's depth.
     let mut order: Vec<(u32, u32)> = Vec::new(); // (pid, depth)
@@ -237,9 +276,8 @@ fn descendant_pids(sys: &ProcSnapshot, shell_pid: u32) -> Vec<u32> {
         queue.push_back((shell_pid, 0));
     }
     while let Some((pid, depth)) = queue.pop_front() {
-        let mut kids = children.get(&pid).cloned().unwrap_or_default();
-        kids.sort_unstable();
-        for kid in kids {
+        let Some(kids) = children.get(&pid) else { continue };
+        for &kid in kids {
             order.push((kid, depth + 1));
             queue.push_back((kid, depth + 1));
         }
@@ -422,33 +460,24 @@ pub fn kill(pid: u32, lang: &str) -> Result<(), String> {
     }
 }
 
-/// Listening TCP ports via `netstat -ano -p tcp` (available on every Windows
-/// version), owned by one of `pids` (the session's processes). When
-/// `project_root` is Some (the "project ports" setting), listeners owned by
-/// any process belonging to that directory — its working directory is the
-/// root or below, or its command line references the root — are included too,
-/// so a dev server started outside the session still shows up. The directory
-/// fallback is skipped for overly broad roots (home directory, drive roots):
-/// there it matches unrelated system processes, which is noise rather than
-/// signal.
-///
-/// Parse failures are tolerated: rows that don't parse are skipped and
-/// whatever parsed is returned.
+/// Listening IPv4 TCP ports via the IP Helper API (no child process), owned
+/// by one of `pids` (the session's processes). When `project_root` is Some
+/// (the "project ports" setting), listeners owned by any process belonging to
+/// that directory — its working directory is the root or below, or its
+/// command line references the root — are included too, so a dev server
+/// started outside the session still shows up. The directory fallback is
+/// skipped for overly broad roots (home directory, drive roots): there it
+/// matches unrelated system processes, which is noise rather than signal.
 pub fn listen_ports(pids: &[u32], project_root: Option<&str>) -> Vec<ListenPort> {
     let wanted: HashSet<u32> = pids.iter().copied().collect();
     let root = project_root
         .map(normalize_path)
         .filter(|r| !r.is_empty() && !too_broad_root(r));
-    let mut cmd = quiet_command("netstat");
-    cmd.args(["-ano", "-p", "tcp"]);
-    let Ok(output) = cmd.output() else { return Vec::new() };
-    let stdout = String::from_utf8_lossy(&output.stdout);
 
     let mut seen: HashSet<u16> = HashSet::new();
     let mut rows: Vec<(u16, u32)> = Vec::new();
     let mut cwd_cache: HashMap<u32, Option<String>> = HashMap::new();
-    for line in stdout.lines() {
-        let Some((port, pid)) = parse_netstat_line(line) else { continue };
+    for (port, pid) in listening_tcp_ports() {
         if !wanted.contains(&pid) {
             let Some(root) = &root else { continue };
             if !belongs_to_project(pid, root, &mut cwd_cache) {
@@ -638,22 +667,68 @@ fn process_names(pids: &[u32]) -> HashMap<u32, String> {
         .collect()
 }
 
-/// Parse one `netstat -ano -p tcp` row into (local port, pid), or None for
-/// headers, non-LISTENING rows, and malformed lines. Row shape:
-/// `  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       12345`
-fn parse_netstat_line(line: &str) -> Option<(u16, u32)> {
-    let cols: Vec<&str> = line.split_whitespace().collect();
-    if cols.len() < 5 || cols[0] != "TCP" || cols[3] != "LISTENING" {
-        return None;
+/// (local port, owning pid) for every LISTENING IPv4 TCP endpoint, read from
+/// the IP Helper API. This replaces spawning `netstat` on every poll: no
+/// console process creation, no full table text to parse.
+#[cfg(windows)]
+fn listening_tcp_ports() -> Vec<(u16, u32)> {
+    use windows::Win32::Foundation::{BOOL, ERROR_SUCCESS};
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+    };
+    use windows::Win32::Networking::WinSock::AF_INET;
+
+    let mut size: u32 = 0;
+    // First call sizes the buffer; ERROR_INSUFFICIENT_BUFFER is expected.
+    unsafe {
+        GetExtendedTcpTable(
+            None,
+            &mut size,
+            BOOL(0),
+            AF_INET.0 as u32,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        );
     }
-    let port: u16 = cols[1].rsplit(':').next()?.parse().ok()?;
-    let pid: u32 = cols[4].parse().ok()?;
-    Some((port, pid))
+    if size == 0 {
+        return Vec::new();
+    }
+    // u32 words keep the table 4-byte aligned for the repr(C) struct.
+    let mut buf = vec![0u32; (size as usize).div_ceil(4)];
+    let result = unsafe {
+        GetExtendedTcpTable(
+            Some(buf.as_mut_ptr() as *mut _),
+            &mut size,
+            BOOL(0),
+            AF_INET.0 as u32,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        )
+    };
+    if result != ERROR_SUCCESS.0 {
+        return Vec::new();
+    }
+    unsafe {
+        let table = &*(buf.as_ptr() as *const MIB_TCPTABLE_OWNER_PID);
+        let rows = std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize);
+        rows.iter()
+            .map(|row| {
+                // The port is stored in network byte order in the low word.
+                let port = u16::from_be((row.dwLocalPort & 0xffff) as u16);
+                (port, row.dwOwningPid)
+            })
+            .collect()
+    }
+}
+
+#[cfg(not(windows))]
+fn listening_tcp_ports() -> Vec<(u16, u32)> {
+    Vec::new()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{contains_path, dir_within, normalize_path, parse_netstat_line};
+    use super::{contains_path, dir_within, normalize_path};
 
     /// Roundtrip of the Job Object tracking: spawn a sleeper, track it, see
     /// it in session_pids, then untrack and verify KILL_ON_JOB_CLOSE reaped
@@ -697,35 +772,6 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         assert!(!alive, "process survived job close");
-    }
-
-    #[test]
-    fn parses_ipv4_listening_row() {
-        let line = "  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       12345";
-        assert_eq!(parse_netstat_line(line), Some((3000, 12345)));
-    }
-
-    #[test]
-    fn parses_ipv6_listening_row() {
-        let line = "  TCP    [::1]:8080               [::]:0                 LISTENING       4321";
-        assert_eq!(parse_netstat_line(line), Some((8080, 4321)));
-    }
-
-    #[test]
-    fn parses_wildcard_and_udp_is_skipped() {
-        let tcp = "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       980";
-        assert_eq!(parse_netstat_line(tcp), Some((135, 980)));
-        let udp = "  UDP    0.0.0.0:5353           *:*                                    980";
-        assert_eq!(parse_netstat_line(udp), None);
-    }
-
-    #[test]
-    fn skips_non_listening_and_garbage() {
-        let established = "  TCP    10.0.0.1:5000          10.0.0.2:80            ESTABLISHED     99";
-        assert_eq!(parse_netstat_line(established), None);
-        assert_eq!(parse_netstat_line("  Proto  Local Address          Foreign Address        State           PID"), None);
-        assert_eq!(parse_netstat_line(""), None);
-        assert_eq!(parse_netstat_line("  TCP    127.0.0.1:abc          0.0.0.0:0              LISTENING       x"), None);
     }
 
     #[test]
@@ -804,11 +850,11 @@ mod tests {
     }
 
     /// End-to-end: a listener owned by this test process shows up in
-    /// listen_ports when its pid is passed. Runs netstat — verify manually
-    /// with `cargo test --lib -- --ignored`.
+    /// listen_ports when its pid is passed. Enumerates real TCP listeners —
+    /// verify manually with `cargo test --lib -- --ignored`.
     #[cfg(windows)]
     #[test]
-    #[ignore = "runs netstat; run manually: cargo test --lib -- --ignored"]
+    #[ignore = "reads the system TCP table; run manually: cargo test --lib -- --ignored"]
     fn finds_own_listener() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "../lib/invoke";
-import { fuzzyFilter } from "../lib/fuzzy";
+import { fuzzyScore, prepareFuzzyText } from "../lib/fuzzy";
 import { getRecentFiles, subscribeRecentFiles } from "../lib/recentFiles";
 import { useProjectCwd } from "../lib/useProjectCwd";
 import type { AgentState, AppStateView, SessionInfo, Uuid } from "../lib/types";
@@ -163,30 +163,50 @@ export default function CommandPalette({
     [recent]
   );
 
-  const sessionItems: CommandItem[] = sessions.map((s) => {
-    const st = agentStates[s.id];
-    return {
-      id: `session-${s.id}`,
-      title: s.title,
-      icon: st ? (
-        <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${AGENT_DOT[st]}`} />
-      ) : (
-        ">"
-      ),
-      hint: s.working_directory || undefined,
-      action: () => {
-        // Jump to the session itself (project + tab + pane), like a
-        // notification click does, not just to its project.
-        api.focusAgentSession(s.id);
-      },
-    };
-  });
+  const sessionItems: CommandItem[] = useMemo(
+    () =>
+      sessions.map((s) => {
+        const st = agentStates[s.id];
+        return {
+          id: `session-${s.id}`,
+          title: s.title,
+          icon: st ? (
+            <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${AGENT_DOT[st]}`} />
+          ) : (
+            ">"
+          ),
+          hint: s.working_directory || undefined,
+          action: () => {
+            // Jump to the session itself (project + tab + pane), like a
+            // notification click does, not just to its project.
+            api.focusAgentSession(s.id);
+          },
+        };
+      }),
+    [sessions, agentStates]
+  );
+
+  // Lowercased/char-split titles are prepared once per item list; each
+  // keystroke then only walks them, instead of re-allocating per candidate.
+  const pool = useMemo(
+    () =>
+      [...recentItems, ...fileItems, ...commands, ...sessionItems].map((item) => ({
+        item,
+        chars: prepareFuzzyText(item.title),
+      })),
+    [recentItems, fileItems, commands, sessionItems]
+  );
 
   const filtered = useMemo(() => {
-    const all = [...recentItems, ...fileItems, ...commands, ...sessionItems];
-    const matched = fuzzyFilter(all, query, (c) => c.title);
-    return matched.slice(0, 60);
-  }, [recentItems, fileItems, commands, sessionItems, query]);
+    const pat = prepareFuzzyText(query.trim());
+    if (pat.length === 0) return pool.slice(0, 60).map((p) => p.item);
+    return pool
+      .map(({ item, chars }) => ({ item, score: fuzzyScore(chars, pat) }))
+      .filter((rec): rec is { item: CommandItem; score: number } => rec.score !== null)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 60)
+      .map((r) => r.item);
+  }, [pool, query]);
 
   useEffect(() => setSelection(0), [query]);
 

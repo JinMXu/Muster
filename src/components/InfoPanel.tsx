@@ -15,7 +15,7 @@ import { useT } from "../lib/i18n/context";
 /// (PORTS — the session's own processes; with the "project ports" setting
 /// on, also any process working in the project directory, so externally
 /// started dev servers still show).
-export default function InfoPanel({ state }: { state: AppStateView | null }) {
+export default function InfoPanel({ state, active }: { state: AppStateView | null; active: boolean }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
   const projSession = sessions.find((s) => s.project_id === project?.id) ?? null;
@@ -24,7 +24,8 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const projectPorts = settings?.project_ports ?? false;
   // Git branch/remote come from the shared store (one poller per repo root,
   // fanned out to GitPanel/FileTree/this panel) instead of a private interval.
-  const git = useGitStatus(root);
+  // `active` keeps this hidden panel from polling at full speed.
+  const git = useGitStatus(root, active);
   const [procs, setProcs] = useState<ProcessInfo[]>([]);
   const [ports, setPorts] = useState<ListenPort[]>([]);
   // Bumped by the header refresh button to re-run every poll below at once.
@@ -40,16 +41,23 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   const { t } = useT();
   const shellPid = projSession && !projSession.has_exited ? projSession.pid : null;
 
+  // Only poll while the Info tab is actually visible: the panel stays mounted
+  // (hidden via CSS) so switching tabs keeps its state, but a hidden panel
+  // must not keep enumerating sessions/processes in the background.
   useEffect(() => {
+    if (!active) return;
     let alive = true;
-    const tick = () => api.listAllSessions().then((s) => alive && setSessions(s));
+    const tick = () => {
+      if (document.hidden) return;
+      api.listAllSessions().then((s) => alive && setSessions(s));
+    };
     tick();
     const i = setInterval(tick, 5000);
     return () => {
       alive = false;
       clearInterval(i);
     };
-  }, [nonce]);
+  }, [nonce, active]);
 
   // PROCESSES + PORTS: poll the session's tracked processes (Job Object
   // members, falling back to the shell's descendant tree), then the listening
@@ -59,6 +67,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
   // either changes while a request is in flight the effect is torn down
   // (alive=false) and the late result dropped.
   useEffect(() => {
+    if (!active) return;
     if (shellPid == null || projSession == null) {
       setProcs([]);
       setPorts([]);
@@ -67,6 +76,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
     const sessionId = projSession.id;
     let alive = true;
     const tick = async () => {
+      if (document.hidden) return;
       const list = await api.sessionProcesses(sessionId, shellPid).catch(() => [] as ProcessInfo[]);
       if (!alive) return;
       setProcs(list);
@@ -81,7 +91,7 @@ export default function InfoPanel({ state }: { state: AppStateView | null }) {
       alive = false;
       clearInterval(i);
     };
-  }, [shellPid, projSession?.id, root, projectPorts, nonce]);
+  }, [active, shellPid, projSession?.id, root, projectPorts, nonce]);
 
   /// Kill and re-poll after a beat so the OS has time to reap the process.
   const kill = (pid: number) => {

@@ -101,7 +101,9 @@ pub struct DirEntry {
 /// yields an empty list (the tree shows it as empty).
 pub fn list_directory(path: &str) -> Vec<DirEntry> {
     let Ok(entries) = std::fs::read_dir(path) else { return Vec::new() };
-    let mut items: Vec<DirEntry> = entries
+    // Sort key is precomputed once per entry: lowercasing inside the
+    // comparator allocates twice per comparison (O(n log n) allocations).
+    let mut items: Vec<(DirEntry, String)> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
@@ -109,17 +111,21 @@ pub fn list_directory(path: &str) -> Vec<DirEntry> {
                 return None;
             }
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            Some(DirEntry { name: name.clone(), path: e.path().to_string_lossy().to_string(), is_directory: is_dir })
+            let sort_key = name.to_lowercase();
+            Some((
+                DirEntry { name, path: e.path().to_string_lossy().to_string(), is_directory: is_dir },
+                sort_key,
+            ))
         })
         .collect();
-    items.sort_by(|a, b| {
+    items.sort_by(|(a, ak), (b, bk)| {
         if a.is_directory != b.is_directory {
             b.is_directory.cmp(&a.is_directory)
         } else {
-            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+            ak.cmp(bk)
         }
     });
-    items
+    items.into_iter().map(|(entry, _)| entry).collect()
 }
 
 /// Create an empty file or directory `parent_dir/name`, returning the full

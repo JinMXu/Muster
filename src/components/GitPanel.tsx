@@ -37,9 +37,9 @@ type SectionKind = "merge" | "staged" | "changes";
 /// Status comes from the shared poller in gitStatusStore (3s). Mutations
 /// report through the ops banner; discard goes through a guarded inline
 /// confirmation.
-export default function GitPanel({ state }: { state: AppStateView | null }) {
+export default function GitPanel({ state, active }: { state: AppStateView | null; active: boolean }) {
   const { root: cwd } = useProjectCwd(state);
-  const info = useGitStatus(cwd);
+  const info = useGitStatus(cwd, active);
   const [message, setMessage] = useState("");
   const [ops, setOps] = useState<GitOp[]>([]);
   const [discardTarget, setDiscardTarget] = useState<DiscardTarget | null>(null);
@@ -88,24 +88,28 @@ export default function GitPanel({ state }: { state: AppStateView | null }) {
 
   // Refresh the "changes since checkpoint" list while a checkpoint is set
   // (polls so new commits/edits by an agent show up without a manual reload).
+  // Paused while the Git tab is hidden or the window is minimized.
   useEffect(() => {
+    if (!active) return;
     if (!checkpoint || checkpoint.root !== info?.repo_root) {
       setCpFiles(null);
       return;
     }
     let alive = true;
-    const tick = () =>
+    const tick = () => {
+      if (document.hidden) return;
       api.git.checkpointChanges(checkpoint.root, checkpoint.oid).then(
         (files) => alive && setCpFiles(files),
         () => alive && setCpFiles([])
       );
+    };
     tick();
     const interval = setInterval(tick, 5000);
     return () => {
       alive = false;
       clearInterval(interval);
     };
-  }, [checkpoint, info?.repo_root]);
+  }, [active, checkpoint, info?.repo_root]);
 
   // Path filter (case-insensitive substring) applied to all three sections.
   // Must be before the early returns to comply with the Rules of Hooks.

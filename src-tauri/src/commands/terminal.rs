@@ -135,7 +135,7 @@ pub async fn kill_process(state: State<'_, SharedState>, session_id: Uuid, shell
 /// listeners from any process working in that directory are included too, so
 /// dev servers started outside this session still show. The directory
 /// matching is skipped for broad roots (home dir, drive root). Runs on the
-/// blocking pool: port lookup shells out to netstat.
+/// blocking pool: the IP Helper table read and PEB queries can block.
 #[tauri::command]
 pub async fn session_ports(
     pids: Vec<u32>,

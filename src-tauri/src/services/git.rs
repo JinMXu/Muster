@@ -59,6 +59,22 @@ pub struct GitStatusInfo {
     pub error: Option<String>,
     /// True when this repository is a linked worktree (not the main checkout).
     pub is_worktree: bool,
+    /// Cheap fingerprint of the index/HEAD at compute time. The frontend
+    /// polls the lightweight `status_revision` before requesting a full
+    /// snapshot, so an idle repo never re-transfers a multi-MB payload.
+    #[serde(default)]
+    pub revision: String,
+}
+
+/// Revision string for a fingerprint. `no-index` covers repos whose index
+/// hasn't been written yet; `no-repo` is reported by `status_revision` for
+/// directories that aren't repositories. Both change on `git init` / first
+/// `git add`, so the frontend notices.
+fn fingerprint_revision(fp: Option<(u64, u64, String)>) -> String {
+    match fp {
+        Some((mtime, len, head)) => format!("{mtime}:{len}:{head}"),
+        None => "no-index".to_string(),
+    }
 }
 
 impl GitStatusInfo {
@@ -71,6 +87,12 @@ impl GitStatusInfo {
 /// signal changing. Working-tree-only edits (no index/HEAD movement) don't
 /// trip the fingerprint below, so they surface after this window.
 const STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// Cap on per-file line-stat patches computed per diff side. The Git panel
+/// renders at most 500 rows per section, so counting beyond that is invisible
+/// work on huge change sets; the summary then falls back to a single combined
+/// diff for an exact total.
+const MAX_STAT_FILES: usize = 500;
 
 /// One cached status result for a repo root.
 struct CachedStatus {
@@ -154,22 +176,49 @@ pub fn cached_status(root: &str) -> Option<GitStatusInfo> {
 }
 
 pub fn status(root: &str, lang: &str) -> GitStatusInfo {
+    status_with(root, lang, false)
+}
+
+/// Always recomputes, bypassing the TTL cache. Used by event-driven
+/// refreshes after a working-tree edit, which doesn't move the index/HEAD
+/// fingerprint the cache keys on.
+pub fn status_forced(root: &str, lang: &str) -> GitStatusInfo {
+    status_with(root, lang, true)
+}
+
+fn status_with(root: &str, lang: &str, force: bool) -> GitStatusInfo {
     // Cheap reuse across the frontend's per-repo polls: recompute only when
     // the index/HEAD moved or the cached entry is older than the TTL.
-    if let Some(info) = cached_status(root) {
-        return info;
+    if !force {
+        if let Some(info) = cached_status(root) {
+            return info;
+        }
     }
     let repo = match repo_at(root) {
         Ok(r) => r,
-        Err(_) => return GitStatusInfo::empty(root.to_string()),
+        Err(_) => {
+            let mut info = GitStatusInfo::empty(root.to_string());
+            info.revision = "no-repo".to_string();
+            return info;
+        }
     };
     let fingerprint = status_fingerprint(&repo);
-    let info = compute_status(&repo, root, lang);
+    let mut info = compute_status(&repo, root, lang);
+    info.revision = fingerprint_revision(fingerprint.clone());
     STATUS_CACHE.lock().insert(
         root.to_string(),
         CachedStatus { fingerprint, computed: Instant::now(), info: info.clone() },
     );
     info
+}
+
+/// The cheap half of `status`: just the index/HEAD fingerprint. The frontend
+/// polls this to decide whether a full status transfer is needed at all.
+pub fn status_revision(root: &str) -> String {
+    match repo_at(root) {
+        Ok(repo) => fingerprint_revision(status_fingerprint(&repo)),
+        Err(_) => "no-repo".to_string(),
+    }
 }
 
 /// Full `git status` computation for an already-resolved repository. Reads
@@ -224,13 +273,17 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
     let mut renamed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut staged_stats: std::collections::HashMap<String, (usize, usize)> =
         std::collections::HashMap::new();
+    // Starts false: repos without a first commit (or a failed HEAD diff) have
+    // no staged side to sum, so the summary must use the combined diff.
+    let mut staged_complete = false;
     if let Ok(head) = repo.head() {
         if let Ok(tree) = head.peel_to_tree() {
             if let Ok(mut diff) = repo.diff_tree_to_index(Some(&tree), None, None) {
                 let mut find_opts = git2::DiffFindOptions::new();
                 find_opts.renames(true);
-                if diff.find_similar(Some(&mut find_opts)).is_ok() {
-                    staged_stats = per_file_line_stats(&diff);
+                let similar = diff.find_similar(Some(&mut find_opts)).is_ok();
+                (staged_stats, staged_complete) = per_file_line_stats(&diff, MAX_STAT_FILES);
+                if similar {
                     for delta in diff.deltas() {
                         if delta.status() == git2::Delta::Renamed {
                             if let (Some(old), Some(new)) =
@@ -278,25 +331,37 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
         }
     }
 
-    // Line stats for the compact "+N −M" summary: HEAD → workdir+index diff
-    // (None tree = empty tree, covering repos without a first commit). The
-    // diff omits untracked files, so count their text lines as additions.
-    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    if let Ok(diff) = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), None) {
-        if let Ok(stats) = diff.stats() {
-            info.line_additions = stats.insertions();
-            info.line_deletions = stats.deletions();
-        }
-    }
     // Per-row badges: staged rows count HEAD→index, changed rows count
     // index→workdir (so each row says what committing/staging it produces);
     // untracked files count their lines as additions.
-    let unstaged_stats = repo
+    let (unstaged_stats, unstaged_complete) = repo
         .diff_index_to_workdir(None, None)
-        .map(|diff| per_file_line_stats(&diff))
+        .map(|diff| per_file_line_stats(&diff, MAX_STAT_FILES))
         .unwrap_or_default();
     let untracked_counts = untracked_line_counts(&info.changed_entries, &repo_root);
-    info.line_additions += untracked_counts.values().sum::<usize>();
+
+    // Compact "+N −M" summary. The per-file passes above already cover both
+    // sides, so summing them avoids a third full HEAD→workdir diff; only when
+    // a side was truncated (huge change sets) fall back to one exact combined
+    // diff. Untracked files are additions either way (git's numstat omits
+    // them).
+    if staged_complete && unstaged_complete {
+        info.line_additions = staged_stats.values().map(|(a, _)| *a).sum::<usize>()
+            + unstaged_stats.values().map(|(a, _)| *a).sum::<usize>()
+            + untracked_counts.values().sum::<usize>();
+        info.line_deletions = staged_stats.values().map(|(_, d)| *d).sum::<usize>()
+            + unstaged_stats.values().map(|(_, d)| *d).sum::<usize>();
+    } else {
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        if let Ok(diff) = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), None) {
+            if let Ok(stats) = diff.stats() {
+                info.line_additions = stats.insertions();
+                info.line_deletions = stats.deletions();
+            }
+        }
+        info.line_additions += untracked_counts.values().sum::<usize>();
+    }
+
     for e in info.staged_entries.iter_mut() {
         if let Some((add, del)) = staged_stats.get(&e.path) {
             e.additions = *add;
@@ -368,13 +433,23 @@ fn compute_status(repo: &Repository, root: &str, lang: &str) -> GitStatusInfo {
     info
 }
 
-/// Per-file (insertions, deletions) for every delta in `diff`, keyed by the
-/// workdir-side path (falling back to the old path for deletions, whose
-/// new-file side carries no path). Binary deltas have no text diff — they
-/// count 0/0, mirroring `git diff --numstat` printing "-" for binaries.
-fn per_file_line_stats(diff: &git2::Diff) -> std::collections::HashMap<String, (usize, usize)> {
+/// Per-file (insertions, deletions) for up to `max_files` deltas of `diff`,
+/// keyed by the workdir-side path (falling back to the old path for
+/// deletions, whose new-file side carries no path). Binary deltas have no
+/// text diff — they count 0/0, mirroring `git diff --numstat` printing "-"
+/// for binaries. The second return value is false when the cap cut the scan,
+/// so the caller knows the map can't be used for an exact total.
+fn per_file_line_stats(
+    diff: &git2::Diff,
+    max_files: usize,
+) -> (std::collections::HashMap<String, (usize, usize)>, bool) {
     let mut map = std::collections::HashMap::new();
+    let mut complete = true;
     for idx in 0..diff.deltas().len() {
+        if map.len() >= max_files {
+            complete = false;
+            break;
+        }
         let Some(delta) = diff.get_delta(idx) else { continue };
         let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
             continue;
@@ -388,7 +463,7 @@ fn per_file_line_stats(diff: &git2::Diff) -> std::collections::HashMap<String, (
         }
         map.entry(key).or_insert((0, 0));
     }
-    map
+    (map, complete)
 }
 
 /// Git's numstat output has no representation for untracked files, so mirror
@@ -423,6 +498,15 @@ const UNTRACKED_COUNT_MAX_FILES: usize = 1000;
 const UNTRACKED_COUNT_MAX_BYTES: u64 = 32 << 20;
 const UNTRACKED_COUNT_MAX_FILE_BYTES: u64 = 1 << 20;
 
+/// Line counts of previously scanned untracked files, keyed by path and
+/// validated against (size, mtime). Untracked edits don't move the
+/// index/HEAD fingerprint, so without this every status TTL expiry would
+/// re-read every untracked file from disk.
+static UNTRACKED_LINE_CACHE: Lazy<Mutex<HashMap<std::path::PathBuf, (u64, i64, usize)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+/// Bound on the untracked line cache (long sessions with generated files).
+const UNTRACKED_LINE_CACHE_MAX: usize = 4096;
+
 #[derive(Default)]
 struct LineCountBudget {
     files: usize,
@@ -452,6 +536,22 @@ fn text_line_count(path: &std::path::Path, budget: &mut LineCountBudget) -> usiz
     if !meta.is_file() || meta.len() > UNTRACKED_COUNT_MAX_FILE_BYTES {
         return 0;
     }
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(-1);
+    let cached = UNTRACKED_LINE_CACHE.lock().get(path).copied();
+    if let Some((size, cached_mtime, count)) = cached {
+        if size == meta.len() && cached_mtime == mtime {
+            // Count the hit against the file budget so a huge tree stops at
+            // the same place on every recompute (stable totals), while still
+            // avoiding the read.
+            budget.files += 1;
+            return count;
+        }
+    }
     budget.files += 1;
     budget.bytes += meta.len();
     let mut file = match std::fs::File::open(path) {
@@ -480,7 +580,15 @@ fn text_line_count(path: &std::path::Path, budget: &mut LineCountBudget) -> usiz
     if byte_count == 0 {
         return 0;
     }
-    newline_count + usize::from(last_byte != Some(b'\n'))
+    let count = newline_count + usize::from(last_byte != Some(b'\n'));
+    {
+        let mut cache = UNTRACKED_LINE_CACHE.lock();
+        if cache.len() >= UNTRACKED_LINE_CACHE_MAX {
+            cache.clear();
+        }
+        cache.insert(path.to_path_buf(), (meta.len(), mtime, count));
+    }
+    count
 }
 
 fn status_char_index(s: Status) -> char {
@@ -1179,6 +1287,30 @@ mod tests {
         let info = status(&tmp.root(), "en");
         assert_eq!(info.line_additions, 4);
         assert_eq!(info.line_deletions, 1);
+    }
+
+    #[test]
+    fn status_revision_tracks_git_state_and_forced_refresh_sees_worktree() {
+        let tmp = TempRepo::new();
+        let root = tmp.root();
+        let first = status(&root, "en");
+        let revision = status_revision(&root);
+        assert_eq!(first.revision, revision);
+
+        // A worktree-only edit doesn't move the revision; the TTL cache
+        // keeps serving the old snapshot until a forced refresh runs.
+        std::fs::write(tmp.0.join("a.txt"), "two\n").unwrap();
+        assert_eq!(status_revision(&root), revision);
+        assert!(status(&root, "en").changed_entries.is_empty(), "cached snapshot");
+        let forced = status_forced(&root, "en");
+        assert_eq!(forced.changed_entries.len(), 1, "forced refresh sees the edit");
+        assert_eq!(forced.revision, revision, "worktree edits don't move the revision");
+
+        // A commit moves HEAD, so the revision changes and the normal path
+        // recomputes even though the cache entry is young.
+        commit_file(&tmp.0, "a.txt", "two\n", "second");
+        assert_ne!(status_revision(&root), revision);
+        assert_eq!(status(&root, "en").revision, status_revision(&root));
     }
 
     #[test]

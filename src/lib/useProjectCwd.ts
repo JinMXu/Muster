@@ -16,6 +16,9 @@ export interface ProjectAnchor {
   cwd: string | null;
 }
 
+const EMPTY: ProjectAnchor = { root: null, cwd: null };
+const POLL_MS = 5000;
+
 /// Cache of cwd -> resolved repo root, so the poll only hits the backend
 /// when the cwd actually changes (module scope: shared by every consumer).
 /// Bounded to 50 entries (LRU) to prevent unbounded growth over long sessions.
@@ -29,77 +32,165 @@ function cacheRoot(cwd: string, root: string) {
   rootCache.set(cwd, root);
 }
 
-/// Resolve the selected project's anchored root and live cwd. Listens for the
-/// `session-cwd-changed` event (emitted immediately when the shell's cwd
-/// changes, e.g. after a `cd` into a worktree) and falls back to a 5s poll.
+/// One shared poller per selected project. Files, Git and Info panels all
+/// call `useProjectCwd` while mounted; without sharing, each held its own
+/// 5s `list_all_sessions` interval and `session-cwd-changed` listener.
+interface Entry {
+  projectId: string;
+  pinned: string | null;
+  anchor: ProjectAnchor;
+  listeners: Set<() => void>;
+  timer: ReturnType<typeof setInterval> | null;
+  unlisten: UnlistenFn | null;
+  disposed: boolean;
+  pending: boolean;
+  /// Increments per root resolution, so a late response for an old cwd is
+  /// dropped instead of overwriting the new anchor.
+  rootSeq: number;
+}
+
+const entries = new Map<string, Entry>();
+let visibilityBound = false;
+
+function notify(e: Entry) {
+  for (const l of e.listeners) l();
+}
+
+function setAnchor(e: Entry, cwd: string | null, root: string | null) {
+  if (e.anchor.cwd === cwd && e.anchor.root === root) return;
+  e.anchor = { cwd, root };
+  notify(e);
+}
+
+async function resolveRoot(e: Entry) {
+  if (e.pinned) {
+    setAnchor(e, e.pinned, e.pinned);
+    return;
+  }
+  const cwd = e.anchor.cwd;
+  if (!cwd) {
+    setAnchor(e, null, null);
+    return;
+  }
+  const cached = rootCache.get(cwd);
+  if (cached !== undefined) {
+    setAnchor(e, cwd, cached);
+    return;
+  }
+  const seq = ++e.rootSeq;
+  const root = await api.resolveProjectRoot(cwd).catch(() => cwd);
+  if (e.disposed || e.pinned || seq !== e.rootSeq) return;
+  cacheRoot(cwd, root);
+  setAnchor(e, cwd, root);
+}
+
+async function tick(e: Entry) {
+  if (e.pinned || document.hidden || e.disposed || e.pending) return;
+  e.pending = true;
+  try {
+    const sessions = await api.listAllSessions().catch(() => null);
+    if (!sessions || e.disposed || e.pinned) return;
+    const cwd = sessions.find((s) => s.project_id === e.projectId)?.working_directory ?? null;
+    if (cwd === e.anchor.cwd) return;
+    setAnchor(e, cwd, e.anchor.root);
+    void resolveRoot(e);
+  } finally {
+    e.pending = false;
+  }
+}
+
+function ensureVisibilityListener() {
+  if (visibilityBound) return;
+  visibilityBound = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    for (const e of entries.values()) void tick(e);
+  });
+}
+
+function startEntry(e: Entry) {
+  if (e.pinned) return;
+  void tick(e);
+  e.timer = setInterval(() => void tick(e), POLL_MS);
+  listen("session-cwd-changed", () => void tick(e)).then((u) => {
+    if (e.disposed) u();
+    else e.unlisten = u;
+  });
+}
+
+function stopEntry(e: Entry) {
+  if (e.timer) clearInterval(e.timer);
+  e.timer = null;
+  e.unlisten?.();
+  e.unlisten = null;
+}
+
+function disposeEntry(e: Entry) {
+  e.disposed = true;
+  stopEntry(e);
+}
+
+function acquire(projectId: string, pinned: string | null): Entry {
+  let e = entries.get(projectId);
+  if (!e) {
+    e = {
+      projectId,
+      pinned,
+      anchor: pinned ? { cwd: pinned, root: pinned } : EMPTY,
+      listeners: new Set(),
+      timer: null,
+      unlisten: null,
+      disposed: false,
+      pending: false,
+      rootSeq: 0,
+    };
+    entries.set(projectId, e);
+    ensureVisibilityListener();
+    startEntry(e);
+    return e;
+  }
+  if (e.pinned !== pinned) {
+    stopEntry(e);
+    e.pinned = pinned;
+    e.rootSeq += 1;
+    if (pinned) {
+      setAnchor(e, pinned, pinned);
+    } else {
+      startEntry(e);
+      if (e.anchor.cwd) void resolveRoot(e);
+    }
+  }
+  return e;
+}
+
+/// Resolve the selected project's anchored root and live cwd. A single
+/// module-level poller (5s fallback + `session-cwd-changed` events) serves
+/// every subscribed panel.
 export function useProjectCwd(state: AppStateView | null): ProjectAnchor {
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
   const projectId = project?.id ?? null;
   const pinned = project?.custom_directory ?? null;
-  const [cwd, setCwd] = useState<string | null>(pinned);
-  const [root, setRoot] = useState<string | null>(pinned);
+  const [anchor, setAnchor] = useState<ProjectAnchor>(EMPTY);
 
-  // Track the session's live cwd (pinned projects pin the cwd too).
-  // Uses an immediate event listener PLUS a 5s fallback poll.
   useEffect(() => {
-    if (pinned) {
-      setCwd(pinned);
-      return;
-    }
     if (!projectId) {
-      setCwd(null);
+      setAnchor(EMPTY);
       return;
     }
-    let alive = true;
-    const tick = () =>
-      api.listAllSessions().then((ss) => {
-        if (!alive) return;
-        const s = ss.find((x) => x.project_id === projectId);
-        setCwd(s?.working_directory ?? null);
-      });
-    tick();
-    // Event-driven: re-read sessions immediately when any session's cwd
-    // changes, so worktree re-rooting is instant (no poll delay).
-    let unlisten: UnlistenFn | null = null;
-    listen("session-cwd-changed", () => {
-      if (alive) tick();
-    }).then((u) => {
-      if (!alive) { u(); return; }
-      unlisten = u;
-    });
-    const i = setInterval(tick, 5000);
+    const e = acquire(projectId, pinned);
+    const listener = () => setAnchor(e.anchor);
+    e.listeners.add(listener);
+    listener();
     return () => {
-      alive = false;
-      clearInterval(i);
-      unlisten?.();
+      const cur = entries.get(projectId);
+      if (!cur) return;
+      cur.listeners.delete(listener);
+      if (cur.listeners.size === 0) {
+        disposeEntry(cur);
+        entries.delete(projectId);
+      }
     };
   }, [projectId, pinned]);
 
-  // Anchor the panels: the pinned directory wins; otherwise resolve the cwd
-  // to its containing repo's toplevel, falling back to the cwd itself.
-  useEffect(() => {
-    if (pinned) {
-      setRoot(pinned);
-      return;
-    }
-    if (!cwd) {
-      setRoot(null);
-      return;
-    }
-    const cached = rootCache.get(cwd);
-    if (cached !== undefined) {
-      setRoot(cached);
-      return;
-    }
-    let alive = true;
-    api.resolveProjectRoot(cwd).then((r) => {
-      cacheRoot(cwd, r);
-      if (alive) setRoot(r);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [cwd, pinned]);
-
-  return { root, cwd };
+  return anchor;
 }

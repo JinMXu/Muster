@@ -194,6 +194,7 @@ export function useGitStatus(root: string | null, active = true): GitStatusInfo 
       return;
     }
     let e = entries.get(root);
+    const created = !e;
     if (!e) {
       e = {
         info: null,
@@ -221,7 +222,14 @@ export function useGitStatus(root: string | null, active = true): GitStatusInfo 
     if (entry.info) setInfo(entry.info);
     else setInfo(null);
     scheduleTimer(root);
-    if (active && Date.now() - entry.lastFull > ACTIVATE_REFRESH_AFTER_MS) {
+    // Don't stack a second fetch on a fresh entry: the initial load above is
+    // already in flight (other panels may subscribe within the same tick).
+    if (
+      !created &&
+      active &&
+      entry.lastFull > 0 &&
+      Date.now() - entry.lastFull > ACTIVATE_REFRESH_AFTER_MS
+    ) {
       void fullRefresh(root, true);
     }
     return () => {

@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./invoke";
+import { createPtyAckBatcher } from "./ptyAcks";
 import type { ThemeColors } from "./types";
 
 interface PtyDataPayload {
@@ -50,38 +51,11 @@ interface PendingBuffer {
 }
 const pendingBuffers = new Map<string, PendingBuffer>();
 
-/// PTY flow-control ACKs are batched: one IPC call per consumed ~256 KiB, or
-/// on a short timer for low-volume streams. The size threshold matters for
-/// background windows too — their timers can be throttled by the WebView,
-/// while the backend only pauses after `MAX_PTY_IN_FLIGHT` (2 MiB).
-const ACK_BATCH_BYTES = 256 * 1024;
-const ACK_FLUSH_MS = 100;
-const ackPending = new Map<string, number>();
-const ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function flushAck(sessionId: string): void {
-  const timer = ackTimers.get(sessionId);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    ackTimers.delete(sessionId);
-  }
-  const bytes = ackPending.get(sessionId) ?? 0;
-  ackPending.delete(sessionId);
-  if (bytes > 0) api.terminalAck(sessionId, bytes).catch(() => {});
-}
-
-function queueAck(sessionId: string, bytes: number): void {
-  if (bytes <= 0) return;
-  const total = (ackPending.get(sessionId) ?? 0) + bytes;
-  ackPending.set(sessionId, total);
-  if (total >= ACK_BATCH_BYTES) {
-    flushAck(sessionId);
-    return;
-  }
-  if (!ackTimers.has(sessionId)) {
-    ackTimers.set(sessionId, setTimeout(() => flushAck(sessionId), ACK_FLUSH_MS));
-  }
-}
+/// Flow-control credit is batched (see `ptyAcks.ts`): one IPC call per
+/// consumed ~256 KiB, or on a 100ms timer for low-volume streams.
+const ptyAcks = createPtyAckBatcher((sessionId, bytes) => {
+  api.terminalAck(sessionId, bytes).catch(() => {});
+});
 
 /// Backend PTY events are listened to once for the whole module (not once per
 /// session) and dispatched by session id. Per-session listeners would outlive
@@ -119,7 +93,7 @@ export function ensureListeners(): Promise<void> {
           }
           // Nothing will throttle this buffered/dropped output, so credit it
           // immediately to keep the session (and its agent) running.
-          queueAck(id, base64ByteLength(data));
+          ptyAcks.queue(id, base64ByteLength(data));
           return;
         }
         // Capture the follow state before the async write. term.write is
@@ -134,7 +108,7 @@ export function ensureListeners(): Promise<void> {
           // the callback would stall background sessions (and their agents).
           // Credit on arrival; only the visible path applies real backpressure.
           entry.term.write(bytes);
-          queueAck(id, bytes.length);
+          ptyAcks.queue(id, bytes.length);
           return;
         }
         entry.term.write(bytes, () => {
@@ -142,7 +116,7 @@ export function ensureListeners(): Promise<void> {
             entry.term.scrollToBottom();
           }
           // xterm has parsed this chunk: release its PTY flow-control credit.
-          queueAck(id, bytes.length);
+          ptyAcks.queue(id, bytes.length);
         });
       }),
       listen<PtyExitPayload>("pty:exit", (event) => {
@@ -408,12 +382,7 @@ export function getSearchAddon(sessionId: string): SearchAddon | null {
 
 /// Dispose the terminal for a session and drop it from the registry.
 function release(sessionId: string): void {
-  const timer = ackTimers.get(sessionId);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    ackTimers.delete(sessionId);
-  }
-  ackPending.delete(sessionId);
+  ptyAcks.forget(sessionId);
   const entry = registry.get(sessionId);
   if (!entry) return;
   entry.term.dispose();

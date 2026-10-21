@@ -89,7 +89,7 @@ pub fn trash(_path: &str, _lang: &str) -> Result<(), String> {
 // --- File tree operations ----------------------------------------------------
 
 /// One entry of a directory listing for the file tree.
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct DirEntry {
     pub name: String,
     pub path: String,

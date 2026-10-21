@@ -529,7 +529,7 @@ fn spawn_input_writer(session_id: Uuid, mut writer: Box<dyn Write + Send>) -> st
     tx
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SessionInfo {
     pub id: Uuid,
     pub project_id: Uuid,

@@ -7,4 +7,7 @@ pub mod services;
 pub mod theme;
 pub mod bootstrap;
 
+#[cfg(test)]
+mod specta_export;
+
 pub use base64_util::base64_encode;

@@ -24,7 +24,7 @@ use crate::commands::SharedState;
 use crate::models::pane::PaneContent;
 
 /// A coding-agent CLI that Muster recognises inside a session's process tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
     Opencode,
@@ -57,7 +57,7 @@ impl AgentKind {
 /// Three-state model: `Working` (alive, output recently), `Waiting` (alive,
 /// silent — likely needs input), or `Done` (agent exited, session alive, the
 /// user hasn't viewed the tab yet; the dot drops once they do).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
     Working,
@@ -452,7 +452,7 @@ fn notify_changed(
 /// One row of the `agent_status_snapshot` command: the live detection for a
 /// session, plus its display title so UI lists (close confirmation, command
 /// palette) don't need a second round-trip.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SessionAgentStatus {
     pub session_id: Uuid,
     pub agent: AgentKind,

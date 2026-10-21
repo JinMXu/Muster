@@ -960,14 +960,14 @@ impl AppState {
 }
 
 /// One unsaved file entry shown in the close-confirmation dialog.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DirtyFileInfo {
     pub id: Uuid,
     pub name: String,
 }
 
 /// Frontend-facing serialized projection of the live state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct AppStateView {
     pub projects: Vec<ProjectView>,
     pub selected_project_id: Option<Uuid>,
@@ -978,7 +978,7 @@ pub struct AppStateView {
     pub is_pane_zoomed: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProjectView {
     pub id: Uuid,
     pub name: String,
@@ -989,7 +989,7 @@ pub struct ProjectView {
     pub session_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TabView {
     pub id: Uuid,
     pub custom_name: Option<String>,

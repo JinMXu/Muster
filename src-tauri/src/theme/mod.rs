@@ -5,7 +5,7 @@ pub mod fonts;
 use serde::{Deserialize, Serialize};
 
 /// Resolved color palette for window chrome and terminal alike.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ThemeColors {
     pub name: String,
     pub background: String,
@@ -21,7 +21,7 @@ pub struct ThemeColors {
 
 /// Lightweight theme metadata for the settings picker: name, dark/light
 /// classification, and two swatch colors for a visual preview.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ThemeInfo {
     pub name: String,
     pub is_dark: bool,

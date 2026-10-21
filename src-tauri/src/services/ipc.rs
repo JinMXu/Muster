@@ -100,11 +100,100 @@ fn ipc_info_path() -> PathBuf {
 }
 
 fn write_info(port: u16, token: &str) -> std::io::Result<()> {
-    let dir = ipc_info_path();
-    if let Some(parent) = dir.parent() {
+    let path = ipc_info_path();
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(dir, json!({ "port": port, "token": token }).to_string())
+    std::fs::write(&path, json!({ "port": port, "token": token }).to_string())?;
+    // The token grants control over this window's sessions. Restrict the
+    // file to the current user (no inherited ACEs) so another local account
+    // can't read it on shared/redirected-profile setups.
+    #[cfg(windows)]
+    if let Err(e) = restrict_to_current_user(&path) {
+        log::warn!("ipc: failed to restrict permissions on {}: {e}", path.display());
+    }
+    Ok(())
+}
+
+/// Replace `path`'s DACL with a single full-control ACE for the current user
+/// and mark it protected (drop inherited ACEs).
+#[cfg(windows)]
+fn restrict_to_current_user(path: &std::path::Path) -> Result<(), String> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        AddAccessAllowedAce, GetLengthSid, GetTokenInformation, InitializeAcl,
+        InitializeSecurityDescriptor, SetFileSecurityW, SetSecurityDescriptorDacl, ACL,
+        ACL_REVISION, DACL_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR,
+        TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| e.to_string())?;
+
+        let result = (|| -> Result<(), String> {
+            let mut len = 0u32;
+            // First call sizes the TOKEN_USER buffer.
+            let _ = GetTokenInformation(token, TokenUser, None, 0, &mut len);
+            if len == 0 {
+                return Err("GetTokenInformation returned no size".into());
+            }
+            // u32 words keep the buffer aligned for TOKEN_USER.
+            let mut token_buf = vec![0u32; (len as usize).div_ceil(4)];
+            GetTokenInformation(
+                token,
+                TokenUser,
+                Some(token_buf.as_mut_ptr() as *mut c_void),
+                len,
+                &mut len,
+            )
+            .map_err(|e| e.to_string())?;
+            let sid = (*(token_buf.as_ptr() as *const TOKEN_USER)).User.Sid;
+            let sid_len = GetLengthSid(sid) as usize;
+
+            // ACL header + one ACCESS_ALLOWED_ACE + SID (SidStart is included
+            // in the ACE header, hence the small over-allocation).
+            let acl_len = std::mem::size_of::<ACL>() + 16 + sid_len + 32;
+            let mut acl_buf = vec![0u32; acl_len.div_ceil(4)];
+            let acl = acl_buf.as_mut_ptr() as *mut ACL;
+            InitializeAcl(acl, (acl_buf.len() * 4) as u32, ACL_REVISION)
+                .map_err(|e| e.to_string())?;
+            AddAccessAllowedAce(acl, ACL_REVISION, FILE_ALL_ACCESS.0, sid)
+                .map_err(|e| e.to_string())?;
+
+            let mut sd = SECURITY_DESCRIPTOR::default();
+            let sd_ptr = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut c_void);
+            InitializeSecurityDescriptor(sd_ptr, 1).map_err(|e| e.to_string())?;
+            SetSecurityDescriptorDacl(sd_ptr, true, Some(acl as *const ACL), false)
+                .map_err(|e| e.to_string())?;
+
+            let info = OBJECT_SECURITY_INFORMATION(
+                DACL_SECURITY_INFORMATION.0 | PROTECTED_DACL_SECURITY_INFORMATION.0,
+            );
+            let ok = SetFileSecurityW(PCWSTR(wide.as_ptr()), info, sd_ptr);
+            if !ok.as_bool() {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(())
+        })();
+
+        let _ = CloseHandle(token);
+        result
+    }
 }
 
 #[derive(Deserialize)]
@@ -1289,6 +1378,31 @@ pub mod client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn restrict_to_current_user_drops_inherited_aces() {
+        let path = std::env::temp_dir().join(format!("muster-ipc-acl-{}.json", Uuid::new_v4()));
+        std::fs::write(&path, b"{\"token\":\"secret\"}").unwrap();
+        super::restrict_to_current_user(&path).expect("harden ACL");
+
+        // The owner keeps read/write access.
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"token\":\"secret\"}".to_vec());
+        std::fs::write(&path, b"{}").unwrap();
+
+        let out = std::process::Command::new("icacls")
+            .arg(&path)
+            .output()
+            .expect("run icacls");
+        let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+        assert!(out.status.success(), "icacls failed: {text}");
+        assert!(!text.contains("(i)"), "inherited ACEs remain: {text}");
+        let user = std::env::var("USERNAME").unwrap_or_default().to_lowercase();
+        if !user.is_empty() {
+            assert!(text.contains(&user), "current user ACE missing: {text}");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn extract_rc_parses_and_removes_marker() {

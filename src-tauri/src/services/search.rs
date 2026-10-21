@@ -25,7 +25,7 @@ const SKIP_DIRS: [&str; 3] = ["node_modules", "target", "__pycache__"];
 const MAX_LISTED_FILES: usize = 2000;
 
 /// One matching line in one file (offsets are char-based into `line_text`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SearchMatch {
     pub path: String,
     pub rel_path: String,

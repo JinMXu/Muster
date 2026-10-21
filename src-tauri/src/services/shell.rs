@@ -29,7 +29,7 @@ pub fn detect_default_shell() -> ShellSpec {
 /// One entry of the Settings dialog's default-shell picker: a stable id
 /// (stored in `Settings::default_shell`), a display name, and whether the
 /// shell is actually installed on this machine.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct ShellOption {
     pub id: String,
     pub name: String,

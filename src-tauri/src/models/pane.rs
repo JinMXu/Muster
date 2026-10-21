@@ -6,7 +6,7 @@ use uuid::Uuid;
 /// Each variant carries the *id* of the managed resource so the frontend can
 /// look up its own rendered state without the backend needing to ship the
 /// full payload over the FFI boundary on every render.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", content = "id", rename_all = "lowercase")]
 pub enum PaneContent {
     Session(Uuid),
@@ -32,7 +32,7 @@ pub enum PaneDropEdge {
 
 /// One tile in a tab's layout. A value type so structural changes reassign the
 /// enclosing column array and the frontend re-renders.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Pane {
     pub id: Uuid,
     pub content: PaneContent,
@@ -47,7 +47,7 @@ impl Pane {
 }
 
 /// A vertical stack of panes; columns tile left-to-right across the tab.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PaneColumn {
     pub id: Uuid,
     pub panes: Vec<Pane>,

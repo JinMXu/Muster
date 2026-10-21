@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::services::i18n::translate;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct GitStatusEntry {
     pub path: String,
     pub staged: char,
@@ -20,13 +20,11 @@ pub struct GitStatusEntry {
     /// staged rows count HEAD→index, changed rows count index→workdir
     /// (untracked rows count the file's lines as additions). 0/0 for binary
     /// files, conflicts, and anything that couldn't be counted.
-    #[serde(default)]
     pub additions: usize,
-    #[serde(default)]
     pub deletions: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct RecentCommit {
     pub hash: String,
     pub short_hash: String,
@@ -35,7 +33,7 @@ pub struct RecentCommit {
     pub relative_date: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct GitStatusInfo {
     pub is_repo: bool,
     pub repo_root: String,
@@ -62,7 +60,6 @@ pub struct GitStatusInfo {
     /// Cheap fingerprint of the index/HEAD at compute time. The frontend
     /// polls the lightweight `status_revision` before requesting a full
     /// snapshot, so an idle repo never re-transfers a multi-MB payload.
-    #[serde(default)]
     pub revision: String,
 }
 
@@ -700,7 +697,7 @@ pub fn git_show(root: &str, spec: &str, lang: &str) -> Result<String, String> {
 }
 
 /// One commit that touched a path, as reported by `git log --follow`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct FileCommit {
     pub hash: String,
     pub short_hash: String,
@@ -819,7 +816,7 @@ pub fn file_at_head(root: &str, path: &str, lang: &str) -> Result<Option<String>
 
 
 /// One line of a file annotated with the commit that last touched it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BlameLine {
     /// 1-based line number in the current file.
     pub line: u32,
@@ -980,7 +977,7 @@ pub fn unstage_all(repo_root: &str, lang: &str) -> Result<(), String> {
 
 /// Per-file snapshot taken when a destructive confirmation opens: enough to
 /// detect that the file was written to (or deleted) while the dialog was up.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct GuardEntry {
     pub path: String,
     pub exists: bool,
@@ -990,7 +987,7 @@ pub struct GuardEntry {
 
 /// Fingerprint of the repo + target files, re-validated before a discard
 /// runs. Any drift aborts the operation.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct GitGuard {
     pub head_oid: Option<String>,
     pub branch: Option<String>,

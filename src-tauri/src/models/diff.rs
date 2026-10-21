@@ -197,7 +197,7 @@ impl DiffTab {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DiffTabInfo {
     pub id: Uuid,
     pub repo_root: String,

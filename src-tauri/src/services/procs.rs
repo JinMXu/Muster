@@ -24,7 +24,7 @@ use uuid::Uuid;
 const SNAPSHOT_REUSE: Duration = Duration::from_millis(1000);
 
 /// One row of the PROCESSES section.
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
@@ -35,7 +35,7 @@ pub struct ProcessInfo {
 
 /// One row of the PORTS section: a listening TCP port owned by one of the
 /// session's processes or by a process working in the project directory.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct ListenPort {
     pub port: u16,
     pub pid: u32,

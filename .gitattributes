@@ -1,0 +1,3 @@
+# Specta exports LF; keep the generated file byte-stable across checkouts so
+# the CI "bindings are up to date" diff check doesn't trip on CRLF conversion.
+src/lib/bindings.ts text eol=lf

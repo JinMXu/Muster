@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum RightPanel {
     #[default]

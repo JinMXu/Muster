@@ -12,8 +12,9 @@
   "homepage": "https://github.com/JinMXu/Muster",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "node scripts/build-file-icon-subset.mjs && vite",
+    "build": "node scripts/build-file-icon-subset.mjs && tsc && vite build",
+    "icons:subset": "node scripts/build-file-icon-subset.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

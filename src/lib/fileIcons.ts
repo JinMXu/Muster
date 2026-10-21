@@ -1,13 +1,15 @@
 import { addCollection } from "@iconify/react";
 import { useSyncExternalStore } from "react";
 
-/// File-type icons for the file tree, backed by the vscode-icons set
-/// (@iconify-json/vscode-icons, MIT) rendered through @iconify/react.
+/// File-type icons for the file tree, backed by a generated subset of the
+/// vscode-icons set (@iconify-json/vscode-icons, MIT) rendered through
+/// @iconify/react.
 ///
-/// The collection JSON is loaded lazily in one dynamic-import chunk (~2 MB,
-/// local disk — no network): unknown icons must NEVER hit iconify's API
-/// fallback, so rendering gates on `iconExists` + a loaded flag and falls
-/// back to the app's generic file icon instead.
+/// The subset (only the names referenced below, ~100 KB) is loaded lazily in
+/// one dynamic-import chunk; `scripts/build-file-icon-subset.mjs` regenerates
+/// it before dev/build. Unknown icons must NEVER hit iconify's API fallback,
+/// so rendering gates on `iconLoaded` + a loaded flag and falls back to the
+/// app's generic file icon instead.
 
 const PREFIX = "vscode-icons";
 
@@ -22,7 +24,7 @@ function notifyWaiters() {
 
 function loadCollection(): Promise<void> {
   if (!loading) {
-    loading = import("@iconify-json/vscode-icons/icons.json")
+    loading = import("../assets/vscode-icons-subset.json")
       .then((m) => {
         // Cast via addCollection's own parameter type — the JSON module has
         // no type declaration of its own.
@@ -131,7 +133,7 @@ const EXT_ICONS: Record<string, string> = {
   kt: "file-type-kotlin",
   scala: "file-type-scala",
   swift: "file-type-swift",
-  dart: "file-type-dart",
+  dart: "file-type-dartlang",
   php: "file-type-php",
   rb: "file-type-ruby",
   lua: "file-type-lua",

@@ -55,6 +55,10 @@ export const MONACO_THEME = "muster-dynamic";
 type MonacoNS = typeof import("monaco-editor");
 let monacoInstance: MonacoNS | null = null;
 let monacoPromise: Promise<MonacoNS> | null = null;
+/// Latest theme requested while Monaco was unloaded. Applied as soon as the
+/// editor chunk finishes loading, so settings can be applied at startup
+/// without triggering the (~4 MB) editor import.
+let pendingTheme: { colors: ThemeColors; dark: boolean } | null = null;
 
 export function ensureMonaco(): Promise<MonacoNS> {
   if (monacoInstance) return Promise.resolve(monacoInstance);
@@ -109,18 +113,29 @@ export function ensureMonaco(): Promise<MonacoNS> {
     });
 
     monacoInstance = monaco;
+    if (pendingTheme) defineMonacoTheme(pendingTheme.colors, pendingTheme.dark);
     return monaco;
   })();
   return monacoPromise;
 }
 
-// ── Theme application (no-op until monaco is loaded) ──────────────────
+// ── Theme application (deferred until monaco is loaded) ───────────────
 
+/// Store the theme and apply it immediately when Monaco is already loaded.
+/// Deliberately never starts the Monaco import itself: settings load at app
+/// startup, and doing so there would defeat the lazy editor chunk.
 export function applyMonacoTheme(colors: ThemeColors, dark: boolean) {
+  pendingTheme = { colors, dark };
   if (!monacoInstance) return;
+  defineMonacoTheme(colors, dark);
+}
+
+function defineMonacoTheme(colors: ThemeColors, dark: boolean) {
+  const monaco = monacoInstance;
+  if (!monaco) return;
   const bg = mixHex(colors.background, "000000", 0.12);
   const editorBg = `#${bg}`;
-  monacoInstance.editor.defineTheme("muster-dynamic", {
+  monaco.editor.defineTheme("muster-dynamic", {
     base: dark ? "vs-dark" : "vs",
     inherit: true,
     rules: [],
@@ -145,5 +160,5 @@ export function applyMonacoTheme(colors: ThemeColors, dark: boolean) {
       "scrollbarSlider.activeBackground": `#${mixHex(colors.foreground, colors.background, 0.6)}80`,
     },
   });
-  monacoInstance.editor.setTheme("muster-dynamic");
+  monaco.editor.setTheme("muster-dynamic");
 }

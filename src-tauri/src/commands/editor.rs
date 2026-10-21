@@ -17,7 +17,7 @@ pub async fn open_file(window: Window, state: State<'_, SharedState>, path: Stri
         .await
         .ok()
         .flatten();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(id)
 }
 
@@ -41,7 +41,7 @@ pub async fn open_file_at(window: Window, state: State<'_, SharedState>, path: S
         .await
         .ok()
         .flatten();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     if let Some(id) = id {
         let _ = window.emit("file-reveal", serde_json::json!({ "id": id, "line": line }));
     }
@@ -126,7 +126,7 @@ pub async fn open_diff(window: Window, state: State<'_, SharedState>, repo_root:
         .await
         .ok()
         .flatten();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(id)
 }
 
@@ -140,7 +140,7 @@ pub async fn open_commit_diff(window: Window, state: State<'_, SharedState>, rep
         .await
         .ok()
         .flatten();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(id)
 }
 
@@ -170,7 +170,7 @@ pub async fn open_workdir_diff(window: Window, state: State<'_, SharedState>, re
         .await
         .ok()
         .flatten();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(id)
 }
 
@@ -183,6 +183,6 @@ pub async fn open_checkpoint_diff(window: Window, state: State<'_, SharedState>,
         .await
         .ok()
         .flatten();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(id)
 }

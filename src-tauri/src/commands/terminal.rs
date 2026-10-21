@@ -43,7 +43,7 @@ pub async fn spawn_session(
     })
     .await
     .map_err(|e| e.to_string())??;
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(info)
 }
 
@@ -52,6 +52,20 @@ pub fn send_text(window: Window, state: State<SharedState>, id: Uuid, text: Stri
     let Some(s) = state.get_label(window.label()) else { return };
     let g = s.lock();
     if let Some(session) = g.sessions.get(&id) { session.send_text(&text); }
+}
+
+/// Credit the PTY flow-control window for bytes the frontend's terminal has
+/// consumed. Batched by the frontend so this is not one IPC call per chunk.
+#[tauri::command]
+pub fn terminal_ack(window: Window, state: State<SharedState>, id: Uuid, bytes: usize) {
+    let Some(s) = state.get_label(window.label()) else { return };
+    let session = {
+        let g = s.lock();
+        g.sessions.get(&id).cloned()
+    };
+    if let Some(session) = session {
+        session.ack_output(bytes);
+    }
 }
 
 #[tauri::command]
@@ -153,5 +167,12 @@ pub async fn session_ports(
 #[tauri::command]
 pub fn init_read_loops(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
+    // The frontend just (re)registered its PTY listeners. Anything emitted
+    // before that point (e.g. across a WebView reload) was dropped and will
+    // never be ACKed; clear the credit so the pumps can't stay paused.
+    let sessions: Vec<_> = s.lock().sessions.values().cloned().collect();
+    for session in sessions {
+        session.reset_output_flow();
+    }
     crate::bootstrap::start_read_loops(window.app_handle(), window.label(), &s);
 }

@@ -40,7 +40,7 @@ pub async fn split(window: Window, state: State<'_, SharedState>, edge: PaneDrop
     })
     .await
     .map_err(|e| e.to_string())??;
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(())
 }
 
@@ -48,14 +48,14 @@ pub async fn split(window: Window, state: State<'_, SharedState>, edge: PaneDrop
 pub fn focus_pane(window: Window, state: State<SharedState>, direction: FocusDirection) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().focus_pane(direction);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn resize_pane(window: Window, state: State<SharedState>, direction: ResizeDirection) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().resize_pane(direction);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 /// Drag-resize one divider: `vertical` = between columns `index`/`index + 1`,
@@ -89,7 +89,7 @@ pub fn move_pane(
 ) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().move_pane(tab_id, pane_id, target_pane_id, edge);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 /// Drag & drop a pane onto another tab (dropped on the tab's strip header):
@@ -107,7 +107,7 @@ pub fn move_pane_cross_tab(
     let Some(s) = state.get_label(window.label()) else { return false };
     let moved = s.lock().move_pane_cross_tab(source_tab_id, pane_id, target_tab_id);
     if moved {
-        emit_state(&window, &s.lock());
+        emit_state(&window, &s);
     }
     moved
 }
@@ -119,7 +119,7 @@ pub fn close_pane(window: Window, state: State<SharedState>, tab_id: Uuid, pane_
     let Some(s) = state.get_label(window.label()) else { return false };
     let closed = s.lock().close_pane(tab_id, pane_id);
     if closed {
-        emit_state(&window, &s.lock());
+        emit_state(&window, &s);
     }
     closed
 }
@@ -128,14 +128,14 @@ pub fn close_pane(window: Window, state: State<SharedState>, tab_id: Uuid, pane_
 pub fn toggle_pane_zoom(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_pane_zoom();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn equalize_panes(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().equalize_panes();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 // --- Sidebar / panel -------------------------------------------------------
@@ -144,19 +144,19 @@ pub fn equalize_panes(window: Window, state: State<SharedState>) {
 pub fn toggle_left_sidebar(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_left_sidebar();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn toggle_right_panel(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_right_panel();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn toggle_panel(window: Window, state: State<SharedState>, panel: RightPanel) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_panel(panel);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }

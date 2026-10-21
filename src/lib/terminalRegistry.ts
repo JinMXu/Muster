@@ -50,6 +50,39 @@ interface PendingBuffer {
 }
 const pendingBuffers = new Map<string, PendingBuffer>();
 
+/// PTY flow-control ACKs are batched: one IPC call per consumed ~256 KiB, or
+/// on a short timer for low-volume streams. The size threshold matters for
+/// background windows too — their timers can be throttled by the WebView,
+/// while the backend only pauses after `MAX_PTY_IN_FLIGHT` (2 MiB).
+const ACK_BATCH_BYTES = 256 * 1024;
+const ACK_FLUSH_MS = 100;
+const ackPending = new Map<string, number>();
+const ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function flushAck(sessionId: string): void {
+  const timer = ackTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    ackTimers.delete(sessionId);
+  }
+  const bytes = ackPending.get(sessionId) ?? 0;
+  ackPending.delete(sessionId);
+  if (bytes > 0) api.terminalAck(sessionId, bytes).catch(() => {});
+}
+
+function queueAck(sessionId: string, bytes: number): void {
+  if (bytes <= 0) return;
+  const total = (ackPending.get(sessionId) ?? 0) + bytes;
+  ackPending.set(sessionId, total);
+  if (total >= ACK_BATCH_BYTES) {
+    flushAck(sessionId);
+    return;
+  }
+  if (!ackTimers.has(sessionId)) {
+    ackTimers.set(sessionId, setTimeout(() => flushAck(sessionId), ACK_FLUSH_MS));
+  }
+}
+
 /// Backend PTY events are listened to once for the whole module (not once per
 /// session) and dispatched by session id. Per-session listeners would outlive
 /// their terminals — the unlisten handles were dropped, so every disposed
@@ -68,21 +101,25 @@ export function ensureListeners(): Promise<void> {
   if (!listenersReady) {
     listenersReady = Promise.all([
       listen<PtyDataPayload>("pty:data", (event) => {
-        const entry = registry.get(event.payload.id);
+        const { id, data } = event.payload;
+        const entry = registry.get(id);
         if (!entry) {
           // Terminal not yet created - buffer output so it renders when the
           // pane mounts. Keep only the tail: drop the oldest chunks once the
           // cap is exceeded.
-          let buf = pendingBuffers.get(event.payload.id);
+          let buf = pendingBuffers.get(id);
           if (!buf) {
             buf = { chunks: [], size: 0 };
-            pendingBuffers.set(event.payload.id, buf);
+            pendingBuffers.set(id, buf);
           }
-          buf.chunks.push(event.payload.data);
-          buf.size += event.payload.data.length;
+          buf.chunks.push(data);
+          buf.size += data.length;
           while (buf.size > MAX_PENDING_BYTES && buf.chunks.length > 1) {
             buf.size -= buf.chunks.shift()!.length;
           }
+          // Nothing will throttle this buffered/dropped output, so credit it
+          // immediately to keep the session (and its agent) running.
+          queueAck(id, base64ByteLength(data));
           return;
         }
         // Capture the follow state before the async write. term.write is
@@ -91,11 +128,21 @@ export function ensureListeners(): Promise<void> {
         // knocked ydisp off the bottom. Re-asserting here keeps the
         // terminal pinned to new output while the user hasn't scrolled up.
         const wasAtBottom = entry.atBottom;
-        const id = event.payload.id;
-        entry.term.write(base64ToBytes(event.payload.data), () => {
+        const bytes = base64ToBytes(data);
+        if (document.hidden) {
+          // Hidden WebViews throttle xterm's write scheduling, so waiting for
+          // the callback would stall background sessions (and their agents).
+          // Credit on arrival; only the visible path applies real backpressure.
+          entry.term.write(bytes);
+          queueAck(id, bytes.length);
+          return;
+        }
+        entry.term.write(bytes, () => {
           if (wasAtBottom && registry.has(id)) {
             entry.term.scrollToBottom();
           }
+          // xterm has parsed this chunk: release its PTY flow-control credit.
+          queueAck(id, bytes.length);
         });
       }),
       listen<PtyExitPayload>("pty:exit", (event) => {
@@ -361,6 +408,12 @@ export function getSearchAddon(sessionId: string): SearchAddon | null {
 
 /// Dispose the terminal for a session and drop it from the registry.
 function release(sessionId: string): void {
+  const timer = ackTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    ackTimers.delete(sessionId);
+  }
+  ackPending.delete(sessionId);
   const entry = registry.get(sessionId);
   if (!entry) return;
   entry.term.dispose();
@@ -382,6 +435,16 @@ export function pruneSessions(active: ReadonlySet<string>): void {
 /// Wipe the visible buffer + scrollback of a parked terminal (Ctrl+K).
 export function clear(sessionId: string): void {
   registry.get(sessionId)?.term.clear();
+}
+
+/// Decoded byte length of a base64 string without decoding it — used to ACK
+/// output that is only buffered (no terminal attached yet).
+function base64ByteLength(data: string): number {
+  if (!data) return 0;
+  let padding = 0;
+  if (data.charCodeAt(data.length - 1) === 61) padding += 1; // '='
+  if (data.length > 1 && data.charCodeAt(data.length - 2) === 61) padding += 1;
+  return (data.length / 4) * 3 - padding;
 }
 
 function base64ToBytes(data: string): Uint8Array {

@@ -9,7 +9,7 @@ use super::{emit_state, unknown_window, SharedState};
 pub fn close_selected_tab(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_selected_tab();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 /// Close one tab by id in a single atomic call. Closing must not go through
@@ -20,7 +20,7 @@ pub fn close_selected_tab(window: Window, state: State<SharedState>) {
 pub fn close_tab(window: Window, state: State<SharedState>, tab_id: Uuid) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
     s.lock().close_tab(tab_id);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(())
 }
 
@@ -70,35 +70,35 @@ pub fn select_previous_tab(window: Window, state: State<SharedState>) {
 pub fn move_tab(window: Window, state: State<SharedState>, from: Uuid, to: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().move_tab(from, to);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn rename_tab(window: Window, state: State<SharedState>, id: Uuid, name: Option<String>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().rename_tab(id, name);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn close_other_tabs(window: Window, state: State<SharedState>, tab_id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_other_tabs(tab_id);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn close_tabs_to_right(window: Window, state: State<SharedState>, tab_id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_tabs_to_right(tab_id);
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 #[tauri::command]
 pub fn close_all_tabs(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_all_tabs();
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
 }
 
 /// Path behind a pane for the tab context menu's Reveal/Copy Path items.

@@ -64,6 +64,7 @@ export const api = {
   spawnSession: () => c<SessionInfo>("spawn_session", { directory: null }),
   listShells: () => c<ShellOption[]>("list_shells"),
   sendText: (id: Uuid, text: string) => c<void>("send_text", { id, text }),
+  terminalAck: (id: Uuid, bytes: number) => c<void>("terminal_ack", { id, bytes }),
   resizeTerminal: (id: Uuid, cols: number, rows: number) =>
     c<void>("resize_terminal", { id, cols, rows }),
   clearTerminal: (id: Uuid) => c<void>("clear_terminal", { id }),

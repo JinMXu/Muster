@@ -1,4 +1,4 @@
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use crate::services::conpty::ConPty;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +30,61 @@ const PTY_FLUSH_MAX_BYTES: usize = 64 * 1024;
 /// force-cut into a line at this size so the pending buffer and its
 /// `find('\n')` scans stay bounded.
 const MAX_SCROLLBACK_PENDING_BYTES: usize = 64 * 1024;
+
+/// Max unacknowledged PTY output per session before the read pump pauses.
+/// The frontend ACKs bytes once xterm has parsed them (or while buffering a
+/// parked terminal), so a slow renderer can't grow the WebView's event/write
+/// queues without bound when a command floods output.
+const MAX_PTY_IN_FLIGHT: usize = 2 * 1024 * 1024;
+
+/// Credit-based flow control for one PTY. `claim` runs before an emit,
+/// `ack` when the frontend has consumed that output, and `wait_for_room`
+/// blocks the read pump while too much is outstanding.
+#[derive(Default)]
+pub struct PtyFlow {
+    in_flight: Mutex<usize>,
+    acked: Condvar,
+}
+
+impl PtyFlow {
+    fn claim(&self, bytes: usize) {
+        *self.in_flight.lock() += bytes;
+    }
+
+    /// True when more output may be read. If over the cap, waits one bounded
+    /// slice and reports the current state; the read loop re-checks exit and
+    /// calls again, so a vanished frontend or closing session can't wedge the
+    /// pump inside an unbounded wait.
+    fn wait_for_room(&self) -> bool {
+        let mut in_flight = self.in_flight.lock();
+        if *in_flight <= MAX_PTY_IN_FLIGHT {
+            return true;
+        }
+        self.acked.wait_for(&mut in_flight, Duration::from_millis(200));
+        *in_flight <= MAX_PTY_IN_FLIGHT
+    }
+
+    pub fn ack(&self, bytes: usize) {
+        let mut in_flight = self.in_flight.lock();
+        *in_flight = in_flight.saturating_sub(bytes);
+        if *in_flight <= MAX_PTY_IN_FLIGHT {
+            self.acked.notify_all();
+        }
+    }
+
+    /// Forget all outstanding credit. Used when the frontend (re)registers
+    /// its listeners: output emitted before a WebView reload is gone and will
+    /// never be ACKed, so carrying its credit would stall the pump forever.
+    fn reset(&self) {
+        *self.in_flight.lock() = 0;
+        self.acked.notify_all();
+    }
+
+    #[cfg(test)]
+    fn outstanding(&self) -> usize {
+        *self.in_flight.lock()
+    }
+}
 
 /// One login shell owned by a terminal pane. The PTY is spawned via
 /// `spawn()`, after which the master is held for `resize`, input goes
@@ -83,6 +138,8 @@ pub struct TerminalSession {
     /// thread (see `spawn_input_writer`). `None` before `spawn()` and after
     /// `terminate()` (dropping it closes the channel → the thread exits).
     input_tx: Mutex<Option<std::sync::mpsc::Sender<Vec<u8>>>>,
+    /// Credit window for the PTY output pump (see `PtyFlow`).
+    flow: Arc<PtyFlow>,
 }
 
 impl TerminalSession {
@@ -107,7 +164,20 @@ impl TerminalSession {
             capture_active: AtomicBool::new(false),
             conpty: Mutex::new(None),
             input_tx: Mutex::new(None),
+            flow: Arc::new(PtyFlow::default()),
         }
+    }
+
+    /// Credit the PTY flow-control window for bytes the frontend has consumed
+    /// (see the `terminal_ack` command).
+    pub fn ack_output(&self, bytes: usize) {
+        self.flow.ack(bytes);
+    }
+
+    /// Clear outstanding flow-control credit after the frontend re-registers
+    /// its PTY listeners (see `PtyFlow::reset`).
+    pub fn reset_output_flow(&self) {
+        self.flow.reset();
     }
 
     pub fn spawn(self: &Arc<Self>, cols: u16, rows: u16) -> std::io::Result<()> {
@@ -175,11 +245,20 @@ impl TerminalSession {
                 if pending.is_empty() {
                     return;
                 }
+                // Claim before emitting: the frontend's ACK can arrive as soon
+                // as the event is delivered, and subtracting before the claim
+                // would leave phantom in-flight bytes forever.
+                let len = pending.len();
+                inner.flow.claim(len);
                 let payload = serde_json::json!({
                     "id": session_id,
                     "data": base64_encode(pending),
                 });
-                let _ = app.emit_to(&label, "pty:data", payload);
+                // A failed emit (window gone) will never be ACKed; return the
+                // credit so a still-running session can't wedge on it.
+                if app.emit_to(&label, "pty:data", payload).is_err() {
+                    inner.flow.ack(len);
+                }
                 pending.clear();
             };
             loop {
@@ -191,6 +270,17 @@ impl TerminalSession {
                     && (pending.len() >= PTY_FLUSH_MAX_BYTES || pipe_avail(&reader) == 0)
                 {
                     flush(&mut pending);
+                }
+                // Backpressure: wait until the frontend has consumed enough
+                // of the outstanding output. Placed after the flush so the
+                // pending batch counts against the cap. Loop back while the
+                // frontend is still behind so no extra reads are issued.
+                if !inner.flow.wait_for_room() {
+                    continue;
+                }
+                if inner.is_exited() {
+                    flush(&mut pending);
+                    break;
                 }
                 match reader.read(&mut buf) {
                     Ok(0) => {
@@ -929,6 +1019,20 @@ mod tests {
         s.record_output(b"x");
         // The elapsed time since the write is near zero.
         assert!(s.idle_for() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn pty_flow_ack_releases_claimed_bytes() {
+        let flow = Arc::new(PtyFlow::default());
+        flow.claim(MAX_PTY_IN_FLIGHT + 4096);
+        let acker = flow.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            acker.ack(4096);
+        });
+        flow.wait_for_room();
+        handle.join().unwrap();
+        assert_eq!(flow.outstanding(), MAX_PTY_IN_FLIGHT);
     }
 
     #[test]

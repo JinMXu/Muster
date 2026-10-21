@@ -2,10 +2,32 @@
 //! remapping) lives in `services::explorer`; handlers only resolve inputs,
 //! call the service, and convert errors.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use tauri::{Manager, State, Window};
 
 use super::{emit_state, unknown_window, SharedState};
 use crate::services::explorer;
+
+/// Latest search job per window. Starting a new search flips the previous
+/// job's flag so a stale query scan stops instead of running to completion
+/// on the blocking pool.
+static SEARCH_JOBS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn begin_search(label: &str) -> Arc<AtomicBool> {
+    let mut jobs = SEARCH_JOBS.lock();
+    if let Some(previous) = jobs.get(label) {
+        previous.store(true, Ordering::Relaxed);
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    jobs.insert(label.to_string(), cancel.clone());
+    cancel
+}
 
 /// Runs on the blocking pool like `search_files`: a huge or slow (e.g.
 /// network) directory listing must not stall Tauri's main thread, where
@@ -44,7 +66,7 @@ pub fn rename_path(window: Window, state: State<SharedState>, from: String, to: 
             }
         }
     }
-    emit_state(&window, &s.lock());
+    emit_state(&window, &s);
     Ok(new_path)
 }
 
@@ -57,12 +79,21 @@ pub fn watch_directories(window: Window, paths: Vec<String>) {
 }
 
 /// Full-text search under `root` for the Search panel. Runs on the blocking
-/// pool so a big repository can't starve Tauri's async runtime.
+/// pool so a big repository can't starve Tauri's async runtime. A newer
+/// search from the same window cancels the previous one.
 #[tauri::command]
-pub async fn search_files(root: String, query: String, case_sensitive: bool) -> Result<Vec<crate::services::search::SearchMatch>, String> {
-    tokio::task::spawn_blocking(move || crate::services::search::search_in_project(&root, &query, case_sensitive))
-        .await
-        .map_err(|e| e.to_string())?
+pub async fn search_files(
+    window: Window,
+    root: String,
+    query: String,
+    case_sensitive: bool,
+) -> Result<Vec<crate::services::search::SearchMatch>, String> {
+    let cancel = begin_search(window.label());
+    tokio::task::spawn_blocking(move || {
+        crate::services::search::search_in_project_cancellable(&root, &query, case_sensitive, &cancel)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// List every file under `root` (relative paths, gitignore-aware) for the

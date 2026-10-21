@@ -93,8 +93,14 @@ impl SharedState {
 
 /// Helper: emit a fresh `state-changed` event after a mutation, to the
 /// invoking window only — other windows keep their own independent state.
-fn emit_state(window: &Window, state: &AppState) {
-    let _ = window.emit("state-changed", state.view());
+///
+/// The view is built under the state lock, but the JSON serialization and
+/// IPC enqueue happen after it is released: holding the per-window mutex
+/// through `window.emit` would block unrelated commands (PTY metadata,
+/// session lookups, ...) for the duration of the serialize.
+fn emit_state(window: &Window, state: &Arc<Mutex<AppState>>) {
+    let view = state.lock().view();
+    let _ = window.emit("state-changed", view);
 }
 
 /// Error for fallible commands whose window state no longer exists (a late
@@ -135,6 +141,7 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             terminal::list_shells,
             terminal::spawn_session,
             terminal::send_text,
+            terminal::terminal_ack,
             terminal::resize_terminal,
             terminal::clear_terminal,
             terminal::terminate_session,

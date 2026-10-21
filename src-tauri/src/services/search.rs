@@ -8,8 +8,8 @@
 //! pathological projects can't hang the panel.
 
 use serde::Serialize;
-use std::borrow::Cow;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Cap on individual file size: minified bundles and lock files larger than
 /// this are skipped entirely.
@@ -79,8 +79,26 @@ pub fn list_project_files(root: &str) -> Vec<String> {
     files
 }
 
+/// Returned (as an error) when a newer search for the same window cancelled
+/// this one. The frontend ignores stale responses by request sequence, so the
+/// message is only for logs.
+pub const SEARCH_CANCELLED: &str = "search cancelled";
+
 /// Search `query` under `root`, returning matches capped at `MAX_RESULTS`.
 pub fn search_in_project(root: &str, query: &str, case_sensitive: bool) -> Result<Vec<SearchMatch>, String> {
+    search_in_project_cancellable(root, query, case_sensitive, &AtomicBool::new(false))
+}
+
+/// Same as `search_in_project`, but stops early when `cancel` is set. Each
+/// keystroke (after the frontend debounce) supersedes the previous scan; the
+/// command layer flips the old flag so stale scans don't keep burning a
+/// blocking-pool thread over a large repository.
+pub fn search_in_project_cancellable(
+    root: &str,
+    query: &str,
+    case_sensitive: bool,
+    cancel: &AtomicBool,
+) -> Result<Vec<SearchMatch>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -88,6 +106,9 @@ pub fn search_in_project(root: &str, query: &str, case_sensitive: bool) -> Resul
     let root = Path::new(root);
     if !root.is_dir() {
         return Ok(Vec::new());
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(SEARCH_CANCELLED.to_string());
     }
 
     let walker = ignore::WalkBuilder::new(root)
@@ -111,6 +132,9 @@ pub fn search_in_project(root: &str, query: &str, case_sensitive: bool) -> Resul
         if results.len() >= MAX_RESULTS {
             break;
         }
+        if cancel.load(Ordering::Relaxed) {
+            return Err(SEARCH_CANCELLED.to_string());
+        }
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue,
@@ -132,6 +156,11 @@ pub fn search_in_project(root: &str, query: &str, case_sensitive: bool) -> Resul
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
         for (i, line) in text.split('\n').enumerate() {
+            // Poll per line block instead of per line: cheap enough to abort
+            // a huge file promptly, without an atomic load per line.
+            if i & 63 == 0 && cancel.load(Ordering::Relaxed) {
+                return Err(SEARCH_CANCELLED.to_string());
+            }
             for (start, len) in find_occurrences(line, query, case_sensitive) {
                 if results.len() >= MAX_RESULTS {
                     break;
@@ -164,22 +193,26 @@ fn looks_binary(bytes: &[u8]) -> bool {
 /// (char_start, char_len) pairs. Char-based throughout so the offsets never
 /// diverge from the char indices the frontend highlights with.
 ///
-/// The line is lowered once and searched with the standard substring search
-/// instead of a per-position char comparison: this runs for every line of
-/// every file on each (debounced) keystroke, so the constant factors matter.
+/// This runs for every line of every file on each (debounced) keystroke, so
+/// the common ASCII case-insensitive path avoids allocating a lowercased
+/// copy of the line; only non-ASCII needles pay for the Unicode fallback.
 fn find_occurrences(line: &str, needle: &str, case_sensitive: bool) -> Vec<(usize, usize)> {
     if needle.is_empty() {
         return Vec::new();
     }
-    let hay: Cow<'_, str>;
-    let pat: Cow<'_, str>;
     if case_sensitive {
-        hay = Cow::Borrowed(line);
-        pat = Cow::Borrowed(needle);
-    } else {
-        hay = Cow::Owned(line.to_lowercase());
-        pat = Cow::Owned(needle.to_lowercase());
+        return find_substring(line, needle);
     }
+    if needle.is_ascii() {
+        return find_ascii_case_insensitive(line, needle);
+    }
+    // Unicode case-insensitive fallback: lowercase both sides once.
+    find_substring(&line.to_lowercase(), &needle.to_lowercase())
+}
+
+/// Substring scan returning char offsets, advancing one char at a time so
+/// overlapping occurrences are still reported.
+fn find_substring(hay: &str, pat: &str) -> Vec<(usize, usize)> {
     let pat_chars = pat.chars().count();
     let mut out = Vec::new();
     let mut from = 0usize;
@@ -188,7 +221,7 @@ fn find_occurrences(line: &str, needle: &str, case_sensitive: bool) -> Vec<(usiz
     let mut base_chars = 0usize;
     let mut base_byte = 0usize;
     while from <= hay.len() {
-        let Some(rel) = hay[from..].find(pat.as_ref()) else { break };
+        let Some(rel) = hay[from..].find(pat) else { break };
         let byte = from + rel;
         let char_start = base_chars + hay[base_byte..byte].chars().count();
         out.push((char_start, pat_chars));
@@ -197,10 +230,42 @@ fn find_occurrences(line: &str, needle: &str, case_sensitive: bool) -> Vec<(usiz
         }
         base_chars = char_start;
         base_byte = byte;
-        // Advance one char (not the whole match) so overlapping occurrences
-        // are still reported.
         let step = hay[byte..].chars().next().map(char::len_utf8).unwrap_or(1);
         from = byte + step;
+    }
+    out
+}
+
+/// ASCII-only case-insensitive scan on the original line. ASCII bytes can't
+/// appear inside a UTF-8 multi-byte sequence, so a byte offset found here is
+/// always a char boundary; char offsets for the prefix are counted only for
+/// actual matches (there are at most `MAX_RESULTS`).
+fn find_ascii_case_insensitive(line: &str, needle: &str) -> Vec<(usize, usize)> {
+    let hay = line.as_bytes();
+    let pat = needle.as_bytes();
+    if pat.is_empty() || pat.len() > hay.len() {
+        return Vec::new();
+    }
+    let lower = pat[0].to_ascii_lowercase();
+    let upper = pat[0].to_ascii_uppercase();
+    let mut out = Vec::new();
+    let mut base_chars = 0usize;
+    let mut base_byte = 0usize;
+    let mut byte = 0usize;
+    while byte + pat.len() <= hay.len() {
+        let first = hay[byte];
+        if first == lower || first == upper {
+            if hay[byte..byte + pat.len()].eq_ignore_ascii_case(pat) {
+                let char_start = base_chars + line[base_byte..byte].chars().count();
+                out.push((char_start, pat.len()));
+                if out.len() >= MAX_RESULTS {
+                    break;
+                }
+                base_chars = char_start;
+                base_byte = byte;
+            }
+        }
+        byte += 1;
     }
     out
 }
@@ -303,6 +368,25 @@ mod tests {
         assert_eq!(search_in_project(&root, "HELLO", false).unwrap().len(), 2);
         assert_eq!(search_in_project(&root, "hello", true).unwrap().len(), 1);
         assert_eq!(search_in_project(&root, "HELLO", true).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn ascii_case_insensitive_keeps_char_columns_after_cjk() {
+        let dir = write_project(&[("a.txt", "中文 Alpha beta\n")]);
+        let root = dir.path().to_string_lossy().to_string();
+        let res = search_in_project(&root, "alpha", false).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].column, 4, "three chars precede the match");
+        assert_eq!(char_slice(&res[0].line_text, res[0].match_start, res[0].match_len), "Alpha");
+    }
+
+    #[test]
+    fn cancelled_search_returns_before_scanning() {
+        let dir = write_project(&[("a.txt", "needle")]);
+        let root = dir.path().to_string_lossy().to_string();
+        let cancel = AtomicBool::new(true);
+        let err = search_in_project_cancellable(&root, "needle", false, &cancel).unwrap_err();
+        assert_eq!(err, SEARCH_CANCELLED);
     }
 
     #[test]

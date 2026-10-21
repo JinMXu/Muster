@@ -73,6 +73,9 @@ pub fn save_settings(app: AppHandle, state: State<SharedState>, settings: Settin
             d.set_lang(&lang);
         }
     }
+    // Every window's frontend applies settings from its own snapshot; tell
+    // them to re-read so theme/font/language changes apply everywhere.
+    let _ = app.emit("settings-changed", ());
     Ok(())
 }
 

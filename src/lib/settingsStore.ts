@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "./invoke";
 import { applyFullTheme, applyThemeFonts } from "./theme";
 import { applyTerminalFont } from "./terminalRegistry";
@@ -42,8 +43,23 @@ async function applyAll(s: SettingsType): Promise<void> {
   document.documentElement.style.setProperty("--ui-font-scale", String((s.ui_font_size ?? 12) / 12));
 }
 
+/// Settings are shared across windows; when one window saves, the backend
+/// emits `settings-changed` so every other window re-applies theme/fonts/
+/// language instead of keeping its startup snapshot until the next restart.
+let listeningForChanges = false;
+function ensureSettingsListener(): void {
+  if (listeningForChanges) return;
+  listeningForChanges = true;
+  listen("settings-changed", () => {
+    void initSettings();
+  }).catch(() => {
+    listeningForChanges = false;
+  });
+}
+
 /// Load settings from the backend, store them, and apply everything.
 export async function initSettings(): Promise<void> {
+  ensureSettingsListener();
   const s = await api.settings();
   current = s;
   notify();

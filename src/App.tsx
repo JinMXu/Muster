@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -8,11 +8,9 @@ import Header from "./components/Header";
 import PaneLayout from "./components/PaneLayout";
 import RightSidebar from "./components/RightSidebar";
 import ResizeHandle from "./components/ResizeHandle";
-import CommandPalette from "./components/CommandPalette";
 import TabSwitcher, { type SwitcherTab } from "./components/TabSwitcher";
-import Settings, { type SettingsTab } from "./components/Settings";
+import type { SettingsTab } from "./components/Settings";
 import ContextMenu from "./components/ContextMenu";
-import SearchPanel from "./components/SearchPanel";
 import PasteWarning, { looksDangerousPaste } from "./components/PasteWarning";
 import DiffHosts from "./components/DiffHosts";
 import { IconTerminal } from "./components/icons";
@@ -31,6 +29,11 @@ import { openTerminalSearch } from "./lib/terminalSearch";
 import type { Lang } from "./lib/i18n/types";
 import type { AgentKind, AppStateView, DirtyFile, PaneContentKind, ProjectView, TabView, Uuid } from "./lib/types";
 import { agentLabel } from "./hooks/useAgentStatus";
+
+// Modal overlays load on first open; none are needed to render the workspace.
+const CommandPalette = lazy(() => import("./components/CommandPalette"));
+const Settings = lazy(() => import("./components/Settings"));
+const SearchPanel = lazy(() => import("./components/SearchPanel"));
 
 /// Kind of a tab = its focused pane's content kind (first pane as fallback).
 function tabKind(tab: TabView): PaneContentKind | null {
@@ -894,21 +897,23 @@ export default function App() {
         )}
       </div>
 
-      {showPalette && (
-        <CommandPalette
-          state={stateView}
-          onClose={() => setShowPalette(false)}
-          onAskNewProject={newProjectWithDialog}
-          onClearTerminal={clearTerminal}
-          onCloseProject={closeSelectedProject}
-          onCloseTab={closeTab}
-          onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
-          onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
-          onOpenSearch={() => setShowSearch(true)}
-          onReopenClosed={reopenClosedTab}
-          onClosePane={closeFocusedPane}
-        />
-      )}
+      <Suspense fallback={null}>
+        {showPalette && (
+          <CommandPalette
+            state={stateView}
+            onClose={() => setShowPalette(false)}
+            onAskNewProject={newProjectWithDialog}
+            onClearTerminal={clearTerminal}
+            onCloseProject={closeSelectedProject}
+            onCloseTab={closeTab}
+            onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
+            onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
+            onOpenSearch={() => setShowSearch(true)}
+            onReopenClosed={reopenClosedTab}
+            onClosePane={closeFocusedPane}
+          />
+        )}
+      </Suspense>
       {switcherView && (
         <TabSwitcher
           tabs={switcherView.tabs}
@@ -924,13 +929,15 @@ export default function App() {
           }}
         />
       )}
-      {showSettings && (
-        <Settings
-          initialTab={settingsTab}
-          onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }}
-        />
-      )}
-      {showSearch && <SearchPanel state={stateView} onClose={() => setShowSearch(false)} />}
+      <Suspense fallback={null}>
+        {showSettings && (
+          <Settings
+            initialTab={settingsTab}
+            onClose={() => { setShowSettings(false); refresh(); reloadSettings(); }}
+          />
+        )}
+        {showSearch && <SearchPanel state={stateView} onClose={() => setShowSearch(false)} />}
+      </Suspense>
       <ContextMenu />
       {closePrompt && (
         <div

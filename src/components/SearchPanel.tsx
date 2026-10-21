@@ -86,14 +86,18 @@ export default function SearchPanel({
     return () => clearTimeout(id);
   }, [query, caseSensitive, run]);
 
-  const groups = useMemo(() => {
-    const map = new Map<string, SearchMatch[]>();
-    for (const m of results ?? []) {
-      const arr = map.get(m.rel_path);
+  // Grouped rows plus a match -> flat-index map, so rendering doesn't run
+  // findIndex per row (O(n²) at the 500-result cap).
+  const { groups, indexOf } = useMemo(() => {
+    const byPath = new Map<string, SearchMatch[]>();
+    const index = new Map<SearchMatch, number>();
+    (results ?? []).forEach((m, i) => {
+      index.set(m, i);
+      const arr = byPath.get(m.rel_path);
       if (arr) arr.push(m);
-      else map.set(m.rel_path, [m]);
-    }
-    return [...map.entries()];
+      else byPath.set(m.rel_path, [m]);
+    });
+    return { groups: [...byPath.entries()], indexOf: index };
   }, [results]);
 
   // Flattened match list for selection/opening.
@@ -195,7 +199,7 @@ export default function SearchPanel({
                   <span className="text-muster-muted/50 tabular-nums flex-shrink-0">{matches.length}</span>
                 </div>
                 {matches.map((m) => {
-                  const i = flat.findIndex((f) => f === m);
+                  const i = indexOf.get(m) ?? -1;
                   return (
                     <MatchRow
                       key={`${m.path}:${m.line}:${m.column}`}

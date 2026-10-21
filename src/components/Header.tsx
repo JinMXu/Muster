@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { events } from "../lib/bindings";
 import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
 import { IconColumns, IconMaximize2, IconPanelRight, IconPlus, IconX } from "./icons";
@@ -61,7 +61,7 @@ export default function Header({
   // Pending "clear completed progress" timers, cleared on unmount.
   const progressTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   useEffect(() => {
-    const unlisten = listen<PtyProgress>("pty:progress", (event) => {
+    const unlisten = events.ptyProgress.listen((event) => {
       const p = event.payload;
       setProgressBySession((prev) => {
         const next = { ...prev };

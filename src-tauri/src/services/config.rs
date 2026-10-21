@@ -14,7 +14,7 @@ pub fn config_path() -> PathBuf {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Settings {
     #[serde(default = "AppTheme::system_default")]
     pub theme: AppTheme,
@@ -25,8 +25,10 @@ pub struct Settings {
     #[serde(default)]
     pub font_family: String,
     #[serde(default = "default_font_size")]
+    #[specta(type = specta_typescript::Number)]
     pub font_size: f64,
     #[serde(default = "default_ui_font_size")]
+    #[specta(type = specta_typescript::Number)]
     pub ui_font_size: f64,
     #[serde(default)]
     pub font_thicken: bool,

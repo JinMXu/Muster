@@ -12,6 +12,7 @@ use crate::services::i18n::translate;
 /// live against PATH (a freshly installed shell shows up without an app
 /// restart). Runs on the blocking pool: the PATH scan spawns lookups.
 #[tauri::command]
+#[specta::specta]
 pub async fn list_shells() -> Vec<crate::services::shell::ShellOption> {
     tokio::task::spawn_blocking(crate::services::shell::available_shells)
         .await
@@ -19,6 +20,7 @@ pub async fn list_shells() -> Vec<crate::services::shell::ShellOption> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn spawn_session(
     window: Window,
     state: State<'_, SharedState>,
@@ -48,6 +50,7 @@ pub async fn spawn_session(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn send_text(window: Window, state: State<SharedState>, id: Uuid, text: String) {
     let Some(s) = state.get_label(window.label()) else { return };
     let g = s.lock();
@@ -57,6 +60,7 @@ pub fn send_text(window: Window, state: State<SharedState>, id: Uuid, text: Stri
 /// Credit the PTY flow-control window for bytes the frontend's terminal has
 /// consumed. Batched by the frontend so this is not one IPC call per chunk.
 #[tauri::command]
+#[specta::specta]
 pub fn terminal_ack(window: Window, state: State<SharedState>, id: Uuid, bytes: usize) {
     let Some(s) = state.get_label(window.label()) else { return };
     let session = {
@@ -69,6 +73,7 @@ pub fn terminal_ack(window: Window, state: State<SharedState>, id: Uuid, bytes: 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn resize_terminal(window: Window, state: State<'_, SharedState>, id: Uuid, cols: u16, rows: u16) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(()) };
     // `resize` writes the ConPTY signal pipe with a blocking WriteFile —
@@ -87,6 +92,7 @@ pub async fn resize_terminal(window: Window, state: State<'_, SharedState>, id: 
 /// Clear the focused terminal: ask the shell to clear its screen (`clear` /
 /// `cls`). The frontend additionally wipes the xterm scrollback locally.
 #[tauri::command]
+#[specta::specta]
 pub fn clear_terminal(window: Window, state: State<SharedState>, id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     let g = s.lock();
@@ -97,6 +103,7 @@ pub fn clear_terminal(window: Window, state: State<SharedState>, id: Uuid) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn terminate_session(window: Window, state: State<'_, SharedState>, id: Uuid) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(()) };
     let session = {
@@ -116,6 +123,7 @@ pub async fn terminate_session(window: Window, state: State<'_, SharedState>, id
 /// the blocking pool: the full process enumeration is too heavy for the
 /// async runtime.
 #[tauri::command]
+#[specta::specta]
 pub async fn session_processes(session_id: Uuid, shell_pid: u32) -> Vec<crate::services::procs::ProcessInfo> {
     tokio::task::spawn_blocking(move || {
         let pids = crate::services::procs::session_pids(session_id, shell_pid);
@@ -131,6 +139,7 @@ pub async fn session_processes(session_id: Uuid, shell_pid: u32) -> Vec<crate::s
 /// system processes. Runs on the blocking pool: the validation does a full
 /// process enumeration.
 #[tauri::command]
+#[specta::specta]
 pub async fn kill_process(state: State<'_, SharedState>, session_id: Uuid, shell_pid: u32, pid: u32) -> Result<(), String> {
     let lang = crate::services::i18n::effective(&state.settings.lock().language);
     tokio::task::spawn_blocking(move || {
@@ -151,6 +160,7 @@ pub async fn kill_process(state: State<'_, SharedState>, session_id: Uuid, shell
 /// matching is skipped for broad roots (home dir, drive root). Runs on the
 /// blocking pool: the IP Helper table read and PEB queries can block.
 #[tauri::command]
+#[specta::specta]
 pub async fn session_ports(
     pids: Vec<u32>,
     project_root: Option<String>,
@@ -165,6 +175,7 @@ pub async fn session_ports(
 /// listeners are in place (closes the race between PTY output and listener
 /// setup during application startup).
 #[tauri::command]
+#[specta::specta]
 pub fn init_read_loops(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     // The frontend just (re)registered its PTY listeners. Anything emitted

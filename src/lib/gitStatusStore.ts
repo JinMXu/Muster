@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import type { GitStatusInfo } from "./types";
 import { api } from "./invoke";
+import { events } from "./bindings";
 
 /// Shared git-status cache: one poller per repo root, fan-out to every
 /// subscriber (GitPanel, FileTree decorations, ...), so multiple panels
@@ -164,13 +164,13 @@ function forceActiveRoots() {
 function ensureGlobalListeners() {
   if (globalListenersReady) return;
   globalListenersReady = true;
-  void listen<{ dir: string }>("fs-changed", (event) => {
+  void events.fsChanged.listen((event) => {
     const dir = event.payload.dir;
     for (const [root, e] of entries) {
       if (hasActive(e) && dirInsideRoot(dir, root)) scheduleForcedRefresh(root);
     }
   });
-  void listen("file-saved", forceActiveRoots);
+  void events.fileSaved.listen(() => forceActiveRoots());
   window.addEventListener("focus", forceActiveRoots);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) forceActiveRoots();

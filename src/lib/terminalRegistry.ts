@@ -3,18 +3,10 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { listen } from "@tauri-apps/api/event";
 import { api } from "./invoke";
+import { events } from "./bindings";
 import { createPtyAckBatcher } from "./ptyAcks";
 import type { ThemeColors } from "./types";
-
-interface PtyDataPayload {
-  id: string;
-  data: string;
-}
-interface PtyExitPayload {
-  id: string;
-}
 
 interface Entry {
   term: Terminal;
@@ -74,7 +66,7 @@ let listenersReady: Promise<void> | null = null;
 export function ensureListeners(): Promise<void> {
   if (!listenersReady) {
     listenersReady = Promise.all([
-      listen<PtyDataPayload>("pty:data", (event) => {
+      events.ptyData.listen((event) => {
         const { id, data } = event.payload;
         const entry = registry.get(id);
         if (!entry) {
@@ -119,7 +111,7 @@ export function ensureListeners(): Promise<void> {
           ptyAcks.queue(id, bytes.length);
         });
       }),
-      listen<PtyExitPayload>("pty:exit", (event) => {
+      events.ptyExit.listen((event) => {
         const entry = registry.get(event.payload.id);
         if (!entry) {
           pendingBuffers.delete(event.payload.id); // cleanup pending buffer

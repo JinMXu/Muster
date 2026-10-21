@@ -10,6 +10,7 @@ use super::{emit_state, SharedState};
 /// required by Tauri for async commands borrowing `State`; the frontend
 /// still just receives the `Uuid`.)
 #[tauri::command]
+#[specta::specta]
 pub async fn new_project(window: Window, state: State<'_, SharedState>, directory: Option<String>) -> Result<Uuid, String> {
     let s = state.for_label(window.label());
     // `spawn_pending` brings up the new session's PTY (ConPty +
@@ -33,6 +34,7 @@ pub async fn new_project(window: Window, state: State<'_, SharedState>, director
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn close_project(window: Window, state: State<SharedState>, id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_project(id);
@@ -40,6 +42,7 @@ pub fn close_project(window: Window, state: State<SharedState>, id: Uuid) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn select_project(window: Window, state: State<SharedState>, id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().select_project(id);
@@ -47,6 +50,7 @@ pub fn select_project(window: Window, state: State<SharedState>, id: Uuid) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn select_project_by_index(window: Window, state: State<SharedState>, idx: usize) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().select_project_by_index(idx);
@@ -54,6 +58,7 @@ pub fn select_project_by_index(window: Window, state: State<SharedState>, idx: u
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn select_next_project(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().select_next_project();
@@ -61,6 +66,7 @@ pub fn select_next_project(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn select_previous_project(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().select_previous_project();
@@ -68,6 +74,7 @@ pub fn select_previous_project(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn move_project(window: Window, state: State<SharedState>, from: Uuid, to: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().move_project(from, to);
@@ -75,6 +82,7 @@ pub fn move_project(window: Window, state: State<SharedState>, from: Uuid, to: U
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn rename_project(window: Window, state: State<SharedState>, id: Uuid, name: Option<String>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().rename_project(id, name);
@@ -82,6 +90,7 @@ pub fn rename_project(window: Window, state: State<SharedState>, id: Uuid, name:
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn set_project_directory(window: Window, state: State<SharedState>, id: Uuid, directory: Option<String>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().set_project_directory(id, directory);

@@ -28,6 +28,7 @@ const SNAPSHOT_REUSE: Duration = Duration::from_millis(1000);
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
+    #[specta(type = specta_typescript::Number)]
     pub cpu: f32,
     pub mem_bytes: u64,
     pub exe: String,

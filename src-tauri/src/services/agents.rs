@@ -227,13 +227,13 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
         for (label, rows) in per_window {
             let payload = serde_json::json!({
                 "sessions": rows.iter().map(|(id, _)| serde_json::json!({
-                    "id": id, "agent": null, "state": null
+                    "id": id, "agent": null, "state": null, "title": null, "project": null
                 })).collect::<Vec<_>>(),
             });
             let _ = app.emit_to(&label, "agent-status-changed", payload);
         }
         let sessions: Vec<_> = prev.keys().map(|id| serde_json::json!({
-            "id": id, "agent": null, "state": null
+            "id": id, "agent": null, "state": null, "title": null, "project": null
         })).collect();
         crate::services::ipc::broadcast(serde_json::json!({
             "event": "agent-status-changed",
@@ -354,8 +354,12 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
     for (label, rows) in per_window {
         let payload = serde_json::json!({
             "sessions": rows.iter().map(|(id, status)| match status {
-                Some(s) => serde_json::json!({ "id": id, "agent": s.agent, "state": s.state }),
-                None => serde_json::json!({ "id": id, "agent": null, "state": null }),
+                Some(s) => serde_json::json!({
+                    "id": id, "agent": s.agent, "state": s.state, "title": null, "project": null
+                }),
+                None => serde_json::json!({
+                    "id": id, "agent": null, "state": null, "title": null, "project": null
+                }),
             }).collect::<Vec<_>>(),
         });
         let _ = app.emit_to(&label, "agent-status-changed", payload);
@@ -371,8 +375,12 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
         let sessions = changed
             .iter()
             .map(|(id, status)| match status {
-                Some(s) => serde_json::json!({ "id": id, "agent": s.agent, "state": s.state }),
-                None => serde_json::json!({ "id": id, "agent": null, "state": null }),
+                Some(s) => serde_json::json!({
+                    "id": id, "agent": s.agent, "state": s.state, "title": null, "project": null
+                }),
+                None => serde_json::json!({
+                    "id": id, "agent": null, "state": null, "title": null, "project": null
+                }),
             })
             .collect::<Vec<_>>();
         crate::services::ipc::broadcast(serde_json::json!({

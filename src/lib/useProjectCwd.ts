@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { AppStateView } from "./types";
 import { api } from "./invoke";
+import { events } from "./bindings";
 
 /// Anchored right-panel context for the selected project.
 /// - `root`: the panel anchor - the pinned custom_directory if set, else the
@@ -112,7 +113,7 @@ function startEntry(e: Entry) {
   if (e.pinned) return;
   void tick(e);
   e.timer = setInterval(() => void tick(e), POLL_MS);
-  listen("session-cwd-changed", () => void tick(e)).then((u) => {
+  events.sessionCwdChanged.listen(() => void tick(e)).then((u) => {
     if (e.disposed) u();
     else e.unlisten = u;
   });

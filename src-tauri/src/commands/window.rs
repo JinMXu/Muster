@@ -8,6 +8,7 @@ use tauri::AppHandle;
 /// already sees the restored layout. The actual work lives in
 /// `bootstrap::spawn_window`, which the tray menu's "New Window" also calls.
 #[tauri::command]
+#[specta::specta]
 pub fn new_window(app: AppHandle) -> Result<(), String> {
     crate::bootstrap::spawn_window(&app)
 }

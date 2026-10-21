@@ -30,6 +30,8 @@ jobs:
         working-directory: src-tauri
       - run: cargo test
         working-directory: src-tauri
-      # `cargo test` regenerates src/lib/bindings.ts via specta_export.
+      # Regenerate the command/DTO bindings and fail when they're stale.
+      - run: cargo run --bin export_bindings
+        working-directory: src-tauri
       - name: Check generated bindings are up to date
         run: git diff --exit-code -- src/lib/bindings.ts

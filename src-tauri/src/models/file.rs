@@ -153,7 +153,7 @@ impl FileTab {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct FileTabInfo {
     pub id: Uuid,
     pub path: String,

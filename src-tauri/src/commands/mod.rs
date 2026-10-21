@@ -109,10 +109,26 @@ fn unknown_window(label: &str) -> String {
     format!("no state for window '{label}' (already closed)")
 }
 
-/// Register every command (called from the Tauri Builder).
-pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
-    builder
-        .invoke_handler(tauri::generate_handler![
+/// Single source of truth for command registration and TypeScript bindings.
+///
+/// The runtime uses `invoke_handler()`; the bindings export test uses the same
+/// builder with a mock runtime, so a command can't be exposed without being
+/// registered (or vice versa).
+pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    use tauri_specta::{collect_commands, collect_events, Builder};
+
+    Builder::<tauri::Wry>::new()
+        // Preserve the pre-migration behavior: a failed command rejects the
+        // invoke promise instead of returning a result union.
+        .error_handling(tauri_specta::ErrorHandlingMode::Throw)
+        // DTO 64-bit values are counts/sizes/epoch-ms that serde already
+        // serializes as JSON numbers; BigInt would break existing consumers.
+        .dangerously_cast_bigints_to_number()
+        // Unified serde mode: one type per DTO instead of separate
+        // _Serialize/_Deserialize variants (the event payloads are simple
+        // enough that phase differences only add noise).
+        .disable_serde_phases()
+        .commands(collect_commands![
             state::get_state,
             state::get_settings,
             state::config_path,
@@ -220,4 +236,25 @@ pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri
             fs::remove_from_path,
             fs::is_on_path,
         ])
+        .events(collect_events![
+            crate::events::StateChanged,
+            crate::events::TabFocused,
+            crate::events::FsChanged,
+            crate::events::FileSaved,
+            crate::events::FileReveal,
+            crate::events::PtyData,
+            crate::events::PtyExit,
+            crate::events::PtyProgress,
+            crate::events::SessionCwdChanged,
+            crate::events::AgentStatusChanged,
+            crate::events::AllAgentStatus,
+            crate::events::NotificationActivate,
+            crate::events::OpenSettings,
+            crate::events::SettingsChanged,
+        ])
+}
+
+/// Register every command (called from the Tauri Builder).
+pub fn register_all(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.invoke_handler(specta_builder().invoke_handler())
 }

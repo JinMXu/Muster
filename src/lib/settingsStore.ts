@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { api } from "./invoke";
+import { events } from "./bindings";
 import { applyFullTheme, applyThemeFonts } from "./theme";
 import { applyTerminalFont } from "./terminalRegistry";
 import { applyMonacoTheme } from "./monaco";
@@ -50,7 +50,7 @@ let listeningForChanges = false;
 function ensureSettingsListener(): void {
   if (listeningForChanges) return;
   listeningForChanges = true;
-  listen("settings-changed", () => {
+  events.settingsChanged.listen(() => {
     void initSettings();
   }).catch(() => {
     listeningForChanges = false;

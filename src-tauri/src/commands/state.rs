@@ -12,11 +12,13 @@ use crate::services::config::Settings;
 /// window asking for its state is alive by definition, and `AppStateView`
 /// has no error channel for the unknown-label case.
 #[tauri::command]
+#[specta::specta]
 pub fn get_state(window: Window, state: State<SharedState>) -> AppStateView {
     state.for_label(window.label()).lock().view()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_settings(state: State<SharedState>) -> Settings {
     state.settings.lock().clone()
 }
@@ -24,6 +26,7 @@ pub fn get_settings(state: State<SharedState>) -> Settings {
 /// Absolute path of the persisted config.toml — the Settings dialog's
 /// "config file" row reveals it in Explorer.
 #[tauri::command]
+#[specta::specta]
 pub fn config_path() -> String {
     crate::services::config::config_path().to_string_lossy().into_owned()
 }
@@ -32,6 +35,7 @@ pub fn config_path() -> String {
 /// while the main window was being recreated). Called once by a window's
 /// frontend right after mount; returns `None` when nothing is pending.
 #[tauri::command]
+#[specta::specta]
 pub fn take_pending_action(state: State<SharedState>) -> Option<String> {
     state.pending_action.lock().take()
 }
@@ -39,11 +43,13 @@ pub fn take_pending_action(state: State<SharedState>) -> Option<String> {
 /// Factory defaults for the Settings modal's "Reset" button — returned
 /// without touching the persisted config (the modal's Save does that).
 #[tauri::command]
+#[specta::specta]
 pub fn default_settings() -> Settings {
     Settings::default()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_settings(app: AppHandle, state: State<SharedState>, settings: Settings) -> Result<(), String> {
     let mut guard = state.settings.lock();
     *guard = settings;
@@ -80,24 +86,29 @@ pub fn save_settings(app: AppHandle, state: State<SharedState>, settings: Settin
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn available_themes() -> Vec<String> { crate::theme::catalog::available() }
 
 #[tauri::command]
+#[specta::specta]
 pub fn available_themes_with_info() -> Vec<crate::theme::ThemeInfo> {
     crate::theme::catalog::available_with_info()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn theme_colors(name: String, dark: bool) -> crate::theme::ThemeColors {
     crate::theme::ThemeColors::resolve(&name, dark)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn session_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<SessionInfo> {
     state.get_label(window.label()).and_then(|s| s.lock().session_info(id))
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_all_sessions(window: Window, state: State<SharedState>) -> Vec<SessionInfo> {
     state
         .get_label(window.label())
@@ -110,16 +121,19 @@ pub fn list_all_sessions(window: Window, state: State<SharedState>) -> Vec<Sessi
 /// next `agent-status-changed` push. Consumed by the command palette and the
 /// close-with-running-agents confirmation.
 #[tauri::command]
+#[specta::specta]
 pub fn agent_status_snapshot(state: State<SharedState>) -> Vec<crate::services::agents::SessionAgentStatus> {
     crate::services::agents::snapshot_rows(&state)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn file_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<crate::models::file::FileTabInfo> {
     state.get_label(window.label()).and_then(|s| s.lock().file_info(id))
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn diff_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<crate::models::diff::DiffTabInfo> {
     state.get_label(window.label()).and_then(|s| s.lock().diff_info(id))
 }
@@ -130,6 +144,7 @@ pub fn diff_info(window: Window, state: State<SharedState>, id: Uuid) -> Option<
 /// foreground. Returns true when the session was found in any window; false
 /// when it no longer exists anywhere (the caller drops the row).
 #[tauri::command]
+#[specta::specta]
 pub fn focus_agent_session(app: AppHandle, state: State<SharedState>, session_id: Uuid) -> bool {
     for (label, s) in state.all() {
         let mut g = s.lock();

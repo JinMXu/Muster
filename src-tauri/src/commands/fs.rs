@@ -33,6 +33,7 @@ fn begin_search(label: &str) -> Arc<AtomicBool> {
 /// network) directory listing must not stall Tauri's main thread, where
 /// non-async commands execute.
 #[tauri::command]
+#[specta::specta]
 pub async fn list_directory(path: String) -> Vec<explorer::DirEntry> {
     tokio::task::spawn_blocking(move || explorer::list_directory(&path))
         .await
@@ -40,18 +41,21 @@ pub async fn list_directory(path: String) -> Vec<explorer::DirEntry> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn trash_file(state: State<SharedState>, path: String) -> Result<(), String> {
     let lang = state.settings.lock().language.clone();
     explorer::trash(&path, &lang)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn create_file(state: State<SharedState>, parent_dir: String, name: String, is_directory: bool) -> Result<String, String> {
     let lang = &state.settings.lock().language;
     explorer::create_entry(&parent_dir, &name, is_directory, lang)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn rename_path(window: Window, state: State<SharedState>, from: String, to: String) -> Result<String, String> {
     let lang = state.settings.lock().language.clone();
     let new_path = explorer::rename(&from, &to, &lang)?;
@@ -74,6 +78,7 @@ pub fn rename_path(window: Window, state: State<SharedState>, from: String, to: 
 /// auto-refresh). The frontend sends every directory it currently displays;
 /// watch sets are per window label so windows don't clobber each other.
 #[tauri::command]
+#[specta::specta]
 pub fn watch_directories(window: Window, paths: Vec<String>) {
     crate::services::watch::set_watched_directories(window.app_handle(), window.label(), paths);
 }
@@ -82,6 +87,7 @@ pub fn watch_directories(window: Window, paths: Vec<String>) {
 /// pool so a big repository can't starve Tauri's async runtime. A newer
 /// search from the same window cancels the previous one.
 #[tauri::command]
+#[specta::specta]
 pub async fn search_files(
     window: Window,
     root: String,
@@ -99,6 +105,7 @@ pub async fn search_files(
 /// List every file under `root` (relative paths, gitignore-aware) for the
 /// Ctrl+P quick-open list. Runs on the blocking pool like `search_files`.
 #[tauri::command]
+#[specta::specta]
 pub async fn list_project_files(root: String) -> Vec<String> {
     tokio::task::spawn_blocking(move || crate::services::search::list_project_files(&root))
         .await
@@ -106,6 +113,7 @@ pub async fn list_project_files(root: String) -> Vec<String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn install_explorer_context_menu(state: State<SharedState>) -> Result<(), String> {
     let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -113,6 +121,7 @@ pub fn install_explorer_context_menu(state: State<SharedState>) -> Result<(), St
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn add_to_path(state: State<SharedState>) -> Result<(), String> {
     let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -120,6 +129,7 @@ pub fn add_to_path(state: State<SharedState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn remove_from_path(state: State<SharedState>) -> Result<(), String> {
     let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -127,6 +137,7 @@ pub fn remove_from_path(state: State<SharedState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn is_on_path(state: State<SharedState>) -> Result<bool, String> {
     let lang = state.settings.lock().language.clone();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;

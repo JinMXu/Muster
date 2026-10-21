@@ -6,6 +6,7 @@ use uuid::Uuid;
 use super::{emit_state, unknown_window, SharedState};
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_file(window: Window, state: State<'_, SharedState>, path: String, to_side: bool) -> Result<Option<Uuid>, String> {
     // A late invoke from an already-destroyed window resolves to null, as
     // before (async commands borrowing `State` must return a Result).
@@ -26,6 +27,7 @@ pub async fn open_file(window: Window, state: State<'_, SharedState>, path: Stri
 /// emits `file-reveal` so the hosting editor scrolls to the line. Returns the
 /// file tab id (or `None` when the path is missing / no project selected).
 #[tauri::command]
+#[specta::specta]
 pub async fn open_file_at(window: Window, state: State<'_, SharedState>, path: String, line: u32) -> Result<Option<Uuid>, String> {
     // The existence stat and the disk read both run on the blocking pool.
     let stat_path = path.clone();
@@ -49,6 +51,7 @@ pub async fn open_file_at(window: Window, state: State<'_, SharedState>, path: S
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn file_text_changed(window: Window, state: State<SharedState>, id: Uuid, text: String) {
     let Some(s) = state.get_label(window.label()) else { return };
     // Only hold the lock to clone the Arc; release it before set_text,
@@ -63,6 +66,7 @@ pub fn file_text_changed(window: Window, state: State<SharedState>, id: Uuid, te
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_selected_file(window: Window, state: State<SharedState>) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
     let (file, file_id) = {
@@ -84,6 +88,7 @@ pub fn save_selected_file(window: Window, state: State<SharedState>) -> Result<(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_file(window: Window, state: State<SharedState>, id: Uuid, text: Option<String>) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
     let file = {
@@ -101,6 +106,7 @@ pub fn save_file(window: Window, state: State<SharedState>, id: Uuid, text: Opti
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn tab_dirty_files(window: Window, state: State<SharedState>, tab_id: Uuid) -> Vec<crate::models::app::DirtyFileInfo> {
     state
         .get_label(window.label())
@@ -109,6 +115,7 @@ pub fn tab_dirty_files(window: Window, state: State<SharedState>, tab_id: Uuid) 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn project_dirty_files(window: Window, state: State<SharedState>, project_id: Uuid) -> Vec<crate::models::app::DirtyFileInfo> {
     state
         .get_label(window.label())
@@ -117,6 +124,7 @@ pub fn project_dirty_files(window: Window, state: State<SharedState>, project_id
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String, staged: bool) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
     // `open_diff` loads both sides via git2 synchronously; run it on the
@@ -131,6 +139,7 @@ pub async fn open_diff(window: Window, state: State<'_, SharedState>, repo_root:
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn open_commit_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String, old_rev: String, new_rev: String) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
     // git2 diff loading happens inside `open_commit_diff`; blocking pool, as
@@ -145,6 +154,7 @@ pub async fn open_commit_diff(window: Window, state: State<'_, SharedState>, rep
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reload_diff(window: Window, state: State<'_, SharedState>, id: Uuid) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(()) };
     // Only hold the lock to clone the Arc; the git2 reload (blocking repo
@@ -163,6 +173,7 @@ pub async fn reload_diff(window: Window, state: State<'_, SharedState>, id: Uuid
 
 /// Diff of `path` against its HEAD version (new side = the live worktree).
 #[tauri::command]
+#[specta::specta]
 pub async fn open_workdir_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
     let s2 = s.clone();
@@ -176,6 +187,7 @@ pub async fn open_workdir_diff(window: Window, state: State<'_, SharedState>, re
 
 /// Diff of `path` between `old_rev` (a checkpoint oid) and the live worktree.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_checkpoint_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String, old_rev: String) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
     let s2 = s.clone();

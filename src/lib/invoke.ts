@@ -1,194 +1,199 @@
-import { invoke } from "@tauri-apps/api/core";
+import { commands } from "./bindings";
 import type {
-  AppStateView,
   BlameLine,
-  DirEntry,
   DiffTabInfo,
-  DirtyFile,
+  DirEntry,
   FileCommit,
   FileTabInfo,
-  GitStatusInfo,
   GitGuard,
-  ListenPort,
-  ProcessInfo,
+  GitStatusInfo,
   RightPanel,
   SearchMatch,
   SessionAgentStatus,
   SessionInfo,
   Settings,
-  ShellOption,
-  ThemeColors,
-  ThemeInfo,
   Uuid,
 } from "./types";
 import { setPendingReveal, trackDiffTab, trackFileTab } from "./recentFiles";
 
-// Import the pane enums' string forms directly (Rust side listens for the
-// serde-converted lowercase form).
-export type PaneDropEdge = "left" | "right" | "top" | "bottom";
-export type FocusDirection = "up" | "down" | "left" | "right" | "next" | "previous";
-export type ResizeDirection = "up" | "down" | "left" | "right";
+// Command argument enums are generated from the Rust definitions; re-export
+// them here so existing call sites keep importing from `lib/invoke`.
+export type { FocusDirection, PaneDropEdge, ResizeDirection } from "./bindings";
+import type { FocusDirection, PaneDropEdge, ResizeDirection } from "./bindings";
 
-const c = <T>(name: string, args?: Record<string, unknown>): Promise<T> => invoke<T>(name, args);
+/// Commands that return `()` surface as `null` from the generated bindings;
+/// normalize them to the `Promise<void>` the app's `api` has always exposed.
+const done = (p: Promise<unknown>): Promise<void> => p.then(() => {});
 
 export const api = {
-  state: () => c<AppStateView>("get_state"),
-  settings: () => c<Settings>("get_settings"),
-  configPath: () => c<string>("config_path"),
-  takePendingAction: () => c<string | null>("take_pending_action"),
-  defaultSettings: () => c<Settings>("default_settings"),
-  saveSettings: (s: Settings) => c<void>("save_settings", { settings: s }),
-  availableThemes: () => c<string[]>("available_themes"),
-  availableThemesWithInfo: () => c<ThemeInfo[]>("available_themes_with_info"),
-  themeColors: (name: string, dark: boolean) => c<ThemeColors>("theme_colors", { name, dark }),
-  sessionInfo: (id: Uuid) => c<SessionInfo | null>("session_info", { id }),
-  listAllSessions: () => c<SessionInfo[]>("list_all_sessions"),
-  agentStatusSnapshot: () => c<SessionAgentStatus[]>("agent_status_snapshot"),
-  fileInfo: (id: Uuid) => c<FileTabInfo | null>("file_info", { id }),
-  diffInfo: (id: Uuid) => c<DiffTabInfo | null>("diff_info", { id }),
-  focusAgentSession: (sessionId: Uuid) => c<boolean>("focus_agent_session", { sessionId }),
+  state: () => commands.getState(),
+  // Settings has serde defaults (so the generated fields are optional while
+  // the persisted config always contains every field). Keep the stricter
+  // hand-written shape at this boundary.
+  settings: () => commands.getSettings() as unknown as Promise<Settings>,
+  configPath: () => commands.configPath(),
+  takePendingAction: () => commands.takePendingAction(),
+  defaultSettings: () => commands.defaultSettings() as unknown as Promise<Settings>,
+  saveSettings: (s: Settings) => done(commands.saveSettings(s)),
+  availableThemes: () => commands.availableThemes(),
+  availableThemesWithInfo: () => commands.availableThemesWithInfo(),
+  themeColors: (name: string, dark: boolean) => commands.themeColors(name, dark),
+  sessionInfo: (id: Uuid) =>
+    commands.sessionInfo(id) as unknown as Promise<SessionInfo | null>,
+  listAllSessions: () => commands.listAllSessions(),
+  agentStatusSnapshot: () => commands.agentStatusSnapshot() as Promise<SessionAgentStatus[]>,
+  fileInfo: (id: Uuid) =>
+    commands.fileInfo(id) as unknown as Promise<FileTabInfo | null>,
+  diffInfo: (id: Uuid) =>
+    commands.diffInfo(id) as unknown as Promise<DiffTabInfo | null>,
+  focusAgentSession: (sessionId: Uuid) => commands.focusAgentSession(sessionId),
 
-  newWindow: () => c<void>("new_window"),
-
-  newProject: (directory?: string) => c<Uuid>("new_project", { directory: directory ?? null }),
-  closeProject: (id: Uuid) => c<void>("close_project", { id }),
-  selectProject: (id: Uuid) => c<void>("select_project", { id }),
-  selectProjectByIndex: (idx: number) => c<void>("select_project_by_index", { idx }),
-  selectNextProject: () => c<void>("select_next_project"),
-  selectPreviousProject: () => c<void>("select_previous_project"),
-  moveProject: (from: Uuid, to: Uuid) => c<void>("move_project", { from, to }),
-  renameProject: (id: Uuid, name: string | null) => c<void>("rename_project", { id, name }),
+  newWindow: () => done(commands.newWindow()),
+  newProject: (directory?: string) => commands.newProject(directory ?? null),
+  closeProject: (id: Uuid) => done(commands.closeProject(id)),
+  selectProject: (id: Uuid) => done(commands.selectProject(id)),
+  selectProjectByIndex: (idx: number) => done(commands.selectProjectByIndex(idx)),
+  selectNextProject: () => done(commands.selectNextProject()),
+  selectPreviousProject: () => done(commands.selectPreviousProject()),
+  moveProject: (from: Uuid, to: Uuid) => done(commands.moveProject(from, to)),
+  renameProject: (id: Uuid, name: string | null) => done(commands.renameProject(id, name)),
   setProjectDirectory: (id: Uuid, directory: string | null) =>
-    c<void>("set_project_directory", { id, directory }),
+    done(commands.setProjectDirectory(id, directory)),
 
-  spawnSession: () => c<SessionInfo>("spawn_session", { directory: null }),
-  listShells: () => c<ShellOption[]>("list_shells"),
-  sendText: (id: Uuid, text: string) => c<void>("send_text", { id, text }),
-  terminalAck: (id: Uuid, bytes: number) => c<void>("terminal_ack", { id, bytes }),
+  spawnSession: () => commands.spawnSession(null),
+  listShells: () => commands.listShells(),
+  sendText: (id: Uuid, text: string) => commands.sendText(id, text),
+  terminalAck: (id: Uuid, bytes: number) => commands.terminalAck(id, bytes),
   resizeTerminal: (id: Uuid, cols: number, rows: number) =>
-    c<void>("resize_terminal", { id, cols, rows }),
-  clearTerminal: (id: Uuid) => c<void>("clear_terminal", { id }),
+    done(commands.resizeTerminal(id, cols, rows)),
+  clearTerminal: (id: Uuid) => commands.clearTerminal(id),
 
   sessionProcesses: (sessionId: Uuid, shellPid: number) =>
-    c<ProcessInfo[]>("session_processes", { sessionId, shellPid }),
+    commands.sessionProcesses(sessionId, shellPid),
   killProcess: (sessionId: Uuid, shellPid: number, pid: number) =>
-    c<void>("kill_process", { sessionId, shellPid, pid }),
+    done(commands.killProcess(sessionId, shellPid, pid)),
   sessionPorts: (pids: number[], projectRoot: string | null) =>
-    c<ListenPort[]>("session_ports", { pids, projectRoot }),
+    commands.sessionPorts(pids, projectRoot),
 
-  closeSelectedTab: () => c<void>("close_selected_tab"),
-  closeTab: (tabId: Uuid) => c<void>("close_tab", { tabId }),
-  selectTab: (id: Uuid) => c<void>("select_tab", { id }),
-  selectNextTab: () => c<void>("select_next_tab"),
-  selectPreviousTab: () => c<void>("select_previous_tab"),
-  moveTab: (from: Uuid, to: Uuid) => c<void>("move_tab", { from, to }),
-  renameTab: (id: Uuid, name: string | null) => c<void>("rename_tab", { id, name }),
-  closeOtherTabs: (tabId: Uuid) => c<void>("close_other_tabs", { tabId }),
-  closeTabsToRight: (tabId: Uuid) => c<void>("close_tabs_to_right", { tabId }),
-  closeAllTabs: () => c<void>("close_all_tabs"),
-  paneContextPath: (tabId: Uuid, paneId: Uuid) =>
-    c<string | null>("pane_context_path", { tabId, paneId }),
+  closeSelectedTab: () => done(commands.closeSelectedTab()),
+  closeTab: (tabId: Uuid) => done(commands.closeTab(tabId)),
+  selectTab: (id: Uuid) => done(commands.selectTab(id)),
+  selectNextTab: () => done(commands.selectNextTab()),
+  selectPreviousTab: () => done(commands.selectPreviousTab()),
+  moveTab: (from: Uuid, to: Uuid) => done(commands.moveTab(from, to)),
+  renameTab: (id: Uuid, name: string | null) => done(commands.renameTab(id, name)),
+  closeOtherTabs: (tabId: Uuid) => done(commands.closeOtherTabs(tabId)),
+  closeTabsToRight: (tabId: Uuid) => done(commands.closeTabsToRight(tabId)),
+  closeAllTabs: () => done(commands.closeAllTabs()),
+  paneContextPath: (tabId: Uuid, paneId: Uuid) => commands.paneContextPath(tabId, paneId),
 
-  split: (edge: PaneDropEdge) => c<void>("split", { edge }),
-  focusPane: (direction: FocusDirection) => c<void>("focus_pane", { direction }),
-  resizePane: (direction: ResizeDirection) => c<void>("resize_pane", { direction }),
-  resizePaneDivider: (tabId: Uuid, vertical: boolean, columnIndex: number, index: number, delta: number) =>
-    c<void>("resize_pane_divider", { tabId, vertical, columnIndex, index, delta }),
+  split: (edge: PaneDropEdge) => done(commands.split(edge)),
+  focusPane: (direction: FocusDirection) => done(commands.focusPane(direction)),
+  resizePane: (direction: ResizeDirection) => done(commands.resizePane(direction)),
+  resizePaneDivider: (
+    tabId: Uuid,
+    vertical: boolean,
+    columnIndex: number,
+    index: number,
+    delta: number
+  ) => done(commands.resizePaneDivider(tabId, vertical, columnIndex, index, delta)),
   movePane: (tabId: Uuid, paneId: Uuid, targetPaneId: Uuid, edge: PaneDropEdge) =>
-    c<void>("move_pane", { tabId, paneId, targetPaneId, edge }),
+    done(commands.movePane(tabId, paneId, targetPaneId, edge)),
   movePaneCrossTab: (sourceTabId: Uuid, paneId: Uuid, targetTabId: Uuid) =>
-    c<boolean>("move_pane_cross_tab", { sourceTabId, paneId, targetTabId }),
-  closePane: (tabId: Uuid, paneId: Uuid) => c<boolean>("close_pane", { tabId, paneId }),
-  togglePaneZoom: () => c<void>("toggle_pane_zoom"),
-  equalizePanes: () => c<void>("equalize_panes"),
+    commands.movePaneCrossTab(sourceTabId, paneId, targetTabId),
+  closePane: (tabId: Uuid, paneId: Uuid) => commands.closePane(tabId, paneId),
+  togglePaneZoom: () => done(commands.togglePaneZoom()),
+  equalizePanes: () => done(commands.equalizePanes()),
 
-  toggleLeftSidebar: () => c<void>("toggle_left_sidebar"),
-  toggleRightPanel: () => c<void>("toggle_right_panel"),
-  togglePanel: (panel: RightPanel) => c<void>("toggle_panel", { panel }),
+  toggleLeftSidebar: () => done(commands.toggleLeftSidebar()),
+  toggleRightPanel: () => done(commands.toggleRightPanel()),
+  togglePanel: (panel: RightPanel) => done(commands.togglePanel(panel)),
 
   openFile: (path: string, toSide: boolean) =>
-    c<Uuid | null>("open_file", { path, toSide }).then((id) => {
+    commands.openFile(path, toSide).then((id) => {
       trackFileTab(id, path);
       return id;
     }),
   openFileAt: (path: string, line: number) =>
-    c<Uuid | null>("open_file_at", { path, line }).then((id) => {
+    commands.openFileAt(path, line).then((id) => {
       trackFileTab(id, path);
       if (id) setPendingReveal(id, line);
       return id;
     }),
-  fileTextChanged: (id: Uuid, text: string) => c<void>("file_text_changed", { id, text }),
-  saveSelectedFile: () => c<void>("save_selected_file"),
-  saveFile: (id: Uuid, text?: string) => c<void>("save_file", { id, text: text ?? null }),
-  tabDirtyFiles: (tabId: Uuid) => c<DirtyFile[]>("tab_dirty_files", { tabId }),
-  projectDirtyFiles: (projectId: Uuid) => c<DirtyFile[]>("project_dirty_files", { projectId }),
+  fileTextChanged: (id: Uuid, text: string) => commands.fileTextChanged(id, text),
+  saveSelectedFile: () => done(commands.saveSelectedFile()),
+  saveFile: (id: Uuid, text?: string) => done(commands.saveFile(id, text ?? null)),
+  tabDirtyFiles: (tabId: Uuid) => commands.tabDirtyFiles(tabId),
+  projectDirtyFiles: (projectId: Uuid) => commands.projectDirtyFiles(projectId),
   openDiff: (repoRoot: string, path: string, staged: boolean) =>
-    c<Uuid | null>("open_diff", { repoRoot, path, staged }).then((id) => {
+    commands.openDiff(repoRoot, path, staged).then((id) => {
       trackDiffTab(id, { repoRoot, path, staged, oldRev: null, newRev: null, workdir: false });
       return id;
     }),
   openCommitDiff: (repoRoot: string, path: string, oldRev: string, newRev: string) =>
-    c<Uuid | null>("open_commit_diff", { repoRoot, path, oldRev, newRev }).then((id) => {
+    commands.openCommitDiff(repoRoot, path, oldRev, newRev).then((id) => {
       trackDiffTab(id, { repoRoot, path, staged: false, oldRev, newRev, workdir: false });
       return id;
     }),
   openWorkdirDiff: (repoRoot: string, path: string) =>
-    c<Uuid | null>("open_workdir_diff", { repoRoot, path }).then((id) => {
+    commands.openWorkdirDiff(repoRoot, path).then((id) => {
       trackDiffTab(id, { repoRoot, path, staged: false, oldRev: null, newRev: null, workdir: true });
       return id;
     }),
   openCheckpointDiff: (repoRoot: string, path: string, oldRev: string) =>
-    c<Uuid | null>("open_checkpoint_diff", { repoRoot, path, oldRev }).then((id) => {
+    commands.openCheckpointDiff(repoRoot, path, oldRev).then((id) => {
       trackDiffTab(id, { repoRoot, path, staged: false, oldRev, newRev: null, workdir: true });
       return id;
     }),
-  reloadDiff: (id: Uuid) => c<void>("reload_diff", { id }),
+  reloadDiff: (id: Uuid) => done(commands.reloadDiff(id)),
 
-  listDirectory: (path: string) => c<DirEntry[]>("list_directory", { path }),
-  trashFile: (path: string) => c<void>("trash_file", { path }),
+  listDirectory: (path: string) => commands.listDirectory(path) as Promise<DirEntry[]>,
+  trashFile: (path: string) => done(commands.trashFile(path)),
   createFile: (parentDir: string, name: string, isDirectory: boolean) =>
-    c<string>("create_file", { parentDir, name, isDirectory }),
-  renamePath: (from: string, to: string) => c<string>("rename_path", { from, to }),
-  watchDirectories: (paths: string[]) => c<void>("watch_directories", { paths }),
+    commands.createFile(parentDir, name, isDirectory),
+  renamePath: (from: string, to: string) => commands.renamePath(from, to),
+  watchDirectories: (paths: string[]) => commands.watchDirectories(paths),
   searchFiles: (root: string, query: string, caseSensitive: boolean) =>
-    c<SearchMatch[]>("search_files", { root, query, caseSensitive }),
-  listProjectFiles: (root: string) => c<string[]>("list_project_files", { root }),
+    commands.searchFiles(root, query, caseSensitive) as Promise<SearchMatch[]>,
+  listProjectFiles: (root: string) => commands.listProjectFiles(root),
 
-  gitStatus: (repoRoot: string, force = false) => c<GitStatusInfo>("git_status", { repoRoot, force }),
-  gitStatusRevision: (repoRoot: string) => c<string>("git_status_revision", { repoRoot }),
-  gitGuard: (repoRoot: string, paths: string[]) => c<GitGuard>("git_guard", { repoRoot, paths }),
-  resolveProjectRoot: (cwd: string) => c<string>("resolve_project_root", { cwd }),
+  gitStatus: (repoRoot: string, force = false) =>
+    commands.gitStatus(repoRoot, force) as Promise<GitStatusInfo>,
+  gitGuard: (repoRoot: string, paths: string[]) => commands.gitGuard(repoRoot, paths),
+  gitStatusRevision: (repoRoot: string) => commands.gitStatusRevision(repoRoot),
+  resolveProjectRoot: (cwd: string) => commands.resolveProjectRoot(cwd),
   git: {
-    stage: (repoRoot: string, path: string) => c<void>("git_stage", { repoRoot, path }),
-    stageAll: (repoRoot: string) => c<void>("git_stage_all", { repoRoot }),
-    unstage: (repoRoot: string, path: string) => c<void>("git_unstage", { repoRoot, path }),
-    unstageAll: (repoRoot: string) => c<void>("git_unstage_all", { repoRoot }),
+    stage: (repoRoot: string, path: string) => done(commands.gitStage(repoRoot, path)),
+    stageAll: (repoRoot: string) => done(commands.gitStageAll(repoRoot)),
+    unstage: (repoRoot: string, path: string) => done(commands.gitUnstage(repoRoot, path)),
+    unstageAll: (repoRoot: string) => done(commands.gitUnstageAll(repoRoot)),
     discardGuarded: (repoRoot: string, path: string, guard: GitGuard) =>
-      c<string>("git_discard_guarded", { repoRoot, path, guard }),
+      commands.gitDiscardGuarded(repoRoot, path, guard),
     discardAllGuarded: (repoRoot: string, guard: GitGuard) =>
-      c<string>("git_discard_all_guarded", { repoRoot, guard }),
+      commands.gitDiscardAllGuarded(repoRoot, guard),
     commit: (repoRoot: string, message: string, includeAll: boolean, amend: boolean) =>
-      c<string>("git_commit", { repoRoot, message, includeAll, amend }),
-    switchBranch: (repoRoot: string, name: string) => c<void>("git_switch_branch", { repoRoot, name }),
-    createBranch: (repoRoot: string, name: string) => c<void>("git_create_branch", { repoRoot, name }),
-    fetch: (repoRoot: string) => c<void>("git_fetch", { repoRoot }),
-    pull: (repoRoot: string) => c<void>("git_pull", { repoRoot }),
-    push: (repoRoot: string, remote: string) => c<void>("git_push", { repoRoot, remote }),
-    stashAll: (repoRoot: string) => c<void>("git_stash_all", { repoRoot }),
-    stashPop: (repoRoot: string) => c<void>("git_stash_pop", { repoRoot }),
-    init: (repoRoot: string) => c<void>("git_init", { repoRoot }),
+      commands.gitCommit(repoRoot, message, includeAll, amend),
+    switchBranch: (repoRoot: string, name: string) =>
+      done(commands.gitSwitchBranch(repoRoot, name)),
+    createBranch: (repoRoot: string, name: string) =>
+      done(commands.gitCreateBranch(repoRoot, name)),
+    fetch: (repoRoot: string) => done(commands.gitFetch(repoRoot)),
+    pull: (repoRoot: string) => done(commands.gitPull(repoRoot)),
+    push: (repoRoot: string, remote: string) => done(commands.gitPush(repoRoot, remote)),
+    stashAll: (repoRoot: string) => done(commands.gitStashAll(repoRoot)),
+    stashPop: (repoRoot: string) => done(commands.gitStashPop(repoRoot)),
+    init: (repoRoot: string) => done(commands.gitInit(repoRoot)),
     fileHistory: (repoRoot: string, path: string) =>
-      c<FileCommit[]>("git_file_history", { repoRoot, path }),
-    headContent: (repoRoot: string, path: string) =>
-      c<string | null>("git_head_content", { repoRoot, path }),
+      commands.gitFileHistory(repoRoot, path) as Promise<FileCommit[]>,
+    headContent: (repoRoot: string, path: string) => commands.gitHeadContent(repoRoot, path),
     blame: (repoRoot: string, path: string) =>
-      c<BlameLine[]>("git_blame", { repoRoot, path }),
-    headOid: (repoRoot: string) => c<string | null>("git_head_oid", { repoRoot }),
+      commands.gitBlame(repoRoot, path) as Promise<BlameLine[]>,
+    headOid: (repoRoot: string) => commands.gitHeadOid(repoRoot),
     checkpointChanges: (repoRoot: string, checkpoint: string) =>
-      c<string[]>("git_checkpoint_changes", { repoRoot, checkpoint }),
+      commands.gitCheckpointChanges(repoRoot, checkpoint),
   },
-  installExplorerContextMenu: () => c<void>("install_explorer_context_menu"),
-  addToPath: () => c<void>("add_to_path"),
-  removeFromPath: () => c<void>("remove_from_path"),
-  isOnPath: () => c<boolean>("is_on_path"),
+  installExplorerContextMenu: () => done(commands.installExplorerContextMenu()),
+  addToPath: () => done(commands.addToPath()),
+  removeFromPath: () => done(commands.removeFromPath()),
+  isOnPath: () => commands.isOnPath(),
 };

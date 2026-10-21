@@ -21,7 +21,7 @@ impl PaneContent {
 }
 
 /// Which side of a target pane a dragged pane is dropped on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneDropEdge {
     Left,
@@ -37,6 +37,7 @@ pub struct Pane {
     pub id: Uuid,
     pub content: PaneContent,
     /// Relative vertical share within its column.
+    #[specta(type = specta_typescript::Number)]
     pub weight: f32,
 }
 
@@ -52,6 +53,7 @@ pub struct PaneColumn {
     pub id: Uuid,
     pub panes: Vec<Pane>,
     /// Relative horizontal share within the tab.
+    #[specta(type = specta_typescript::Number)]
     pub weight: f32,
 }
 
@@ -442,7 +444,7 @@ impl PaneTab {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum FocusDirection {
     Up,
@@ -453,7 +455,7 @@ pub enum FocusDirection {
     Previous,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ResizeDirection {
     Up,

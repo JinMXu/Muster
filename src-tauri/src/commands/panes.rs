@@ -8,6 +8,7 @@ use crate::models::pane::{FocusDirection, PaneContent, PaneDropEdge, ResizeDirec
 use crate::models::project::RightPanel;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn split(window: Window, state: State<'_, SharedState>, edge: PaneDropEdge) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
     // The PTY spawn for the new session (ConPty + CreateProcessW + shell
@@ -45,6 +46,7 @@ pub async fn split(window: Window, state: State<'_, SharedState>, edge: PaneDrop
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn focus_pane(window: Window, state: State<SharedState>, direction: FocusDirection) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().focus_pane(direction);
@@ -52,6 +54,7 @@ pub fn focus_pane(window: Window, state: State<SharedState>, direction: FocusDir
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn resize_pane(window: Window, state: State<SharedState>, direction: ResizeDirection) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().resize_pane(direction);
@@ -63,6 +66,7 @@ pub fn resize_pane(window: Window, state: State<SharedState>, direction: ResizeD
 /// Skips `emit_state` to avoid full-tree serialization on every mousemove;
 /// the frontend updates pane weights locally during drag.
 #[tauri::command]
+#[specta::specta]
 pub fn resize_pane_divider(
     window: Window,
     state: State<SharedState>,
@@ -79,6 +83,7 @@ pub fn resize_pane_divider(
 /// Drag & drop rearrange: move `pane_id` to `edge` of `target_pane_id`
 /// within tab `tab_id` (intra-tab only; see PaneTab::move_pane).
 #[tauri::command]
+#[specta::specta]
 pub fn move_pane(
     window: Window,
     state: State<SharedState>,
@@ -97,6 +102,7 @@ pub fn move_pane(
 /// `target_tab_id`. When the move empties the source tab, that tab is closed
 /// (its panes were all moved out first, so nothing is terminated).
 #[tauri::command]
+#[specta::specta]
 pub fn move_pane_cross_tab(
     window: Window,
     state: State<SharedState>,
@@ -115,6 +121,7 @@ pub fn move_pane_cross_tab(
 /// Close one pane ("undo split"). When the pane is the tab's only pane, the
 /// whole tab closes instead (same cleanup as close_tab).
 #[tauri::command]
+#[specta::specta]
 pub fn close_pane(window: Window, state: State<SharedState>, tab_id: Uuid, pane_id: Uuid) -> bool {
     let Some(s) = state.get_label(window.label()) else { return false };
     let closed = s.lock().close_pane(tab_id, pane_id);
@@ -125,6 +132,7 @@ pub fn close_pane(window: Window, state: State<SharedState>, tab_id: Uuid, pane_
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn toggle_pane_zoom(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_pane_zoom();
@@ -132,6 +140,7 @@ pub fn toggle_pane_zoom(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn equalize_panes(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().equalize_panes();
@@ -141,6 +150,7 @@ pub fn equalize_panes(window: Window, state: State<SharedState>) {
 // --- Sidebar / panel -------------------------------------------------------
 
 #[tauri::command]
+#[specta::specta]
 pub fn toggle_left_sidebar(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_left_sidebar();
@@ -148,6 +158,7 @@ pub fn toggle_left_sidebar(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn toggle_right_panel(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_right_panel();
@@ -155,6 +166,7 @@ pub fn toggle_right_panel(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn toggle_panel(window: Window, state: State<SharedState>, panel: RightPanel) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().toggle_panel(panel);

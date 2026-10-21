@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, type MonacoDiffEditor } from "@monaco-editor/react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { events } from "../lib/bindings";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
 import { useSettings, updateSettings } from "../lib/settingsStore";
@@ -97,8 +98,8 @@ export default function DiffPane({ diffId, visible }: { diffId: string; visible:
     };
     load();
     const unlisteners: Promise<UnlistenFn>[] = [
-      listen<{ dir: string }>("fs-changed", onFsChanged),
-      listen("file-saved", onFileSaved),
+      events.fsChanged.listen(onFsChanged),
+      events.fileSaved.listen(onFileSaved),
     ];
     return () => {
       alive = false;

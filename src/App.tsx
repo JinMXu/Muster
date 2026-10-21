@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { events } from "./lib/bindings";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import Sidebar from "./components/Sidebar";
@@ -20,7 +20,7 @@ import { pruneSessions, clear as clearSessionTerm, ensureListeners } from "./lib
 import { pruneHosts as pruneDiffHosts } from "./lib/diffViewRegistry";
 import { getLatestText, clearLatestText } from "./lib/fileEdits";
 import { popClosedTab, pushClosedTab, filePathOf, diffMetaOf, untrackTab } from "./lib/recentFiles";
-import { useTauriEvent } from "./hooks/useTauriEvent";
+import { useTauriEventOf } from "./hooks/useTauriEvent";
 import { usePanelWidth } from "./hooks/usePanelWidth";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
 import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/context";
@@ -52,7 +52,7 @@ interface BusyAgent {
 }
 
 export default function App() {
-  const [state, setStateRaw] = useTauriEvent<AppStateView | null>("state-changed", null);
+  const [state, setStateRaw] = useTauriEventOf(events.stateChanged, null);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
@@ -88,7 +88,7 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    listen("open-settings", () => {
+    events.openSettings.listen(() => {
       setSettingsTab("general");
       setShowSettings(true);
     }).then((u) => {
@@ -237,7 +237,7 @@ export default function App() {
   // now active. A full `state-changed` from other operations (open/close/split)
   // still arrives and authoritatively replaces this patched state.
   useEffect(() => {
-    const unlisten = listen<Uuid>("tab-focused", (event) => {
+    const unlisten = events.tabFocused.listen((event) => {
       const prev = stateRef.current;
       if (!prev || !prev.selected_project_id) return;
       setStateRaw({
@@ -255,7 +255,7 @@ export default function App() {
   // A system notification was clicked: jump to the session that raised it
   // (the backend has already shown + focused this window).
   useEffect(() => {
-    const unlisten = listen<{ id: Uuid }>("notification-activate", (event) => {
+    const unlisten = events.notificationActivate.listen((event) => {
       api.focusAgentSession(event.payload.id);
     });
     return () => { unlisten.then((u) => u()); };

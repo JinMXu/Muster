@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { events } from "../lib/bindings";
 import { api } from "../lib/invoke";
 import { editorOptions, languageForPath, MONACO_THEME, ensureMonaco } from "../lib/monaco";
 import { useSettings } from "../lib/settingsStore";
@@ -142,7 +142,7 @@ export default function FilePane({
 
   // Clear the dirty indicator once the backend confirms a save.
   useEffect(() => {
-    const unlisten = listen<{ id: string }>("file-saved", (event) => {
+    const unlisten = events.fileSaved.listen((event) => {
       if (event.payload.id !== fileId) return;
       setInfo((prev) => (prev ? { ...prev, is_dirty: false } : prev));
     });
@@ -151,7 +151,7 @@ export default function FilePane({
 
   // Open-file-at-line: scroll + focus the requested line once mounted.
   useEffect(() => {
-    const unlisten = listen<{ id: string; line: number }>("file-reveal", (event) => {
+    const unlisten = events.fileReveal.listen((event) => {
       if (event.payload.id !== fileId) return;
       const editor = editorRef.current;
       if (editor) {

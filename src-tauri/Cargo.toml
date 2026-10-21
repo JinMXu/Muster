@@ -1,6 +1,9 @@
 [package]
 name = "muster"
 version = "0.1.6"
+# `tauri dev` runs bare `cargo run`; without this it refuses to choose between
+# the app binary and the bindings-export helper.
+default-run = "muster"
 description = "A native terminal workspace for Windows"
 license = "MIT"
 repository = "https://github.com/JinMXu/Muster"
@@ -27,7 +30,9 @@ git2 = { version = "0.19", default-features = false, features = ["ssh"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-specta = { version = "=2.0.0-rc.25", features = ["derive", "uuid"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive", "uuid", "function"] }
+specta-typescript = "0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt"] }
@@ -73,9 +78,6 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
 tempfile = "3"
-specta-serde = "0.0.12"
-specta-typescript = "0.0.12"
-specta-util = "0.0.12"
 
 [profile.release]
 codegen-units = 1

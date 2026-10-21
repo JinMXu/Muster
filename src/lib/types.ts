@@ -5,28 +5,43 @@
 import type {
   AgentKind,
   AgentState,
+  AgentStatusChanged,
+  AgentStatusRow,
+  AllAgentStatus,
   AppStateView,
   BlameLine,
   DiffTabInfo,
   DirEntry,
   DirtyFileInfo,
   FileCommit,
+  FileReveal,
+  FileSaved,
+  FsChanged,
   GitGuard,
   GitStatusEntry,
   GitStatusInfo,
   GuardEntry,
   ListenPort,
+  NotificationActivate,
+  OpenSettings,
   Pane,
   PaneColumn,
   PaneContent,
   ProcessInfo,
   ProjectView,
+  PtyData,
+  PtyExit,
+  PtyProgress,
   RecentCommit,
   RightPanel,
   SearchMatch,
   SessionAgentStatus,
+  SessionCwdChanged,
   SessionInfo,
+  SettingsChanged,
   ShellOption,
+  StateChanged,
+  TabFocused,
   TabView,
   ThemeColors,
   ThemeInfo,
@@ -35,28 +50,43 @@ import type {
 export type {
   AgentKind,
   AgentState,
+  AgentStatusChanged,
+  AgentStatusRow,
+  AllAgentStatus,
   AppStateView,
   BlameLine,
   DiffTabInfo,
   DirEntry,
   DirtyFileInfo,
   FileCommit,
+  FileReveal,
+  FileSaved,
+  FsChanged,
   GitGuard,
   GitStatusEntry,
   GitStatusInfo,
   GuardEntry,
   ListenPort,
+  NotificationActivate,
+  OpenSettings,
   Pane,
   PaneColumn,
   PaneContent,
   ProcessInfo,
   ProjectView,
+  PtyData,
+  PtyExit,
+  PtyProgress,
   RecentCommit,
   RightPanel,
   SearchMatch,
   SessionAgentStatus,
+  SessionCwdChanged,
   SessionInfo,
+  SettingsChanged,
   ShellOption,
+  StateChanged,
+  TabFocused,
   TabView,
   ThemeColors,
   ThemeInfo,
@@ -99,28 +129,6 @@ export interface FileTabInfo {
   is_dirty: boolean;
 }
 
-/// Payload of the `pty:progress` event (OSC 9;4 ConEmu progress sequences).
-export interface PtyProgress {
-  id: Uuid;
-  /// 0=remove, 1=normal, 2=error, 3=indeterminate, 4=warning
-  state: number;
-  progress: number;
-}
-
-/// One row of the `agent-status-changed` event payload. `agent`/`state` are
-/// null for a removal (the session's agent disappeared) — the UI drops the
-/// status dot in that case. For the global `all-agent-status` snapshot, each
-/// row additionally carries `title`/`project` so the mini-bar popover can
-/// show "what" and "where" without another IPC round-trip.
-export interface AgentStatusRow {
-  id: Uuid;
-  agent: AgentKind | null;
-  state: AgentState | null;
-  title?: string;
-  project?: string;
-}
-
-/// Payload of the `agent-status-changed` event.
-export interface AgentStatusEvent {
-  sessions: AgentStatusRow[];
-}
+/// Payload of the `agent-status-changed` event (the generated
+/// `AgentStatusChanged`); kept as an alias for the existing hooks.
+export type AgentStatusEvent = AgentStatusChanged;

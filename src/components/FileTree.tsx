@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { events } from "../lib/bindings";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { AppStateView, DirEntry, GitStatusEntry } from "../lib/types";
 import { api } from "../lib/invoke";
@@ -157,7 +158,7 @@ export default function FileTree({ state, active }: { state: AppStateView | null
     // resolved, unlisten the moment the handle arrives.
     let cancelled = false;
     const lastReload = new Map<string, number>();
-    listen<{ dir: string }>("fs-changed", (e) => {
+    events.fsChanged.listen((e) => {
       const dir = e.payload.dir;
       if (!loadedRef.current.has(dir)) return;
       // The backend already debounces per dir; this guards against bursts.

@@ -6,6 +6,7 @@ use uuid::Uuid;
 use super::{emit_state, unknown_window, SharedState};
 
 #[tauri::command]
+#[specta::specta]
 pub fn close_selected_tab(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_selected_tab();
@@ -17,6 +18,7 @@ pub fn close_selected_tab(window: Window, state: State<SharedState>) {
 /// close the wrong tab. The current selection is only reassigned when the
 /// closed tab was the selected one (see AppState::remove_tab).
 #[tauri::command]
+#[specta::specta]
 pub fn close_tab(window: Window, state: State<SharedState>, tab_id: Uuid) -> Result<(), String> {
     let Some(s) = state.get_label(window.label()) else { return Err(unknown_window(window.label())); };
     s.lock().close_tab(tab_id);
@@ -29,6 +31,7 @@ pub fn close_tab(window: Window, state: State<SharedState>, tab_id: Uuid) -> Res
 /// frequent state mutation and the frontend already has all tab data in its
 /// local state; it only needs to know which tab is now selected.
 #[tauri::command]
+#[specta::specta]
 pub fn select_tab(window: Window, state: State<SharedState>, id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     let mut g = s.lock();
@@ -43,6 +46,7 @@ pub fn select_tab(window: Window, state: State<SharedState>, id: Uuid) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn select_next_tab(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     let mut g = s.lock();
@@ -55,6 +59,7 @@ pub fn select_next_tab(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn select_previous_tab(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     let mut g = s.lock();
@@ -67,6 +72,7 @@ pub fn select_previous_tab(window: Window, state: State<SharedState>) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn move_tab(window: Window, state: State<SharedState>, from: Uuid, to: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().move_tab(from, to);
@@ -74,6 +80,7 @@ pub fn move_tab(window: Window, state: State<SharedState>, from: Uuid, to: Uuid)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn rename_tab(window: Window, state: State<SharedState>, id: Uuid, name: Option<String>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().rename_tab(id, name);
@@ -81,6 +88,7 @@ pub fn rename_tab(window: Window, state: State<SharedState>, id: Uuid, name: Opt
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn close_other_tabs(window: Window, state: State<SharedState>, tab_id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_other_tabs(tab_id);
@@ -88,6 +96,7 @@ pub fn close_other_tabs(window: Window, state: State<SharedState>, tab_id: Uuid)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn close_tabs_to_right(window: Window, state: State<SharedState>, tab_id: Uuid) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_tabs_to_right(tab_id);
@@ -95,6 +104,7 @@ pub fn close_tabs_to_right(window: Window, state: State<SharedState>, tab_id: Uu
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn close_all_tabs(window: Window, state: State<SharedState>) {
     let Some(s) = state.get_label(window.label()) else { return };
     s.lock().close_all_tabs();
@@ -103,6 +113,7 @@ pub fn close_all_tabs(window: Window, state: State<SharedState>) {
 
 /// Path behind a pane for the tab context menu's Reveal/Copy Path items.
 #[tauri::command]
+#[specta::specta]
 pub fn pane_context_path(window: Window, state: State<SharedState>, tab_id: Uuid, pane_id: Uuid) -> Option<String> {
     state
         .get_label(window.label())

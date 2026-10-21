@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { useTauriEvent } from "./useTauriEvent";
+import { useTauriEventOf } from "./useTauriEvent";
+import { events } from "../lib/bindings";
 import type { AgentStatusEvent, Uuid } from "../lib/types";
 import type { LiveAgentStatus } from "./useAgentStatus";
 
@@ -22,7 +23,7 @@ export interface AllAgentStatus extends LiveAgentStatus {
 /// all windows), so the whole map is replaced on each event — no
 /// accumulation, no stale entries when an agent disappears.
 export function useAllAgents(): Record<Uuid, AllAgentStatus> {
-  const [event] = useTauriEvent<AgentStatusEvent | null>("all-agent-status", null);
+  const [event] = useTauriEventOf(events.allAgentStatus, null);
   return useMemo(() => {
     const map: Record<Uuid, AllAgentStatus> = {};
     for (const row of event?.sessions ?? []) {

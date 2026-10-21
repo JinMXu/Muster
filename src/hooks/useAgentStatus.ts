@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { useTauriEvent } from "./useTauriEvent";
+import { useTauriEventOf } from "./useTauriEvent";
+import { events } from "../lib/bindings";
 import type { AgentKind, AgentState, AgentStatusEvent, Uuid } from "../lib/types";
 
 /// A live agent status: the hook only stores rows whose agent/state are
@@ -15,7 +16,7 @@ export interface LiveAgentStatus {
 /// changes). Returns a map of session id -> status; sessions without an
 /// agent are simply absent.
 export function useAgentStatus(): Record<Uuid, LiveAgentStatus> {
-  const [event] = useTauriEvent<AgentStatusEvent | null>("agent-status-changed", null);
+  const [event] = useTauriEventOf(events.agentStatusChanged, null);
   return useMemo(() => {
     const map: Record<Uuid, LiveAgentStatus> = {};
     for (const row of event?.sessions ?? []) {

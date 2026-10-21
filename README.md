@@ -63,7 +63,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 | **文件编辑器** | Monaco 语法高亮/查找替换/自动换行；内联 diff vs HEAD（实时更新）、git blame、文件历史；终端报错行点击直达 |
 | **差异查看器** | Monaco Diff 内联/分栏对比，支持任意两提交对比 |
 | **文件树** | 懒加载目录树，内联重命名/新建，拖拽文件到终端粘贴路径 |
-| **Git 面板** | porcelain v2 状态，暂存/提交（`Ctrl+Enter`）/push/pull/fetch/分支/stash/冲突检测/最近提交；检查点锚定快照，持续追踪后续变更 |
+| **Git 面板** | libgit2 工作区/暂存区状态，暂存/提交（`Ctrl+Enter`）/push/pull/fetch/分支/stash/冲突检测/最近提交；检查点锚定快照，持续追踪后续变更 |
 | **项目搜索** | `Ctrl+Shift+F` 全文搜索，gitignore 感知，结果按文件分组、命中高亮 |
 | **终端搜索** | 终端焦点下 `Ctrl+F` 滚动回滚搜索，增量高亮 |
 | **命令面板** | `Ctrl+P` 模糊搜索项目文件、最近文件、命令、会话 |
@@ -93,7 +93,8 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 | 编辑器 / Diff | Monaco Editor |
 | Git | git2（libgit2，含 SSH） |
 | 剪贴板安全 | 前端粘贴拦截 + 危险内容检测 |
-| 其他 | notify、sysinfo、ignore、rusqlite、toml、winreg、本地 TCP JSON IPC |
+| 类型化 IPC | Specta + tauri-specta 从 Rust 生成命令、事件与 DTO 绑定（`src/lib/bindings.ts`） |
+| 其他 | notify、sysinfo、ignore、toml、winreg、本地 TCP JSON IPC |
 
 ---
 
@@ -102,7 +103,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 ### 环境要求
 
 - Windows 10/11（依赖 WebView2 与 ConPTY）
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 22+
 - [Rust](https://rustup.rs/) 1.85+（MSVC 工具链）
 
 ### 开发
@@ -132,14 +133,21 @@ npm run tauri build    # 产出 MSI 和 NSIS 安装包
 ### 常用命令
 
 ```sh
-npm run dev            # 仅启动前端 Vite dev server
-npm run build          # 前端类型检查 + 产物构建（tsc && vite build）
+npm run dev            # 生成文件图标子集后启动前端 Vite dev server
+npm run build          # 图标子集 + 类型检查 + 前端产物构建
+npm test               # 前端 Vitest（单次运行）
+npm run test:watch     # 前端 Vitest（watch 模式）
+npm run icons:subset   # 重新生成 src/assets/vscode-icons-subset.json
 cargo check            # 后端编译检查（在 src-tauri/ 下执行）
 cargo test             # 后端单元测试（在 src-tauri/ 下执行）
+cargo run --bin export_bindings   # 改命令/事件后重新生成 src/lib/bindings.ts
 ```
 
 > 部分后端测试会真实创建进程和监听端口，默认被标记为 `#[ignore]`，需手动运行：
 > `cargo test --lib -- --ignored`
+
+> `src/lib/bindings.ts` 由 Rust 生成，不要手改。修改 `#[tauri::command]` 或事件 payload 后运行
+> `cargo run --bin export_bindings` 并提交生成结果；CI 会校验该文件是否有漂移。
 
 <details>
 <summary><b>本机工具链配置</b>（可选，仅非标准安装时需要）</summary>
@@ -271,19 +279,24 @@ muster ls                              # 列出窗口、项目、标签与 pane
 ```
 kero-windows/
 ├── src/                    # React 前端
+│   ├── assets/             # 生成的文件图标子集
 │   ├── components/         # 界面组件（终端、文件树、Git 面板、设置等）
-│   ├── lib/                # invoke 封装、设置存储、主题、i18n、模糊匹配等
+│   ├── lib/                # invoke 封装、bindings.ts（Rust 生成）、设置/主题/缓存等
 │   ├── hooks/              # Tauri 事件订阅等 React hooks
+│   ├── test/               # Vitest setup
 │   └── styles/             # 全局样式与设计变量
 ├── src-tauri/              # Rust 后端
 │   ├── src/
+│   │   ├── bin/            # export_bindings：生成前端命令/事件/类型绑定
 │   │   ├── commands/       # 全部 Tauri 命令，按域拆分（前端 invoke 入口）
+│   │   ├── events.rs       # 事件 payload 类型（Specta 生成来源）
 │   │   ├── models/         # 应用状态：项目、标签、pane、终端会话
 │   │   ├── services/       # PTY/shell、git、配置、持久化、进程、CLI 等
 │   │   └── theme/          # 主题目录与解析（含 Ghostty 主题）
 │   ├── capabilities/       # Tauri 权限声明
 │   └── assets/fonts/       # 内嵌字体（JetBrains Mono + Nerd Font 符号）
-├── scripts/                # 主题目录生成脚本
+├── scripts/                # 主题目录、文件图标子集生成脚本
+├── vitest.config.ts        # 前端测试配置
 └── docs/                   # 设计文档与截图
 ```
 

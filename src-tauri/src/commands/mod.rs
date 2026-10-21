@@ -27,6 +27,7 @@ mod project;
 mod state;
 mod tabs;
 mod terminal;
+mod usage;
 mod window;
 
 /// Per-window state registry: each window label owns an independent
@@ -36,6 +37,9 @@ pub struct SharedState {
     states: Mutex<HashMap<String, Arc<Mutex<AppState>>>>,
     settings: Arc<Mutex<Settings>>,
     pub agents: Arc<Mutex<AgentCache>>,
+    /// Token usage ledger + run tracker. Shared across windows (usage is
+    /// machine-wide, not per-window).
+    pub usage: Arc<crate::services::usage::UsageStore>,
     /// One-shot UI action queued by a tray menu item while the main window
     /// is being (re)created. The frontend consumes it on mount via
     /// `take_pending_action`, so a tray click can't be lost to the race
@@ -49,6 +53,7 @@ impl SharedState {
             states: Mutex::new(HashMap::new()),
             settings: Arc::new(Mutex::new(settings)),
             agents: Arc::new(Mutex::new(AgentCache::default())),
+            usage: Arc::new(crate::services::usage::UsageStore::new()),
             pending_action: Arc::new(Mutex::new(None)),
         }
     }
@@ -144,6 +149,11 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             state::file_info,
             state::diff_info,
             state::focus_agent_session,
+            usage::usage_overview,
+            usage::usage_compare,
+            usage::usage_runs,
+            usage::usage_coverage,
+            usage::usage_refresh,
             window::new_window,
             project::new_project,
             project::close_project,
@@ -252,6 +262,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             crate::events::NotificationActivate,
             crate::events::OpenSettings,
             crate::events::SettingsChanged,
+            crate::events::UsageUpdated,
         ])
 }
 

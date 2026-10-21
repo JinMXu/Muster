@@ -33,6 +33,7 @@ import { agentLabel } from "./hooks/useAgentStatus";
 // Modal overlays load on first open; none are needed to render the workspace.
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
 const Settings = lazy(() => import("./components/Settings"));
+const UsagePanel = lazy(() => import("./components/UsagePanel"));
 const SearchPanel = lazy(() => import("./components/SearchPanel"));
 
 /// Kind of a tab = its focused pane's content kind (first pane as fallback).
@@ -55,6 +56,7 @@ export default function App() {
   const [state, setStateRaw] = useTauriEventOf(events.stateChanged, null);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [showSearch, setShowSearch] = useState(false);
   const [agentBarOpen, setAgentBarOpen] = useState(false);
@@ -591,6 +593,23 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [closeFocusedPane]);
 
+  // Ctrl+Shift+U: open Agent Usage. Dedicated capture listener so it also
+  // works while the terminal (an xterm textarea) has focus, like Ctrl+Shift+W.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== "u") return;
+      const target = e.target as HTMLElement | null;
+      const inTerminal = !!target?.closest("[data-terminal-pane]");
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) && !inTerminal) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowUsage(true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   // ---- search shortcuts -----------------------------------------------
   // Ctrl+Shift+F opens the project search overlay; Ctrl+F opens scrollback
   // search when a terminal pane is focused (otherwise Monaco keeps its own
@@ -857,6 +876,7 @@ export default function App() {
               onRename={(id, name) => api.renameProject(id, name)}
               onProjectMenu={projectMenu}
               onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
+              onOpenUsage={() => setShowUsage(true)}
               width={leftPanel.width}
               agentBarOpen={agentBarOpen}
               onAgentBarToggle={() => setAgentBarOpen((v) => !v)}
@@ -907,6 +927,7 @@ export default function App() {
             onCloseProject={closeSelectedProject}
             onCloseTab={closeTab}
             onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
+            onOpenUsage={() => setShowUsage(true)}
             onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
             onOpenSearch={() => setShowSearch(true)}
             onReopenClosed={reopenClosedTab}
@@ -937,6 +958,13 @@ export default function App() {
           />
         )}
         {showSearch && <SearchPanel state={stateView} onClose={() => setShowSearch(false)} />}
+        {showUsage && (
+          <UsagePanel
+            open={showUsage}
+            onClose={() => setShowUsage(false)}
+            state={stateView}
+          />
+        )}
       </Suspense>
       <ContextMenu />
       {closePrompt && (

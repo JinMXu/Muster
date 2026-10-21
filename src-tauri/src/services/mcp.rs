@@ -194,6 +194,7 @@ fn tool_verb(name: &str) -> Option<&'static str> {
         "muster_procs" => "procs",
         "muster_run" => "run",
         "muster_wait" => "wait",
+        "muster_usage" => "usage",
         _ => return None,
     })
 }
@@ -325,6 +326,20 @@ fn tools() -> Vec<Value> {
                 "additionalProperties": false
             },
         }),
+        json!({
+            "name": "muster_usage",
+            "description": "Token usage comparison by agent and model: runs, tokens per run, fresh input, cache hit rate, tokens per turn and average duration. Use view=runs or coverage for history and adapter availability.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "view": { "type": "string", "enum": ["compare", "runs", "coverage", "overview"], "description": "Default compare." },
+                    "range": { "type": "string", "enum": ["today", "7d", "30d", "all"], "description": "Default 7d. CLI 'today' means the last 24h." },
+                    "project_id": { "type": "string", "description": "Optional Muster project id." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Max runs (view=runs)." }
+                },
+                "additionalProperties": false
+            },
+        }),
     ]
 }
 
@@ -368,7 +383,7 @@ mod tests {
         assert_eq!(responses[0]["result"]["protocolVersion"], "2024-11-05");
         assert_eq!(responses[0]["result"]["serverInfo"]["name"], "muster");
         let tools = responses[1]["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
         assert!(tools
             .iter()
             .any(|t| t["name"] == "muster_send" && t["inputSchema"]["required"][0] == "id"));
@@ -382,12 +397,17 @@ mod tests {
             "\n",
             r#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"muster_send_keys","arguments":{"id":"abc","keys":["ctrl+c","enter"]}}}"#,
             "\n",
+            r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"muster_usage","arguments":{"view":"runs","range":"7d","limit":20}}}"#,
+            "\n",
         );
         let (responses, calls) = run_serve(input);
         assert_eq!(calls[0].0, "capture");
         assert_eq!(calls[0].1["lines"], 50);
         assert_eq!(calls[1].0, "send-keys");
         assert_eq!(calls[1].1["keys"][0], "ctrl+c");
+        assert_eq!(calls[2].0, "usage");
+        assert_eq!(calls[2].1["view"], "runs");
+        assert_eq!(calls[2].1["limit"], 20);
         assert_eq!(responses[0]["result"]["isError"], false);
         assert!(responses[0]["result"]["content"][0]["text"]
             .as_str()

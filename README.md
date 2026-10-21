@@ -73,6 +73,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 | **会话持久化** | 布局/项目/选中状态每 5 秒自动快照，重启完整恢复 |
 | **Agent 总览** | 左下角 mini-bar 跨窗口汇总所有 agent 状态，点击跳转（`Ctrl+Shift+A`） |
 | **Agent CLI 桥** | `muster` 命令驱动终端：`split`/`send`/`capture`/`run`/`wait`/`watch` 等 |
+| **Agent 用量对比** | agent×model 效率矩阵：tokens/run、fresh input、cache hit、tokens/turn、时长；本地日志自动解析 |
 | **MCP server** | `muster mcp` 把窗口、会话与 Agent 状态暴露为 MCP 工具，Claude Code / Cursor 等可直接编排 |
 | **CLI 工具** | `muster <path>` 从任意终端打开项目，支持 `--cmd` 执行命令 |
 | **剪贴板安全** | 粘贴疑似可执行命令时弹窗确认 |
@@ -211,6 +212,9 @@ muster run -- cargo test              # 新标签 PTY 运行命令，等待完�
 muster wait <id>                       # 等待 agent 达到目标状态（默认 done）
 muster watch                           # 持续输出 agent 状态变化
 muster ls                              # 列出窗口、项目、标签与 pane
+muster usage --range 7d                # agent×model token 效率对比
+muster usage --view runs --limit 20    # 最近的 agent run
+muster usage --view coverage           # 26 种 agent 的数据源覆盖
 ```
 
 - `run` 默认 600s 超时（`--timeout N`）；`--` 之后的内容原样作为命令
@@ -229,7 +233,7 @@ muster ls                              # 列出窗口、项目、标签与 pane
 }
 ```
 
-提供 `muster_ls`、`muster_agents`、`muster_doctor`、`muster_new`、`muster_split`、`muster_send`、`muster_send_keys`、`muster_capture`、`muster_procs`、`muster_run`、`muster_wait` 共 11 个工具，底层复用同一套 IPC 桥；首次调用工具时会自动启动 Muster。使用前请先在「设置 → 集成」中把 `muster` 加入 PATH。
+提供 `muster_ls`、`muster_agents`、`muster_doctor`、`muster_new`、`muster_split`、`muster_send`、`muster_send_keys`、`muster_capture`、`muster_procs`、`muster_run`、`muster_wait`、`muster_usage` 共 12 个工具，底层复用同一套 IPC 桥；首次调用工具时会自动启动 Muster。使用前请先在「设置 → 集成」中把 `muster` 加入 PATH。
 
 ---
 

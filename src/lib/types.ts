@@ -4,7 +4,16 @@
 // the committed bindings are up to date.
 import type {
   AgentAttention,
+  AgentCoverage,
   AgentKind,
+  Confidence,
+  TokenUsage,
+  UsageCompare,
+  UsageCompareRow,
+  UsageOverview,
+  UsageRunView,
+  UsageTotals,
+  UsageUpdated,
   AgentState,
   AgentStatusChanged,
   AgentStatusRow,
@@ -50,7 +59,16 @@ import type {
 
 export type {
   AgentAttention,
+  AgentCoverage,
   AgentKind,
+  Confidence,
+  TokenUsage,
+  UsageCompare,
+  UsageCompareRow,
+  UsageOverview,
+  UsageRunView,
+  UsageTotals,
+  UsageUpdated,
   AgentState,
   AgentStatusChanged,
   AgentStatusRow,

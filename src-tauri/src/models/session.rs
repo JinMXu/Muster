@@ -199,6 +199,9 @@ impl TerminalSession {
         env.insert("COLORTERM".into(), "truecolor".into());
         env.insert("TERM_PROGRAM".into(), "muster".into());
         env.insert("TERM_PROGRAM_VERSION".into(), env!("CARGO_PKG_VERSION").into());
+        // Stable handle for agents/hooks that want to report token usage (or
+        // otherwise correlate) with this Muster session.
+        env.insert("MUSTER_SESSION_ID".into(), self.id.to_string());
         #[cfg(windows)]
         if let Some(path) = crate::services::shell::fresh_path_from_registry() {
             env.insert("PATH".into(), path);

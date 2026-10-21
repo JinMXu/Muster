@@ -2,6 +2,7 @@ import type { ProjectView, Uuid } from "../lib/types";
 import { IconFolder, IconPlus, IconSettings, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import AgentMiniBar from "./AgentMiniBar";
+import UsageMiniMeter from "./UsageMiniMeter";
 
 export default function Sidebar({
   projects,
@@ -13,6 +14,7 @@ export default function Sidebar({
   onRename,
   onProjectMenu,
   onOpenSettings,
+  onOpenUsage,
   width,
   agentBarOpen,
   onAgentBarToggle,
@@ -29,6 +31,7 @@ export default function Sidebar({
   /// re-enters the row's inline rename field.
   onProjectMenu: (project: ProjectView, x: number, y: number, requestRename: () => void) => void;
   onOpenSettings: () => void;
+  onOpenUsage: () => void;
   /// Resizable panel width in px (drag handle lives in App).
   width: number;
   /// Cross-state agent mini-bar popover is owned by App so the global
@@ -76,6 +79,7 @@ export default function Sidebar({
         onToggle={onAgentBarToggle}
         onClose={onAgentBarClose}
       />
+      <UsageMiniMeter onOpen={onOpenUsage} />
       <div className="flex-1" />
       <FooterButton title={t("sidebar.settingsTooltip")} onClick={onOpenSettings}>
         <IconSettings size={14} />

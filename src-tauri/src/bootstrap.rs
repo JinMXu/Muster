@@ -263,11 +263,12 @@ pub fn run() {
                 }
             });
 
-            // Agent awareness: background poll loop + the local IPC bridge
-            // that the `muster` CLI (and AI agents) talks to.
+            // Agent awareness: background poll loop + usage scanner + the
+            // local IPC bridge that the `muster` CLI (and AI agents) uses.
             {
                 let handle = app.handle().clone();
                 crate::services::agents::spawn_poll_loop(handle.clone());
+                crate::services::usage::spawn_scanner(handle.clone());
                 crate::services::ipc::start(handle);
             }
 

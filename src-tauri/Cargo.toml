@@ -47,6 +47,8 @@ notify = "6"
 ignore = "0.4"
 tauri-plugin-updater = "2.11.0"
 tauri-plugin-process = "2.3.1"
+zstd = "0.14.3"
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

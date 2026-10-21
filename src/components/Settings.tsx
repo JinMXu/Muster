@@ -68,6 +68,7 @@ const SHORTCUT_GROUPS: { titleKey: TKey; items: ShortcutItem[] }[] = [
       { keys: "Ctrl+Shift+F", labelKey: "shortcuts.searchPanel" },
       { keys: "Ctrl+F", labelKey: "shortcuts.terminalSearch" },
       { keys: "Ctrl+Shift+A", labelKey: "shortcuts.agentBar" },
+      { keys: "Ctrl+Shift+U", labelKey: "shortcuts.usagePanel" },
       { keys: "Ctrl+Shift+G", labelKey: "shortcuts.gitPanel" },
       { keys: "Ctrl+Shift+I", labelKey: "shortcuts.infoPanel" },
       { keys: "Ctrl+S", labelKey: "shortcuts.saveFile" },

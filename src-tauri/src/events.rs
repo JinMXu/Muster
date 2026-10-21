@@ -91,3 +91,10 @@ pub struct OpenSettings;
 
 #[derive(Debug, Clone, Serialize, specta::Type, tauri_specta::Event)]
 pub struct SettingsChanged;
+
+/// Emitted after a usage scan produced new events or runs.
+#[derive(Debug, Clone, Serialize, specta::Type, tauri_specta::Event)]
+pub struct UsageUpdated {
+    pub revision: u64,
+    pub updated_at: i64,
+}

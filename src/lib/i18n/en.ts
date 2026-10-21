@@ -417,6 +417,7 @@ const en = {
     searchPanel: "Search files in project",
     terminalSearch: "Search terminal scrollback (in a terminal)",
     agentBar: "Toggle Agents overview",
+    usagePanel: "Open Agent Usage comparison",
     gitPanel: "Git panel",
     infoPanel: "Info panel",
     saveFile: "Save file (in editor)",
@@ -450,6 +451,64 @@ const en = {
     },
     jumpTo: "Jump to session",
     empty: "No agents running",
+  },
+
+  usage: {
+    title: "Agent Usage",
+    miniTitle: ({ tokens }: { tokens: string }) => `${tokens} tokens today — open comparison`,
+    updated: ({ time }: { time: string }) => `Updated ${time}`,
+    loading: "Scanning…",
+    refresh: "Refresh",
+    localOnly: "Local logs only — nothing is uploaded",
+    allProjects: "All projects",
+    range: {
+      today: "Today",
+      "7d": "7 days",
+      "30d": "30 days",
+      all: "All",
+    },
+    tab: {
+      compare: "Compare",
+      runs: "Runs",
+      coverage: "Coverage",
+    },
+    col: {
+      agentModel: "Agent / model",
+      runs: "Runs",
+      attribution: "Attributed",
+      tokens: "Tokens",
+      tokensPerRun: "Tokens/run",
+      freshPerRun: "Fresh/run",
+      cacheHit: "Cache",
+      tokensPerTurn: "Tokens/turn",
+      outputPerTurn: "Output/turn",
+      avgDuration: "Avg time",
+      time: "Time",
+      project: "Project",
+      duration: "Duration",
+      confidence: "Attribution",
+    },
+    summary: ({ runs, events }: { runs: number; events: number }) =>
+      `${runs} runs · ${events} usage events`,
+    empty: "No token data yet. Start an agent and Muster will scan its local logs automatically.",
+    running: "running",
+    jumpToSession: "Jump to this session",
+    confidence: {
+      high: "exact",
+      medium: "inferred",
+      low: "coarse",
+    },
+    runs: {
+      empty: "No agent runs in this range.",
+    },
+    coverage: {
+      note: "Only agents with a native log adapter report automatically; the rest show unavailable rather than a fake zero.",
+      native: "native",
+      noData: "no data yet",
+      unavailable: "no source",
+      stats: ({ events, tokens }: { events: number; tokens: string }) =>
+        `${events} events · ${tokens} tokens`,
+    },
   },
 
   commandPalette: {

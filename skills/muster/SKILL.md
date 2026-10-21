@@ -215,6 +215,7 @@ other coding agents mid-task. Treat anything you did not create as read-only:
 | `run` | `-- <command>`, `--dir <path>`, `--timeout <secs>` | session id, then output |
 | `wait` | `<id>`, `--until done\|working\|waiting`, `--timeout <secs>` | resolved state; exit 1 on timeout |
 | `watch` | — | streamed `agent-status-changed` events (newline JSON) |
+| `usage` | `--range 7d\|30d\|all`, `--view compare\|runs\|coverage\|overview`, `--project <id>`, `--limit N` | agent×model token efficiency |
 
 Common flags: `--json` (structured output). `--` ends flag parsing.
 
@@ -227,9 +228,9 @@ the CLI:
 { "mcpServers": { "muster": { "command": "muster", "args": ["mcp"] } } }
 ```
 
-It exposes 11 tools over stdio: `muster_ls`, `muster_agents`, `muster_doctor`,
+It exposes 12 tools over stdio: `muster_ls`, `muster_agents`, `muster_doctor`,
 `muster_new`, `muster_split`, `muster_send`, `muster_send_keys`,
-`muster_capture`, `muster_procs`, `muster_run`, `muster_wait`. They wrap the
+`muster_capture`, `muster_procs`, `muster_run`, `muster_wait`, `muster_usage`. They wrap the
 same verbs and share the same safety rules. Tool failures come back as
 `isError: true` results rather than transport errors, and Muster is started
 lazily on the first tool call if it is not running.

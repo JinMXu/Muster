@@ -42,6 +42,17 @@ export const api = {
     commands.sessionInfo(id) as unknown as Promise<SessionInfo | null>,
   listAllSessions: () => commands.listAllSessions(),
   agentStatusSnapshot: () => commands.agentStatusSnapshot() as Promise<SessionAgentStatus[]>,
+  usageOverview: (sinceMs: number) => commands.usageOverview(sinceMs),
+  usageCompare: (sinceMs: number | null, untilMs: number | null, projectId: string | null) =>
+    commands.usageCompare(sinceMs, untilMs, projectId),
+  usageRuns: (
+    sinceMs: number | null,
+    untilMs: number | null,
+    projectId: string | null,
+    limit: number | null
+  ) => commands.usageRuns(sinceMs, untilMs, projectId, limit),
+  usageCoverage: () => commands.usageCoverage(),
+  usageRefresh: () => commands.usageRefresh(),
   fileInfo: (id: Uuid) =>
     commands.fileInfo(id) as unknown as Promise<FileTabInfo | null>,
   diffInfo: (id: Uuid) =>

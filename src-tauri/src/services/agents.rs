@@ -56,6 +56,36 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
+    /// Every kind in display order, for coverage lists and tests.
+    pub const ALL: &'static [AgentKind] = &[
+        AgentKind::Opencode,
+        AgentKind::ClaudeCode,
+        AgentKind::Codex,
+        AgentKind::KimiCode,
+        AgentKind::Aider,
+        AgentKind::Gemini,
+        AgentKind::Goose,
+        AgentKind::Atomcode,
+        AgentKind::Copilot,
+        AgentKind::Cursor,
+        AgentKind::Kiro,
+        AgentKind::Amp,
+        AgentKind::Droid,
+        AgentKind::Crush,
+        AgentKind::Cline,
+        AgentKind::ContinueCli,
+        AgentKind::Kilo,
+        AgentKind::Grok,
+        AgentKind::OpenHands,
+        AgentKind::Pi,
+        AgentKind::Vibe,
+        AgentKind::Qwen,
+        AgentKind::Qoder,
+        AgentKind::Trae,
+        AgentKind::CodeBuddy,
+        AgentKind::Comate,
+    ];
+
     /// Human-readable display name. Agent identifiers are brand names, so
     /// they are intentionally not translated.
     pub fn label(self) -> &'static str {
@@ -481,6 +511,7 @@ pub fn spawn_poll_loop(app: AppHandle) {
 }
 
 fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant) {
+    let now_ms = crate::services::usage::now_ms();
     // Fast path: nothing live to track. Skip the full-system process
     // enumeration (the most expensive step of the poll) entirely when no
     // window has a live spawned session - e.g. the app is sitting in the
@@ -498,6 +529,9 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
 
     let prev = shared.agents.lock().statuses.clone();
     if !has_live_session {
+        // No session can be running an agent; close any run the tracker still
+        // holds (e.g. the last window was closed from the tray).
+        shared.usage.end_all_runs(now_ms);
         // Nothing to detect, and nothing left to clear -> fully idle.
         if prev.is_empty() {
             return;
@@ -562,6 +596,7 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
     // snapshot instead of `refresh_and_snapshot` (which also collects CPU%,
     // memory and exe paths for every process on the machine).
     let procs_cache = crate::services::procs::refresh_and_snapshot_light();
+    let mut live_agents: HashSet<Uuid> = HashSet::new();
 
     for (label, state) in shared.all() {
         let mut g = state.lock();
@@ -598,6 +633,22 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
                     if session.record_agent(detected.kind, detected.command.clone()) {
                         persisted_changed = true;
                     }
+                    live_agents.insert(sid);
+                    let cwd = session.current_directory();
+                    let branch = if shared.usage.needs_run(sid, detected.kind, &cwd) {
+                        crate::services::usage::branch_for(&cwd)
+                    } else {
+                        None
+                    };
+                    shared.usage.observe_run(crate::services::usage::RunObservation {
+                        session_id: sid,
+                        agent: detected.kind,
+                        project_id: project.id,
+                        project: project.name(&g),
+                        cwd,
+                        branch,
+                        now_ms,
+                    });
                     // Reading the tail activates the capture ring for this
                     // session (agent sessions only). That is the price of
                     // prompt detection: ANSI-stripped lines are accumulated
@@ -662,6 +713,8 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
             g.bump();
         }
     }
+    // Runs whose agent disappeared or whose session closed are finished.
+    shared.usage.end_missing_runs(&live_agents, now_ms);
 
     // Sessions that closed entirely (in prev, no longer in current and not
     // already handled above) lose their status — the frontend drops the dot.

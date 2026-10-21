@@ -82,6 +82,15 @@ export const commands = {
 	 *  when it no longer exists anywhere (the caller drops the row).
 	 */
 	focusAgentSession: (sessionId: string) => __TAURI_INVOKE<boolean>("focus_agent_session", { sessionId }),
+	usageOverview: (sinceMs: number) => __TAURI_INVOKE<UsageOverview>("usage_overview", { sinceMs }),
+	usageCompare: (sinceMs: number | null, untilMs: number | null, projectId: string | null) => __TAURI_INVOKE<UsageCompare>("usage_compare", { sinceMs, untilMs, projectId }),
+	usageRuns: (sinceMs: number | null, untilMs: number | null, projectId: string | null, limit: number | null) => __TAURI_INVOKE<UsageRunView[]>("usage_runs", { sinceMs, untilMs, projectId, limit }),
+	usageCoverage: () => __TAURI_INVOKE<AgentCoverage[]>("usage_coverage"),
+	/**
+	 *  Force a scan. The normal scanner runs every 10s; this backs the manual
+	 *  refresh button.
+	 */
+	usageRefresh: () => __TAURI_INVOKE<number>("usage_refresh"),
 	/**
 	 *  Open a new window with its own independent projects/tabs/sessions. The
 	 *  state is registered (and restored from the window's own snapshot, if any)
@@ -327,6 +336,7 @@ export const events = {
 	settingsChanged: makeEvent<SettingsChanged>("settings-changed"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 	tabFocused: makeEvent<TabFocused>("tab-focused"),
+	usageUpdated: makeEvent<UsageUpdated>("usage-updated"),
 };
 
 /* Types */
@@ -335,6 +345,14 @@ export const events = {
  *  permission/approval prompt rather than an ordinary input prompt.
  */
 export type AgentAttention = "approval";
+
+export type AgentCoverage = {
+	agent: AgentKind,
+	has_adapter: boolean,
+	events: number,
+	runs: number,
+	total_tokens: number,
+};
 
 /**  A coding-agent CLI that Muster recognises inside a session's process tree. */
 export type AgentKind = "opencode" | "claude_code" | "codex" | "kimi_code" | "aider" | "gemini" | "goose" | "atomcode" | "copilot" | "cursor" | "kiro" | "amp" | "droid" | "crush" | "cline" | "continue_cli" | "kilo" | "grok" | "open_hands" | "pi" | "vibe" | "qwen" | "qoder" | "trae" | "code_buddy" | "comate";
@@ -385,6 +403,8 @@ export type BlameLine = {
 	/**  Relative age (reuses `relative_date`; no chrono dependency). */
 	date: string,
 };
+
+export type Confidence = "high" | "medium" | "low";
 
 export type DiffTabInfo = {
 	id: string,
@@ -740,6 +760,82 @@ export type ThemeInfo = {
 	is_dark: boolean,
 	background: string,
 	accent: string,
+};
+
+/**
+ *  Normalized token counters. `input` is always *fresh* (non-cached) input;
+ *  cached and cache-write tokens are tracked separately so agents that report
+ *  a combined input number stay comparable.
+ */
+export type TokenUsage = {
+	input: number,
+	output: number,
+	reasoning: number,
+	cache_read: number,
+	cache_write: number,
+};
+
+export type UsageCompare = {
+	since_ms: number | null,
+	until_ms: number | null,
+	project_id: string | null,
+	rows: UsageCompareRow[],
+	totals: UsageTotals,
+	coverage: AgentCoverage[],
+	updated_at: number,
+};
+
+export type UsageCompareRow = {
+	agent: AgentKind,
+	model: string | null,
+	runs: number,
+	events: number,
+	tokens: TokenUsage,
+	total_tokens: number,
+	tokens_per_run: number,
+	fresh_input_per_run: number,
+	cache_hit: number,
+	tokens_per_turn: number,
+	output_per_turn: number,
+	avg_duration_ms: number,
+	attributed_ratio: number,
+};
+
+export type UsageOverview = {
+	updated_at: number,
+	since_ms: number,
+	today: UsageTotals,
+	active_runs: UsageRunView[],
+	coverage: AgentCoverage[],
+};
+
+export type UsageRunView = {
+	id: string,
+	agent: AgentKind,
+	project_id: string,
+	project: string,
+	session_id: string,
+	cwd: string,
+	branch: string | null,
+	started_at: number,
+	ended_at: number | null,
+	tokens: TokenUsage,
+	turns: number,
+	model: string | null,
+	confidence: Confidence,
+};
+
+export type UsageTotals = {
+	tokens: TokenUsage,
+	turns: number,
+	runs: number,
+	events: number,
+};
+
+/**  Emitted after a usage scan produced new events or runs. */
+export type UsageUpdated = {
+	revision: number,
+	updated_at: number,
 };
 
 /* Tauri Specta runtime */

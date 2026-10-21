@@ -415,6 +415,7 @@ const zh = {
     searchPanel: "搜索项目中的文件",
     terminalSearch: "搜索终端回滚（在终端中）",
     agentBar: "切换 Agents 总览",
+    usagePanel: "打开 Agent 用量对比",
     gitPanel: "Git 面板",
     infoPanel: "信息面板",
     saveFile: "保存文件（编辑器中）",
@@ -447,6 +448,64 @@ const zh = {
     },
     jumpTo: "跳转到该会话",
     empty: "没有正在运行的 agent",
+  },
+
+  usage: {
+    title: "Agent 用量",
+    miniTitle: ({ tokens }: { tokens: string }) => `今日 ${tokens} tokens — 打开对比`,
+    updated: ({ time }: { time: string }) => `更新于 ${time}`,
+    loading: "正在扫描…",
+    refresh: "刷新",
+    localOnly: "仅统计本地日志，不上传",
+    allProjects: "全部项目",
+    range: {
+      today: "今天",
+      "7d": "7 天",
+      "30d": "30 天",
+      all: "全部",
+    },
+    tab: {
+      compare: "对比",
+      runs: "运行记录",
+      coverage: "覆盖",
+    },
+    col: {
+      agentModel: "Agent / 模型",
+      runs: "Runs",
+      attribution: "归因",
+      tokens: "Tokens",
+      tokensPerRun: "Tokens/run",
+      freshPerRun: "Fresh/run",
+      cacheHit: "Cache",
+      tokensPerTurn: "Tokens/turn",
+      outputPerTurn: "Output/turn",
+      avgDuration: "平均时长",
+      time: "时间",
+      project: "项目",
+      duration: "时长",
+      confidence: "归因",
+    },
+    summary: ({ runs, events }: { runs: number; events: number }) =>
+      `${runs} 次 run · ${events} 条用量事件`,
+    empty: "还没有可用的 token 数据。启动一个 agent 后，后台会扫描本地日志并自动填充。",
+    running: "运行中",
+    jumpToSession: "跳转到该会话",
+    confidence: {
+      high: "精确",
+      medium: "推断",
+      low: "粗略",
+    },
+    runs: {
+      empty: "当前范围内没有 agent run。",
+    },
+    coverage: {
+      note: "只有带原生日志适配器的 agent 能自动统计；其余 agent 显示为不可用，绝不伪造 0。",
+      native: "已接入",
+      noData: "暂无数据",
+      unavailable: "无数据源",
+      stats: ({ events, tokens }: { events: number; tokens: string }) =>
+        `${events} 条事件 · ${tokens} tokens`,
+    },
   },
 
   commandPalette: {

@@ -219,6 +219,11 @@ struct Args {
     until: Option<String>,
     /// `send-keys` combos: a space-separated string or a JSON array.
     keys: Option<Value>,
+    /// `usage`: range shorthand, view selector and filters.
+    range: Option<String>,
+    view: Option<String>,
+    limit: Option<usize>,
+    project_id: Option<String>,
 }
 
 fn handle_connection(mut stream: TcpStream, app: &AppHandle, token: &str) {
@@ -318,6 +323,7 @@ fn dispatch(app: &AppHandle, verb: &str, args_value: Value) -> Result<Value, Str
         "run" => verb_run(app, shared, &args),
         "wait" => verb_wait(shared, &args),
         "send-keys" => verb_send_keys(shared, &args),
+        "usage" => verb_usage(shared, &args),
         other => Err(format!("unknown verb '{other}'")),
     }
 }
@@ -403,6 +409,52 @@ fn verb_agents(shared: &SharedState) -> Result<Value, String> {
         .collect();
     rows.sort_by_key(|r| r["id"].as_str().unwrap_or("").to_string());
     Ok(json!({ "sessions": rows }))
+}
+
+fn verb_usage(shared: &SharedState, args: &Args) -> Result<Value, String> {
+    let now = crate::services::usage::now_ms();
+    let range = args.range.as_deref().unwrap_or("7d");
+    let (since, until) = match range {
+        // The CLI has no local-timezone API; "today" means the last 24h.
+        "today" => (Some(now - 86_400_000), None),
+        "7d" => (Some(now - 7 * 86_400_000), None),
+        "30d" => (Some(now - 30 * 86_400_000), None),
+        "all" => (None, None),
+        other => return Err(format!("unknown range '{other}' (today|7d|30d|all)")),
+    };
+    let project = match args.project_id.as_deref() {
+        Some(s) => Some(Uuid::parse_str(s).map_err(|_| format!("invalid project id '{s}'"))?),
+        None => None,
+    };
+    match args.view.as_deref().unwrap_or("compare") {
+        "overview" => {
+            let mut value = serde_json::to_value(
+                shared
+                    .usage
+                    .overview(since.unwrap_or(now - 86_400_000)),
+            )
+            .map_err(|e| e.to_string())?;
+            value["view"] = json!("overview");
+            Ok(value)
+        }
+        "runs" => Ok(json!({
+            "view": "runs",
+            "runs": shared.usage.runs(since, until, project, args.limit.unwrap_or(50)),
+        })),
+        "coverage" => Ok(json!({
+            "view": "coverage",
+            "coverage": shared.usage.coverage(),
+        })),
+        "compare" => {
+            let mut value = serde_json::to_value(
+                shared.usage.compare(since, until, project),
+            )
+            .map_err(|e| e.to_string())?;
+            value["view"] = json!("compare");
+            Ok(value)
+        }
+        other => Err(format!("unknown view '{other}' (compare|runs|coverage|overview)")),
+    }
 }
 
 fn verb_new(app: &AppHandle, shared: &SharedState, args: &Args) -> Result<Value, String> {
@@ -952,7 +1004,7 @@ pub mod client {
 
     /// The verbs this CLI understands. Anything else falls through to the
     /// normal GUI launch (e.g. `muster .` opens a project).
-    const VERBS: &[&str] = &["doctor", "ls", "agents", "new", "split", "send", "send-keys", "capture", "procs", "run", "wait", "watch"];
+    const VERBS: &[&str] = &["doctor", "ls", "agents", "new", "split", "send", "send-keys", "capture", "procs", "run", "wait", "watch", "usage"];
 
     /// Entry point from `main`: if argv looks like a CLI invocation, talk to
     /// the running app and exit; otherwise return None so the GUI boots.
@@ -997,6 +1049,10 @@ pub mod client {
         pub(crate) timeout: Option<u64>,
         pub(crate) vertical: bool,
         pub(crate) until: Option<String>,
+        pub(crate) range: Option<String>,
+        pub(crate) view: Option<String>,
+        pub(crate) limit: Option<usize>,
+        pub(crate) project: Option<String>,
         pub(crate) positionals: Vec<String>,
     }
 
@@ -1011,6 +1067,10 @@ pub mod client {
             timeout: None,
             vertical: false,
             until: None,
+            range: None,
+            view: None,
+            limit: None,
+            project: None,
             positionals: Vec::new(),
         };
         let mut i = 0;
@@ -1049,6 +1109,25 @@ pub mod client {
                 "--until" => {
                     i += 1;
                     out.until = args.get(i).cloned();
+                }
+                "--range" => {
+                    i += 1;
+                    out.range = args.get(i).cloned();
+                }
+                "--view" => {
+                    i += 1;
+                    out.view = args.get(i).cloned();
+                }
+                "--limit" => {
+                    i += 1;
+                    out.limit = Some(args
+                        .get(i)
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .ok_or("--limit needs a number")?);
+                }
+                "--project" => {
+                    i += 1;
+                    out.project = args.get(i).cloned();
                 }
                 other if other.starts_with("--") => {
                     return Err(format!("unknown flag '{other}' (use '--' before command text)"));
@@ -1111,6 +1190,14 @@ pub mod client {
                     .ok_or("send-keys needs a session id")?;
                 let keys = parsed.positionals[1..].join(" ");
                 args = json!({ "id": id, "keys": keys });
+            }
+            "usage" => {
+                args = json!({
+                    "range": parsed.range,
+                    "view": parsed.view,
+                    "limit": parsed.limit,
+                    "project_id": parsed.project,
+                });
             }
             _ => {}
         }
@@ -1378,6 +1465,68 @@ pub mod client {
                         s["agent"].as_str().unwrap_or(""),
                         s["state"].as_str().unwrap_or("")
                     );
+                }
+                0
+            }
+            "usage" => {
+                match data["view"].as_str().unwrap_or("") {
+                    "compare" => {
+                        println!(
+                            "{:<14} {:<28} {:>5} {:>12} {:>12} {:>6}",
+                            "agent", "model", "runs", "tokens", "tok/run", "cache"
+                        );
+                        for r in data["rows"].as_array().unwrap_or(&vec![]) {
+                            println!(
+                                "{:<14} {:<28} {:>5} {:>12} {:>12} {:>5.0}%",
+                                r["agent"].as_str().unwrap_or(""),
+                                r["model"].as_str().unwrap_or("-"),
+                                r["runs"].as_u64().unwrap_or(0),
+                                r["total_tokens"].as_u64().unwrap_or(0),
+                                r["tokens_per_run"].as_f64().unwrap_or(0.0),
+                                r["cache_hit"].as_f64().unwrap_or(0.0) * 100.0
+                            );
+                        }
+                    }
+                    "runs" => {
+                        for r in data["runs"].as_array().unwrap_or(&vec![]) {
+                            let tokens = r["tokens"]
+                                .as_object()
+                                .map(|t| t.values().filter_map(|v| v.as_u64()).sum::<u64>())
+                                .unwrap_or(0);
+                            println!(
+                                "{}  {:<12} {:<10} {:>10} tokens  {}",
+                                r["started_at"].as_i64().unwrap_or(0),
+                                r["agent"].as_str().unwrap_or(""),
+                                r["model"].as_str().unwrap_or("-"),
+                                tokens,
+                                r["project"].as_str().unwrap_or("")
+                            );
+                        }
+                    }
+                    "coverage" => {
+                        for c in data["coverage"].as_array().unwrap_or(&vec![]) {
+                            println!(
+                                "{:<14} {:>8} {:>12} tokens",
+                                c["agent"].as_str().unwrap_or(""),
+                                if c["has_adapter"].as_bool().unwrap_or(false) {
+                                    "native"
+                                } else {
+                                    "none"
+                                },
+                                c["total_tokens"].as_u64().unwrap_or(0)
+                            );
+                        }
+                    }
+                    "overview" => {
+                        println!(
+                            "today: {} tokens, {} runs",
+                            data["today"]["tokens"].as_object().map(|t| {
+                                t.values().filter_map(|v| v.as_u64()).sum::<u64>()
+                            }).unwrap_or(0),
+                            data["today"]["runs"].as_u64().unwrap_or(0)
+                        );
+                    }
+                    _ => {}
                 }
                 0
             }

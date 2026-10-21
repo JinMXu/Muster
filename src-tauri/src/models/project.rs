@@ -70,7 +70,15 @@ pub struct ColumnSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "lowercase")]
 pub enum PaneContentSnapshot {
-    Session { working_directory: String },
+    Session {
+        working_directory: String,
+        /// Coding agent last seen in this pane, and a minimal command to
+        /// relaunch it. Optional so snapshots from older builds still load.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<crate::services::agents::AgentKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_command: Option<String>,
+    },
     File { path: String },
     Diff {
         repo_root: String,

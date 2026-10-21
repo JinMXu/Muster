@@ -160,6 +160,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             terminal::terminal_ack,
             terminal::resize_terminal,
             terminal::clear_terminal,
+            terminal::restart_session_agent,
             terminal::terminate_session,
             terminal::session_processes,
             terminal::kill_process,

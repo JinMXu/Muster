@@ -34,6 +34,7 @@ export function useAllAgents(): Record<Uuid, AllAgentStatus> {
           id: row.id,
           agent: row.agent,
           state: row.state,
+          attention: row.attention,
           title: row.title ?? "",
           project: row.project ?? "",
         };

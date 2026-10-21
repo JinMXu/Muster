@@ -126,9 +126,31 @@ fn build_snapshot(sys: &System) -> ProcSnapshot {
         if let Some(parent) = proc_.parent() {
             snap.parents.insert(pid, parent.as_u32());
         }
-        snap.cmdline.insert(pid, (proc_.name().to_string(), proc_.cmd().join(" ")));
+        snap.cmdline.insert(pid, (proc_.name().to_string(), join_cmdline(proc_.cmd())));
     }
     snap
+}
+
+/// `sysinfo` exposes Windows command lines already split into argv (via
+/// `CommandLineToArgvW`). Joining with plain spaces would lose the boundaries
+/// of paths that contain spaces (`C:\Program Files\...`), so re-quote those
+/// arguments — agent detection and the restart-command capture both parse the
+/// joined string again.
+fn join_cmdline(args: &[String]) -> String {
+    let mut out = String::new();
+    for (i, arg) in args.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        if arg.contains([' ', '\t']) {
+            out.push('"');
+            out.push_str(arg);
+            out.push('"');
+        } else {
+            out.push_str(arg);
+        }
+    }
+    out
 }
 
 fn cached_snapshot() -> Option<Arc<ProcSnapshot>> {
@@ -246,7 +268,7 @@ pub fn process_infos(pids: &[u32]) -> Vec<ProcessInfo> {
 pub fn process_cmdline(pid: u32) -> Option<(String, String)> {
     let sys = SYSTEM.lock();
     let p = sys.process(Pid::from_u32(pid))?;
-    Some((p.name().to_string(), p.cmd().join(" ")))
+    Some((p.name().to_string(), join_cmdline(p.cmd())))
 }
 
 /// Same as `process_cmdline` but reads a caller-provided `ProcSnapshot`.
@@ -864,5 +886,19 @@ mod tests {
             mine.iter().any(|p| p.port == port),
             "own listener on {port} missing from {mine:?}"
         );
+    }
+
+    #[test]
+    fn cmdline_join_preserves_argument_boundaries() {
+        let args = vec![
+            r"C:\Program Files\nodejs\node.exe".to_string(),
+            r"C:\Users\x\cli.js".to_string(),
+            "--flag".to_string(),
+        ];
+        assert_eq!(
+            super::join_cmdline(&args),
+            r#""C:\Program Files\nodejs\node.exe" C:\Users\x\cli.js --flag"#
+        );
+        assert_eq!(super::join_cmdline(&[]), "");
     }
 }

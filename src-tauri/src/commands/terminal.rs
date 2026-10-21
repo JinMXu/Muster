@@ -102,6 +102,42 @@ pub fn clear_terminal(window: Window, state: State<SharedState>, id: Uuid) {
     }
 }
 
+/// Re-run the last coding agent detected in this session. Used after a
+/// relaunch restored a fresh shell. The stored command is the agent's
+/// invocation only (no flags), so it is safe to replay into the shell.
+#[tauri::command]
+#[specta::specta]
+pub fn restart_session_agent(window: Window, state: State<SharedState>, id: Uuid) -> Result<String, String> {
+    let Some(s) = state.get_label(window.label()) else {
+        return Err(unknown_window(window.label()));
+    };
+    let session = {
+        let g = s.lock();
+        g.sessions.get(&id).cloned()
+    }
+    .ok_or("unknown session")?;
+    if session.is_exited() {
+        return Err("session has exited".into());
+    }
+    if state.agents.lock().statuses.contains_key(&id) {
+        return Err("agent is already running".into());
+    }
+    let command = session.agent_command().ok_or("no agent to restart")?;
+    // PowerShell/Nushell parse a leading quoted path as a string, not a
+    // command; the call operator is required to execute it.
+    let mut line = command.clone();
+    if command.starts_with('"') {
+        let shell = session.shell_name.to_lowercase();
+        if shell.contains("powershell") || shell == "pwsh" {
+            line.insert_str(0, "& ");
+        } else if shell == "nu" {
+            line.insert(0, '^');
+        }
+    }
+    session.send_text(&format!("{line}\r"));
+    Ok(line)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn terminate_session(window: Window, state: State<'_, SharedState>, id: Uuid) -> Result<(), String> {

@@ -52,6 +52,7 @@ const zh = {
     splitRight: "向右拆分",
     splitDown: "向下拆分",
     closePane: "关闭窗格",
+    restartAgent: ({ agent }: { agent: string }) => `重新运行 ${agent}`,
     pasteWarningTitle: "粘贴保护",
     pasteWarningBody: "确定要粘贴此文本吗？它看起来可能包含可执行命令，粘贴后可能立即在终端中运行。",
     pasteAnyway: "仍然粘贴",
@@ -186,6 +187,8 @@ const zh = {
     exited: "已退出",
     running: "运行中",
     branch: "分支",
+    agent: "Agent",
+    restartAgent: "重新运行",
     detached: "游离",
     remote: "远程",
     unpublished: "未发布",
@@ -214,6 +217,7 @@ const zh = {
     untitled: "未命名",
     agentWorking: ({ agent }: { agent: string }) => `${agent} 正在运行`,
     agentWaiting: ({ agent }: { agent: string }) => `${agent} 等待输入`,
+    agentApproval: ({ agent }: { agent: string }) => `${agent} 等待你批准`,
     agentDone: ({ agent }: { agent: string }) => `${agent} 已完成 — 查看结果`,
   },
 
@@ -430,6 +434,7 @@ const zh = {
   agents: {
     title: "Agents",
     tooltipDone: ({ n }: { n: number }) => `${n} 个 agent 已完成，待查看`,
+    tooltipApproval: ({ n }: { n: number }) => `${n} 个 agent 等待你批准`,
     tooltipWaiting: ({ n }: { n: number }) => `${n} 个 agent 待输入`,
     tooltipRunning: ({ n }: { n: number }) => `${n} 个 agent 在运行`,
     tooltipMixed: ({ done, waiting, working }: { done: number; waiting: number; working: number }) =>
@@ -437,6 +442,7 @@ const zh = {
     state: {
       working: "运行中",
       waiting: "待输入",
+      approval: "待批准",
       done: "已完成",
     },
     jumpTo: "跳转到该会话",

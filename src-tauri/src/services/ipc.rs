@@ -399,7 +399,7 @@ fn verb_agents(shared: &SharedState) -> Result<Value, String> {
         .lock()
         .statuses
         .iter()
-        .map(|(id, s)| json!({ "id": id, "agent": s.agent, "state": s.state }))
+        .map(|(id, s)| json!({ "id": id, "agent": s.agent, "state": s.state, "attention": s.attention }))
         .collect();
     rows.sort_by_key(|r| r["id"].as_str().unwrap_or("").to_string());
     Ok(json!({ "sessions": rows }))
@@ -961,6 +961,10 @@ pub mod client {
         // transcode non-ASCII output to mojibake on a human-facing console;
         // agents piping our stdout get bytes either way).
         set_console_utf8();
+        // `mcp` is a long-lived stdio server, not a one-shot request.
+        if argv.len() >= 2 && argv[1] == "mcp" {
+            return Some(crate::services::mcp::run());
+        }
         if argv.len() < 2 || !VERBS.contains(&argv[1].as_str()) {
             return None;
         }
@@ -1151,8 +1155,14 @@ pub mod client {
         Ok(0)
     }
 
-    fn ensure_info() -> Result<IpcInfo, String> {
-        if let Some(info) = read_info() {
+    /// Run one verb against the running app, starting Muster if needed.
+    /// The MCP adapter is long-lived and calls this once per tool invocation.
+    pub(crate) fn call(verb: &str, args: Value) -> Result<Value, String> {
+        let info = ensure_info()?;
+        request(&info, verb, args)
+    }
+
+    fn ensure_info() -> Result<IpcInfo, String> {        if let Some(info) = read_info() {
             if try_connect(&info).is_ok() {
                 return Ok(info);
             }
@@ -1161,7 +1171,15 @@ pub mod client {
         // Start it and wait for the server to come up.
         let exe = std::env::current_exe().map_err(|e| format!("cannot locate muster binary: {e}"))?;
         log::debug!("ipc client: starting {exe:?}");
-        if let Err(e) = std::process::Command::new(&exe).spawn() {
+        // Detach the GUI's stdio: when this client is `muster mcp`, the
+        // inherited handles are the MCP client's pipes, and a long-lived GUI
+        // holding them open would prevent the client from seeing EOF.
+        let mut command = std::process::Command::new(&exe);
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Err(e) = command.spawn() {
             return Err(format!("cannot start Muster: {e}"));
         }
         let deadline = Instant::now() + BOOT_WAIT;

@@ -21,7 +21,9 @@ interface CommandItem {
 const fileIcon = <IconFile size={12} />;
 
 /// Agent status dot colors, matching the AgentMiniBar.
-const AGENT_DOT: Record<AgentState, string> = {
+type AgentDotKind = AgentState | "approval";
+const AGENT_DOT: Record<AgentDotKind, string> = {
+  approval: "bg-rose-400 animate-pulse",
   working: "bg-emerald-400",
   waiting: "bg-amber-400 animate-pulse",
   done: "bg-sky-400",
@@ -61,7 +63,7 @@ export default function CommandPalette({
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [agentStates, setAgentStates] = useState<Record<Uuid, AgentState>>({});
+  const [agentStates, setAgentStates] = useState<Record<Uuid, AgentDotKind>>({});
   const [projectFiles, setProjectFiles] = useState<string[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recent = useSyncExternalStore(subscribeRecentFiles, getRecentFiles);
@@ -72,8 +74,10 @@ export default function CommandPalette({
     // dot immediately (the push events only fire on changes, so a fresh
     // palette mount would otherwise render without any dots).
     api.agentStatusSnapshot().then((rows) => {
-      const map: Record<Uuid, AgentState> = {};
-      for (const r of rows) map[r.session_id] = r.state;
+      const map: Record<Uuid, AgentDotKind> = {};
+      for (const r of rows) {
+        map[r.session_id] = r.attention === "approval" ? "approval" : r.state;
+      }
       setAgentStates(map);
     }).catch(() => {});
     setTimeout(() => inputRef.current?.focus(), 0);

@@ -52,6 +52,7 @@ const en = {
     splitRight: "Split Right",
     splitDown: "Split Down",
     closePane: "Close Pane",
+    restartAgent: ({ agent }: { agent: string }) => `Restart ${agent}`,
     pasteWarningTitle: "Paste Protection",
     pasteWarningBody: "Are you sure you want to paste this text? It looks like it may contain executable commands. Pasted commands can execute immediately in the terminal.",
     pasteAnyway: "Paste Anyway",
@@ -186,6 +187,8 @@ const en = {
     exited: "exited",
     running: "running",
     branch: "Branch",
+    agent: "Agent",
+    restartAgent: "Restart",
     detached: "detached",
     remote: "Remote",
     unpublished: "unpublished",
@@ -214,6 +217,7 @@ const en = {
     untitled: "untitled",
     agentWorking: ({ agent }: { agent: string }) => `${agent} is working`,
     agentWaiting: ({ agent }: { agent: string }) => `${agent} is waiting for input`,
+    agentApproval: ({ agent }: { agent: string }) => `${agent} needs your approval`,
     agentDone: ({ agent }: { agent: string }) => `${agent} finished — review the result`,
   },
 
@@ -433,6 +437,7 @@ const en = {
     title: "Agents",
     /// Tooltip — counts split by state. Mixed uses {done}, {waiting}, {working}.
     tooltipDone: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} finished — review`,
+    tooltipApproval: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} waiting for your approval`,
     tooltipWaiting: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} waiting for input`,
     tooltipRunning: ({ n }: { n: number }) => `${n} agent${n === 1 ? "" : "s"} running`,
     tooltipMixed: ({ done, waiting, working }: { done: number; waiting: number; working: number }) =>
@@ -440,6 +445,7 @@ const en = {
     state: {
       working: "running",
       waiting: "waiting",
+      approval: "needs approval",
       done: "done",
     },
     jumpTo: "Jump to session",

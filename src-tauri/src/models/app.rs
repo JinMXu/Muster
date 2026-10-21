@@ -155,7 +155,7 @@ impl AppState {
                     let mut panes: Vec<Pane> = Vec::new();
                     for pane_snap in &col_snap.panes {
                         let content = match &pane_snap.content {
-                            PaneContentSnapshot::Session { working_directory } => {
+                            PaneContentSnapshot::Session { working_directory, agent, agent_command } => {
                                 let dir = if working_directory.is_empty() {
                                     proj_snap
                                         .custom_directory
@@ -170,6 +170,9 @@ impl AppState {
                                     dir,
                                     self.resolved_shell(),
                                 ));
+                                if let Some(kind) = agent {
+                                    session.restore_agent(*kind, agent_command.clone());
+                                }
                                 let sid = session.id;
                                 self.sessions.insert(sid, session);
                                 PaneContent::Session(sid)
@@ -1058,7 +1061,11 @@ mod tests {
 
     fn session_pane(wd: &str, weight: f32) -> PaneSnapshot {
         PaneSnapshot {
-            content: PaneContentSnapshot::Session { working_directory: wd.to_string() },
+            content: PaneContentSnapshot::Session {
+                working_directory: wd.to_string(),
+                agent: None,
+                agent_command: None,
+            },
             weight,
         }
     }
@@ -1403,5 +1410,31 @@ mod tests {
                 .right_panel_tab,
             Some(RightPanel::Git)
         );
+    }
+
+    #[test]
+    fn session_snapshot_agent_fields_are_optional_and_roundtrip() {
+        // Older snapshots only stored the cwd; they must keep loading.
+        let old = r#"{"projects":[{"tabs":[{"columns":[{"panes":[{"content":{"kind":"session","data":{"working_directory":"C:\\work"}},"weight":1.0}],"weight":1.0}],"focused_column":0,"focused_row":0,"custom_name":null}],"selected_tab_index":null}],"selected_project_index":null}"#;
+        let mut snapshot: SessionSnapshot = serde_json::from_str(old).expect("old snapshot parses");
+        let pane = &mut snapshot.projects[0].tabs[0].columns[0].panes[0].content;
+        let PaneContentSnapshot::Session { working_directory, agent, agent_command } = pane else {
+            panic!("expected session pane");
+        };
+        assert_eq!(working_directory, r"C:\work");
+        assert!(agent.is_none());
+        assert!(agent_command.is_none());
+
+        *agent = Some(crate::services::agents::AgentKind::ClaudeCode);
+        *agent_command = Some("claude".into());
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let back: SessionSnapshot = serde_json::from_str(&json).unwrap();
+        let PaneContentSnapshot::Session { agent, agent_command, .. } =
+            &back.projects[0].tabs[0].columns[0].panes[0].content
+        else {
+            panic!("expected session pane");
+        };
+        assert_eq!(*agent, Some(crate::services::agents::AgentKind::ClaudeCode));
+        assert_eq!(agent_command.as_deref(), Some("claude"));
     }
 }

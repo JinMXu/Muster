@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTauriEventOf } from "./useTauriEvent";
 import { events } from "../lib/bindings";
-import type { AgentKind, AgentState, AgentStatusEvent, Uuid } from "../lib/types";
+import type { AgentAttention, AgentKind, AgentState, AgentStatusEvent, Uuid } from "../lib/types";
 
 /// A live agent status: the hook only stores rows whose agent/state are
 /// present (removal rows are deleted instead).
@@ -9,6 +9,7 @@ export interface LiveAgentStatus {
   id: Uuid;
   agent: AgentKind;
   state: AgentState;
+  attention: AgentAttention | null;
 }
 
 /// Live coding-agent status per session, fed by the backend's
@@ -46,5 +47,41 @@ export function agentLabel(agent: AgentKind): string {
       return "Goose";
     case "atomcode":
       return "AtomCode";
+    case "copilot":
+      return "GitHub Copilot";
+    case "cursor":
+      return "Cursor";
+    case "kiro":
+      return "Kiro";
+    case "amp":
+      return "Amp";
+    case "droid":
+      return "Factory Droid";
+    case "crush":
+      return "Crush";
+    case "cline":
+      return "Cline";
+    case "continue_cli":
+      return "Continue";
+    case "kilo":
+      return "Kilo Code";
+    case "grok":
+      return "Grok Build";
+    case "open_hands":
+      return "OpenHands";
+    case "pi":
+      return "Pi";
+    case "vibe":
+      return "Mistral Vibe";
+    case "qwen":
+      return "Qwen Code";
+    case "qoder":
+      return "Qoder";
+    case "trae":
+      return "Trae CLI";
+    case "code_buddy":
+      return "CodeBuddy";
+    case "comate":
+      return "Comate";
   }
 }

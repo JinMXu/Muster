@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Terminal } from "@xterm/xterm";
+import { useAgentStatus, agentLabel } from "../hooks/useAgentStatus";
 import { acquire } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
 import { shellQuotePath } from "../lib/shellEscape";
@@ -57,6 +58,7 @@ export default function TerminalPane({
   const [pasteWarning, setPasteWarning] = useState<string | null>(null);
   const { t } = useT();
   const settings = useSettings();
+  const agents = useAgentStatus();
   // Whether the scrollback search bar is open for THIS pane's session.
   const searchState = useSyncExternalStore(subscribeTerminalSearch, getTerminalSearchState);
   const searchOpen = searchState.sessionId === sessionId;
@@ -167,7 +169,7 @@ export default function TerminalPane({
         // user can compose the rest of the command before running it.
         api.sendText(sessionId, shellQuotePath(path));
       }}
-      onContextMenu={(e) => {
+      onContextMenu={async (e) => {
         e.preventDefault();
         const { term } = acquire(sessionId);
         // Windows Terminal-style smart right-click: copy when there is a
@@ -185,6 +187,12 @@ export default function TerminalPane({
           }
           return;
         }
+        // A restored shell has no agent process yet; offer to replay the
+        // invocation that was detected before the relaunch.
+        const info = await api.sessionInfo(sessionId).catch(() => null);
+        const resumableAgent = info?.agent && info.agent_command && !agents[sessionId]
+          ? info.agent
+          : null;
         openMenu({
           x: e.clientX,
           y: e.clientY,
@@ -204,6 +212,17 @@ export default function TerminalPane({
             "sep",
             { label: t("terminal.splitRight"), action: () => api.split("right") },
             { label: t("terminal.splitDown"), action: () => api.split("bottom") },
+            ...(resumableAgent
+              ? [
+                  "sep" as const,
+                  {
+                    label: t("terminal.restartAgent", { agent: agentLabel(resumableAgent) }),
+                    action: () => {
+                      api.restartSessionAgent(sessionId).catch(() => {});
+                    },
+                  },
+                ]
+              : []),
             { label: t("terminal.closePane"), action: () => api.closePane(tabId, paneKey) },
           ],
         });

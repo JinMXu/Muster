@@ -67,6 +67,7 @@ export const api = {
   resizeTerminal: (id: Uuid, cols: number, rows: number) =>
     done(commands.resizeTerminal(id, cols, rows)),
   clearTerminal: (id: Uuid) => commands.clearTerminal(id),
+  restartSessionAgent: (id: Uuid) => commands.restartSessionAgent(id),
 
   sessionProcesses: (sessionId: Uuid, shellPid: number) =>
     commands.sessionProcesses(sessionId, shellPid),

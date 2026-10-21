@@ -115,9 +115,17 @@ pub struct TerminalSession {
     /// When the last chunk of PTY output was read. Drives agent idle
     /// detection ("the coding agent is waiting for input").
     last_output_at: Mutex<Instant>,
+    /// When the user last sent input to the PTY. An approval flag is
+    /// suppressed until the agent produces output again, so answering a
+    /// permission prompt clears the red dot immediately.
+    last_input_at: Mutex<Option<Instant>>,
     /// Last time an agent "waiting for input" notification was sent, for
     /// rate limiting.
     last_agent_notify: Mutex<Option<Instant>>,
+    /// Last coding agent detected in this session, plus the minimal command
+    /// that launched it. Persisted in the layout snapshot so a relaunch can
+    /// offer to restart the agent in the restored shell.
+    last_agent: Mutex<Option<(crate::services::agents::AgentKind, Option<String>)>>,
     /// Ring buffer of ANSI-stripped output lines (for `muster capture`).
     scrollback: Mutex<VecDeque<String>>,
     /// Whether any consumer (`muster capture`/`run`/`wait`, which read via
@@ -157,7 +165,9 @@ impl TerminalSession {
             last_bell_notify: Mutex::new(None),
             progress: Mutex::new(None),
             last_output_at: Mutex::new(Instant::now()),
+            last_input_at: Mutex::new(None),
             last_agent_notify: Mutex::new(None),
+            last_agent: Mutex::new(None),
             scrollback: Mutex::new(VecDeque::new()),
             scrollback_pending: Mutex::new(String::new()),
             ansi: Mutex::new(AnsiStripper::default()),
@@ -352,6 +362,41 @@ impl TerminalSession {
         self.last_output_at.lock().elapsed()
     }
 
+    /// True after the user typed something until the agent answers with new
+    /// output. Approval prompts are ignored while true, so answering one
+    /// clears the flag without waiting for the prompt to scroll away.
+    pub fn awaiting_output(&self) -> bool {
+        let Some(input_at) = *self.last_input_at.lock() else {
+            return false;
+        };
+        *self.last_output_at.lock() <= input_at
+    }
+
+    /// Remember the agent detected in this session. Returns true when the
+    /// value changed, so the poller can trigger a snapshot save.
+    pub fn record_agent(&self, kind: crate::services::agents::AgentKind, command: Option<String>) -> bool {
+        let mut last = self.last_agent.lock();
+        let next = (kind, command);
+        if *last == Some(next.clone()) {
+            return false;
+        }
+        *last = Some(next);
+        true
+    }
+
+    /// Restore persisted agent metadata after a relaunch (does not spawn it).
+    pub fn restore_agent(&self, kind: crate::services::agents::AgentKind, command: Option<String>) {
+        *self.last_agent.lock() = Some((kind, command));
+    }
+
+    pub fn agent_launch(&self) -> Option<(crate::services::agents::AgentKind, Option<String>)> {
+        self.last_agent.lock().clone()
+    }
+
+    pub fn agent_command(&self) -> Option<String> {
+        self.last_agent.lock().as_ref().and_then(|(_, command)| command.clone())
+    }
+
     /// Feed one chunk of raw PTY output into the capture ring buffer:
     /// updates `last_output_at` and appends ANSI-stripped lines. Called by
     /// the read pump on every chunk.
@@ -445,6 +490,7 @@ impl TerminalSession {
 
     pub fn send_text(&self, text: &str) {
         if let Some(tx) = self.input_tx.lock().as_ref() {
+            *self.last_input_at.lock() = Some(Instant::now());
             // Queue-only: the actual (blocking) pipe write happens on the
             // session's writer thread. A TUI that stops reading stdin makes
             // conhost stop draining the pipe; with a direct write here that
@@ -538,11 +584,16 @@ pub struct SessionInfo {
     pub shell_name: String,
     pub has_exited: bool,
     pub pid: Option<u32>,
+    /// Last coding agent detected in this session (live or restored).
+    pub agent: Option<crate::services::agents::AgentKind>,
+    /// Minimal invocation saved for restarting that agent after a relaunch.
+    pub agent_command: Option<String>,
 }
 
 impl From<&TerminalSession> for SessionInfo {
     fn from(s: &TerminalSession) -> Self {
         let pid = s.conpty.lock().as_ref().and_then(|c| c.process_id());
+        let agent = s.agent_launch();
         Self {
             id: s.id,
             project_id: s.project_id,
@@ -551,6 +602,8 @@ impl From<&TerminalSession> for SessionInfo {
             shell_name: s.shell_name.clone(),
             has_exited: s.is_exited(),
             pid,
+            agent: agent.as_ref().map(|(kind, _)| *kind),
+            agent_command: agent.and_then(|(_, command)| command),
         }
     }
 }

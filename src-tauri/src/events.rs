@@ -8,7 +8,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::models::app::AppStateView;
-use crate::services::agents::{AgentKind, AgentState};
+use crate::services::agents::{AgentAttention, AgentKind, AgentState};
 
 #[derive(Debug, Clone, Serialize, specta::Type, tauri_specta::Event)]
 #[serde(transparent)]
@@ -66,6 +66,7 @@ pub struct AgentStatusRow {
     pub id: Uuid,
     pub agent: Option<AgentKind>,
     pub state: Option<AgentState>,
+    pub attention: Option<AgentAttention>,
     pub title: Option<String>,
     pub project: Option<String>,
 }

@@ -3,28 +3,38 @@ import { api } from "../lib/invoke";
 import { agentLabel } from "../hooks/useAgentStatus";
 import { useAllAgents, type AllAgentStatus } from "../hooks/useAllAgents";
 import { useT } from "../lib/i18n/context";
-import type { AgentState, Uuid } from "../lib/types";
+import type { AgentAttention, AgentState, Uuid } from "../lib/types";
 import { IconTerminal, IconX } from "./icons";
 
 /// Cross-window coding-agent overview capsule that lives in the left
 /// sidebar's footer. Click opens a small popover listing every detected agent
-/// across every window, sorted by attention (done → waiting → working); click
-/// a row jumps the user to that agent's pane, in whichever window it lives.
-/// Hidden entirely when no agents are running.
+/// across every window, sorted by attention (approval → done → waiting →
+/// working); click a row jumps the user to that agent's pane, in whichever
+/// window it lives. Hidden entirely when no agents are running.
+
+type DotKind = AgentState | "approval";
 
 /// Priority used to sort the popover: higher first.
-const PRIORITY: Record<AgentState, number> = {
+const PRIORITY: Record<DotKind, number> = {
+  approval: 4,
   waiting: 3,
   done: 2,
   working: 1,
 };
 
-/// Tailwind dot-class per state — mirrors the colors used in `Header.tsx`.
-const DOT_CLASS: Record<AgentState, string> = {
+/// Tailwind dot-class per kind — mirrors the colors used in `Header.tsx`.
+const DOT_CLASS: Record<DotKind, string> = {
+  approval: "bg-rose-400 animate-pulse",
   working: "bg-emerald-400",
   waiting: "bg-amber-400 animate-pulse",
   done: "bg-sky-400",
 };
+
+/// An approval prompt is more urgent than any state, and is tracked
+/// separately from `state` (the backend reports it as `waiting`).
+function dotKind(r: { state: AgentState; attention: AgentAttention | null }): DotKind {
+  return r.attention === "approval" ? "approval" : r.state;
+}
 
 export default function AgentMiniBar({
   open,
@@ -44,11 +54,11 @@ export default function AgentMiniBar({
   const [selected, setSelected] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  /// Sorted list of detected-agent rows. `done` and `waiting` rise above
-  /// `working` so the rows needing attention surface first.
+  /// Sorted list of detected-agent rows. Approval prompts rise above every
+  /// state, then `done`/`waiting` above `working`.
   const rows: AllAgentStatus[] = useMemo(() => {
     return Object.values(agents).sort((a, b) => {
-      const p = PRIORITY[b.state] - PRIORITY[a.state];
+      const p = PRIORITY[dotKind(b)] - PRIORITY[dotKind(a)];
       if (p !== 0) return p;
       // Tiebreak: agent label, then session id (stable per session).
       const al = agentLabel(a.agent);
@@ -58,13 +68,14 @@ export default function AgentMiniBar({
   }, [agents]);
 
   const counts = useMemo(() => {
-    let done = 0, waiting = 0, working = 0;
+    let approval = 0, done = 0, waiting = 0, working = 0;
     for (const r of rows) {
-      if (r.state === "done") done++;
+      if (r.attention === "approval") approval++;
+      else if (r.state === "done") done++;
       else if (r.state === "waiting") waiting++;
       else if (r.state === "working") working++;
     }
-    return { done, waiting, working, total: rows.length };
+    return { approval, done, waiting, working, total: rows.length };
   }, [rows]);
 
   // No agents at all → the capsule is invisible. If the popover was open,
@@ -110,15 +121,17 @@ export default function AgentMiniBar({
 
   if (counts.total === 0) return null;
 
-  // The states present, in display order (done → waiting → working). Each
-  // shows a colored dot so the capsule reads the same colors as the tab dots.
-  const present: AgentState[] = [];
+  // The kinds present, in display order (approval → done → waiting → working).
+  // Each shows a colored dot so the capsule reads the same colors as the tabs.
+  const present: DotKind[] = [];
+  if (counts.approval) present.push("approval");
   if (counts.done) present.push("done");
   if (counts.waiting) present.push("waiting");
   if (counts.working) present.push("working");
 
-  // One tooltip variant per state mix.
+  // Approval is urgent enough to own the tooltip whenever it is present.
   const tooltip = (() => {
+    if (counts.approval) return t("agents.tooltipApproval", { n: counts.approval });
     if (counts.done && counts.waiting && counts.working) {
       return t("agents.tooltipMixed", {
         done: counts.done, waiting: counts.waiting, working: counts.working });
@@ -199,12 +212,15 @@ function AgentRow({
   onActivate: () => void;
 }) {
   const { t } = useT();
+  const kind = dotKind(row);
   const stateLabel =
-    row.state === "working"
-      ? t("agents.state.working")
-      : row.state === "waiting"
-        ? t("agents.state.waiting")
-        : t("agents.state.done");
+    kind === "approval"
+      ? t("agents.state.approval")
+      : row.state === "working"
+        ? t("agents.state.working")
+        : row.state === "waiting"
+          ? t("agents.state.waiting")
+          : t("agents.state.done");
   return (
     <div
       onClick={onActivate}
@@ -214,7 +230,7 @@ function AgentRow({
         selected ? "bg-muster-selected text-muster-fg" : "hover:bg-muster-hover text-muster-fg/85"
       }`}
     >
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${DOT_CLASS[row.state]}`} />
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${DOT_CLASS[kind]}`} />
       <div className="flex-1 min-w-0 flex flex-col">
         <span className="truncate font-medium">
           {agentLabel(row.agent)}

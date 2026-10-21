@@ -8,6 +8,7 @@ import { reloadSettings, useSettings } from "../lib/settingsStore";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconArrowUpRight, IconGlobe, IconRefresh, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
+import { agentLabel, useAgentStatus } from "../hooks/useAgentStatus";
 
 /// Info panel: details about the focused session, selected project, and the
 /// repository it lives in (shell/PID, cwd, project dir, git branch/remote),
@@ -39,6 +40,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
   };
 
   const { t } = useT();
+  const liveAgents = useAgentStatus();
   const shellPid = projSession && !projSession.has_exited ? projSession.pid : null;
 
   // Only poll while the Info tab is actually visible: the panel stays mounted
@@ -171,6 +173,22 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
         }
       />
       <Row label={t("info.status")} value={projSession ? (projSession.has_exited ? t("info.exited") : t("info.running")) : "—"} />
+      {projSession?.agent && (
+        <div>
+          <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{t("info.agent")}</div>
+          <div className="flex items-center justify-between gap-2 mt-0.5">
+            <span className="ui-fs-sm text-muster-fg/80">{agentLabel(projSession.agent)}</span>
+            {projSession.agent_command && !liveAgents[projSession.id] && (
+              <button
+                onClick={() => api.restartSessionAgent(projSession.id).catch(() => {})}
+                className="ui-fs-xs text-muster-accent hover:underline flex-shrink-0"
+              >
+                {t("info.restartAgent")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {git?.is_repo && (
         <>
           <hr className="border-white/[0.08]" />

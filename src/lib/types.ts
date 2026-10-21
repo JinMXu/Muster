@@ -3,6 +3,7 @@
 // `cargo test --lib specta_export::tests::export_bindings`; CI checks that
 // the committed bindings are up to date.
 import type {
+  AgentAttention,
   AgentKind,
   AgentState,
   AgentStatusChanged,
@@ -48,6 +49,7 @@ import type {
 } from "./bindings";
 
 export type {
+  AgentAttention,
   AgentKind,
   AgentState,
   AgentStatusChanged,

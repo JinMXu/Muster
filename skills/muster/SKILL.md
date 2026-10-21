@@ -132,12 +132,16 @@ muster doctor              # bridge health: version, windows, sessions, agents
 
 `muster agents` is worth knowing about: it reports each session running a
 recognised coding agent (opencode, Claude Code, Codex, Kimi Code, aider,
-Gemini CLI, Goose) with a semantic state:
+Gemini CLI, Goose, GitHub Copilot, Cursor, Qwen Code, and 16 more — 26 in
+total) with a semantic state:
 
 - `working` — alive, produced output recently;
 - `waiting` — alive but silent (likely needs input/approval);
 - `done` — the agent process exited but the session is still alive and the
   user hasn't looked at it yet.
+
+JSON rows also carry `attention: "approval"` when the agent is blocked on a
+permission prompt. Treat it as a higher-priority `waiting`.
 
 If you are one of the recognised agents, you are in that list too.
 
@@ -213,3 +217,19 @@ other coding agents mid-task. Treat anything you did not create as read-only:
 | `watch` | — | streamed `agent-status-changed` events (newline JSON) |
 
 Common flags: `--json` (structured output). `--` ends flag parsing.
+
+## MCP server
+
+If your client supports MCP, register `muster mcp` instead of shelling out to
+the CLI:
+
+```json
+{ "mcpServers": { "muster": { "command": "muster", "args": ["mcp"] } } }
+```
+
+It exposes 11 tools over stdio: `muster_ls`, `muster_agents`, `muster_doctor`,
+`muster_new`, `muster_split`, `muster_send`, `muster_send_keys`,
+`muster_capture`, `muster_procs`, `muster_run`, `muster_wait`. They wrap the
+same verbs and share the same safety rules. Tool failures come back as
+`isError: true` results rather than transport errors, and Muster is started
+lazily on the first tool call if it is not running.

@@ -40,6 +40,10 @@ export const commands = {
 	shell_name: string,
 	has_exited: boolean,
 	pid: number | null,
+	/**  Last coding agent detected in this session (live or restored). */
+	agent: AgentKind | null,
+	/**  Minimal invocation saved for restarting that agent after a relaunch. */
+	agent_command: string | null,
 } | null>("session_info", { id }),
 	listAllSessions: () => __TAURI_INVOKE<SessionInfo[]>("list_all_sessions"),
 	/**
@@ -120,6 +124,12 @@ export const commands = {
 	 *  `cls`). The frontend additionally wipes the xterm scrollback locally.
 	 */
 	clearTerminal: (id: string) => __TAURI_INVOKE<void>("clear_terminal", { id }),
+	/**
+	 *  Re-run the last coding agent detected in this session. Used after a
+	 *  relaunch restored a fresh shell. The stored command is the agent's
+	 *  invocation only (no flags), so it is safe to replay into the shell.
+	 */
+	restartSessionAgent: (id: string) => __TAURI_INVOKE<string>("restart_session_agent", { id }),
 	terminateSession: (id: string) => __TAURI_INVOKE<null>("terminate_session", { id }),
 	/**
 	 *  PROCESSES section: every process of the session (Job Object members, or
@@ -320,8 +330,14 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  Extra signal layered on top of `Waiting`: the agent is blocked on a
+ *  permission/approval prompt rather than an ordinary input prompt.
+ */
+export type AgentAttention = "approval";
+
 /**  A coding-agent CLI that Muster recognises inside a session's process tree. */
-export type AgentKind = "opencode" | "claude_code" | "codex" | "kimi_code" | "aider" | "gemini" | "goose" | "atomcode";
+export type AgentKind = "opencode" | "claude_code" | "codex" | "kimi_code" | "aider" | "gemini" | "goose" | "atomcode" | "copilot" | "cursor" | "kiro" | "amp" | "droid" | "crush" | "cline" | "continue_cli" | "kilo" | "grok" | "open_hands" | "pi" | "vibe" | "qwen" | "qoder" | "trae" | "code_buddy" | "comate";
 
 /**
  *  Three-state model: `Working` (alive, output recently), `Waiting` (alive,
@@ -338,6 +354,7 @@ export type AgentStatusRow = {
 	id: string,
 	agent: AgentKind | null,
 	state: AgentState | null,
+	attention: AgentAttention | null,
 	title: string | null,
 	project: string | null,
 };
@@ -617,6 +634,7 @@ export type SessionAgentStatus = {
 	session_id: string,
 	agent: AgentKind,
 	state: AgentState,
+	attention: AgentAttention | null,
 	title: string,
 };
 
@@ -633,6 +651,10 @@ export type SessionInfo = {
 	shell_name: string,
 	has_exited: boolean,
 	pid: number | null,
+	/**  Last coding agent detected in this session (live or restored). */
+	agent: AgentKind | null,
+	/**  Minimal invocation saved for restarting that agent after a relaunch. */
+	agent_command: string | null,
 };
 
 export type Settings = {

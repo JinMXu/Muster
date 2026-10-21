@@ -44,7 +44,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 
 **🤖 Agent 感知**
 
-自动识别 Claude Code / OpenCode / Codex / Kimi Code 等 coding agent，标签显示状态点（绿=运行、黄=等待、蓝=完成），失焦时发系统通知。CLI 桥让 AI 代理驱动终端。
+自动识别 Claude Code / OpenCode / Codex / GitHub Copilot / Cursor / Gemini CLI / Qwen Code 等 26 种 coding agent，标签显示状态点（绿=运行、黄=等待输入、红=待批准、蓝=已完成），失焦时发系统通知；重启后可从终端右键菜单重新运行上次的 agent。CLI 桥让 AI 代理驱动终端。
 
 </td>
 </tr>
@@ -73,6 +73,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 | **会话持久化** | 布局/项目/选中状态每 5 秒自动快照，重启完整恢复 |
 | **Agent 总览** | 左下角 mini-bar 跨窗口汇总所有 agent 状态，点击跳转（`Ctrl+Shift+A`） |
 | **Agent CLI 桥** | `muster` 命令驱动终端：`split`/`send`/`capture`/`run`/`wait`/`watch` 等 |
+| **MCP server** | `muster mcp` 把窗口、会话与 Agent 状态暴露为 MCP 工具，Claude Code / Cursor 等可直接编排 |
 | **CLI 工具** | `muster <path>` 从任意终端打开项目，支持 `--cmd` 执行命令 |
 | **剪贴板安全** | 粘贴疑似可执行命令时弹窗确认 |
 | **信息面板** | Shell PID、cwd、Git 分支/远程、进程树、监听端口 |
@@ -215,6 +216,20 @@ muster ls                              # 列出窗口、项目、标签与 pane
 - `run` 默认 600s 超时（`--timeout N`）；`--` 之后的内容原样作为命令
 - 任何 verb 加 `--json` 输出结构化结果
 - 为 AI 代理准备的完整使用说明见 `skills/muster/SKILL.md`
+
+### MCP server
+
+`muster mcp` 以 MCP（stdio）方式运行，可直接注册到 Claude Code、Cursor 等客户端：
+
+```json
+{
+  "mcpServers": {
+    "muster": { "command": "muster", "args": ["mcp"] }
+  }
+}
+```
+
+提供 `muster_ls`、`muster_agents`、`muster_doctor`、`muster_new`、`muster_split`、`muster_send`、`muster_send_keys`、`muster_capture`、`muster_procs`、`muster_run`、`muster_wait` 共 11 个工具，底层复用同一套 IPC 桥；首次调用工具时会自动启动 Muster。使用前请先在「设置 → 集成」中把 `muster` 加入 PATH。
 
 ---
 

@@ -706,13 +706,21 @@ fn build_snapshot(state: &AppState) -> crate::models::project::SessionSnapshot {
                                         .iter()
                                         .map(|pane| PaneSnapshot {
                                             content: match &pane.content {
-                                                PaneContent::Session(id) => PaneContentSnapshot::Session {
-                                                    working_directory: state
+                                                PaneContent::Session(id) => {
+                                                    let agent = state
                                                         .sessions
                                                         .get(id)
-                                                        .map(|s| s.current_directory())
-                                                        .unwrap_or_default(),
-                                                },
+                                                        .and_then(|s| s.agent_launch());
+                                                    PaneContentSnapshot::Session {
+                                                        working_directory: state
+                                                            .sessions
+                                                            .get(id)
+                                                            .map(|s| s.current_directory())
+                                                            .unwrap_or_default(),
+                                                        agent: agent.as_ref().map(|(kind, _)| *kind),
+                                                        agent_command: agent.and_then(|(_, command)| command),
+                                                    }
+                                                }
                                                 PaneContent::File(id) => PaneContentSnapshot::File {
                                                     path: state.files.get(id).map(|f| f.path()).unwrap_or_default(),
                                                 },

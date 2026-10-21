@@ -309,18 +309,22 @@ function TabItem({
           {agent && (
             <span
               title={
-                agent.state === "waiting"
-                  ? t("header.agentWaiting", { agent: agentLabel(agent.agent) })
-                  : agent.state === "done"
-                    ? t("header.agentDone", { agent: agentLabel(agent.agent) })
-                    : t("header.agentWorking", { agent: agentLabel(agent.agent) })
+                agent.attention === "approval"
+                  ? t("header.agentApproval", { agent: agentLabel(agent.agent) })
+                  : agent.state === "waiting"
+                    ? t("header.agentWaiting", { agent: agentLabel(agent.agent) })
+                    : agent.state === "done"
+                      ? t("header.agentDone", { agent: agentLabel(agent.agent) })
+                      : t("header.agentWorking", { agent: agentLabel(agent.agent) })
               }
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                agent.state === "waiting"
-                  ? "bg-amber-400 animate-pulse"
-                  : agent.state === "done"
-                    ? "bg-sky-400"
-                    : "bg-emerald-400"
+                agent.attention === "approval"
+                  ? "bg-rose-400 animate-pulse"
+                  : agent.state === "waiting"
+                    ? "bg-amber-400 animate-pulse"
+                    : agent.state === "done"
+                      ? "bg-sky-400"
+                      : "bg-emerald-400"
               }`}
             />
           )}

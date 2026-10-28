@@ -666,13 +666,21 @@ pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>
 
 /// Run [`spawn_pending`] off the main thread. `setup` runs before the first
 /// frame is painted, and a restore of N tabs costs ~N×STAGGER ms of ConPTY
-/// creation — blocking on it delayed window first-paint by that much. Read
-/// loops are re-checked when the background spawn finishes, because the
-/// frontend's initial pump registration may already have run.
+/// creation — blocking on it delayed window first-paint by that much.
+///
+/// Read pumps attach afterwards ONLY when the frontend has already signalled
+/// readiness (`init_read_loops`, i.e. its pty:data listeners are
+/// registered). Attaching earlier emits the shell banner into a webview
+/// with no listener, and the output is dropped forever — a blank terminal.
+/// When the signal hasn't arrived yet, the frontend's own `init_read_loops`
+/// call attaches instead (it runs after listener registration).
 pub fn spawn_pending_async(app: AppHandle, label: String, state: Arc<Mutex<AppState>>) {
     std::thread::spawn(move || {
         spawn_pending(&app, &label, &state);
-        start_read_loops(&app, &label, &state);
+        let ready = state.lock().webview_ready;
+        if ready {
+            start_read_loops(&app, &label, &state);
+        }
     });
 }
 

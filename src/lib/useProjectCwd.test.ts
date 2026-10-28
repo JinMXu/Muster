@@ -99,7 +99,10 @@ describe("useProjectCwd", () => {
     expect(mocks.resolveProjectRoot).toHaveBeenLastCalledWith("D:\\repo\\sub");
   });
 
-  it("uses a pinned directory without polling", async () => {
+  it("uses a pinned directory as the anchor while still serving sessions", async () => {
+    mocks.listAllSessions.mockResolvedValue([
+      { project_id: "p1", working_directory: "D:\\elsewhere" },
+    ]);
     const hook = await loadHook();
 
     const { result } = renderHook(() =>
@@ -107,13 +110,17 @@ describe("useProjectCwd", () => {
     );
     await flush();
 
+    // The anchor stays pinned regardless of where the session cd's to…
     expect(result.current).toEqual({ cwd: "D:\\pinned", root: "D:\\pinned" });
-    expect(mocks.listAllSessions).not.toHaveBeenCalled();
+    // …but the poller still runs: useProjectSessions (InfoPanel's
+    // shell/PID/status) must see the session list even for pinned projects.
+    expect(mocks.listAllSessions).toHaveBeenCalled();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-    expect(mocks.listAllSessions).not.toHaveBeenCalled();
+    expect(result.current).toEqual({ cwd: "D:\\pinned", root: "D:\\pinned" });
+    expect(mocks.resolveProjectRoot).not.toHaveBeenCalled();
   });
 
   it("stops polling when the last subscriber unmounts", async () => {

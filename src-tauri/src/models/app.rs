@@ -80,6 +80,11 @@ pub struct AppState {
     /// persists a window's snapshot only when this changed since the last
     /// write, so an idle app stops hitting the disk every few seconds.
     pub revision: u64,
+    /// Set once the window's frontend has registered its PTY listeners and
+    /// called `init_read_loops`. Read pumps must not attach before this:
+    /// output emitted to a webview with no listener is dropped forever
+    /// (a restored session would show a blank terminal).
+    pub webview_ready: bool,
 }
 
 impl AppState {
@@ -98,6 +103,7 @@ impl AppState {
             settings,
             project_counter: 0,
             revision: 0,
+            webview_ready: false,
         }
     }
 

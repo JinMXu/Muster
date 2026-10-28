@@ -93,11 +93,11 @@ async function resolveRoot(e: Entry) {
 }
 
 async function tick(e: Entry) {
-  if (e.pinned || document.hidden || e.disposed || e.pending) return;
+  if (document.hidden || e.disposed || e.pending) return;
   e.pending = true;
   try {
     const sessions = await api.listAllSessions().catch(() => null);
-    if (!sessions || e.disposed || e.pinned) return;
+    if (!sessions || e.disposed) return;
     const key = JSON.stringify(
       sessions.map((s) => [
         s.id,
@@ -115,6 +115,10 @@ async function tick(e: Entry) {
       e.sessionsKey = key;
       notify(e);
     }
+    // A pinned project anchors to its directory and never tracks the
+    // session cwd — but the session list above still refreshes for
+    // `useProjectSessions` consumers (InfoPanel shell/PID/status).
+    if (e.pinned) return;
     const cwd = sessions.find((s) => s.project_id === e.projectId)?.working_directory ?? null;
     if (cwd === e.anchor.cwd) return;
     setAnchor(e, cwd, e.anchor.root);
@@ -134,7 +138,9 @@ function ensureVisibilityListener() {
 }
 
 function startEntry(e: Entry) {
-  if (e.pinned) return;
+  // The poller always runs, pinned or not: unpinned entries track the
+  // session cwd, and every entry serves the session list to
+  // `useProjectSessions` consumers.
   void tick(e);
   e.timer = setInterval(() => void tick(e), POLL_MS);
   events.sessionCwdChanged.listen(() => void tick(e)).then((u) => {
@@ -182,10 +188,10 @@ function acquire(projectId: string, pinned: string | null): Entry {
     e.rootSeq += 1;
     if (pinned) {
       setAnchor(e, pinned, pinned);
-    } else {
-      startEntry(e);
-      if (e.anchor.cwd) void resolveRoot(e);
+    } else if (e.anchor.cwd) {
+      void resolveRoot(e);
     }
+    startEntry(e);
   }
   return e;
 }

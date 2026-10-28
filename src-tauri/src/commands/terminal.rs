@@ -217,6 +217,10 @@ pub fn init_read_loops(window: Window, state: State<SharedState>) {
     // The frontend just (re)registered its PTY listeners. Anything emitted
     // before that point (e.g. across a WebView reload) was dropped and will
     // never be ACKed; clear the credit so the pumps can't stay paused.
+    {
+        let mut g = s.lock();
+        g.webview_ready = true;
+    }
     let sessions: Vec<_> = s.lock().sessions.values().cloned().collect();
     for session in sessions {
         session.reset_output_flow();

@@ -8,6 +8,7 @@ import { shellQuotePath } from "../lib/shellEscape";
 import { getFocusedSessionId } from "../lib/sessionUtils";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconChevronDown, IconGitBranch, IconSearch } from "./icons";
+import BranchSelect from "./BranchSelect";
 import FileHistory from "./FileHistory";
 import { useT } from "../lib/i18n/context";
 
@@ -297,50 +298,37 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
     openMenu({ x, y, items });
   };
 
+  const switchToBranch = (name: string) => {
+    runOp(
+      t("git.switchTo", { name }),
+      t("git.switchCli", { name }),
+      api.git.switchBranch(info.repo_root, name).then(() => t("git.nowOn", { name }))
+    );
+  };
+  const createNewBranch = () => {
+    const name = window.prompt(t("git.newBranchPrompt"));
+    if (!name) return;
+    runOp(
+      t("git.createBranch", { name }),
+      t("git.createBranchCli", { name }),
+      api.git.createBranch(info.repo_root, name).then(() => t("git.createdBranch", { name }))
+    );
+  };
+
   return (
     <div className="h-full flex flex-col ui-fs-base">
       <div className="px-3 pt-2 pb-1 flex items-center gap-2">
-        <span className="text-muster-accent flex items-center">
-          <IconGitBranch size={13} />
-        </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1">
-            <select
-              value={info.branch ?? ""}
-              onChange={(e) => {
-                const name = e.target.value;
-                if (name && name !== info.branch) {
-                  runOp(
-                    t("git.switchTo", { name }),
-                    t("git.switchCli", { name }),
-                    api.git.switchBranch(info.repo_root, name).then(() => t("git.nowOn", { name }))
-                  );
-                }
-              }}
-              className="bg-transparent ui-fs-base font-medium outline-none max-w-[150px] cursor-pointer"
-              title={t("git.switchBranch")}
-            >
-              {!info.branch && <option value="">{t("git.detached")}</option>}
-              {info.branch && !info.branches.includes(info.branch) && (
-                <option value={info.branch}>{info.branch}</option>
-              )}
-              {info.branches.map((b) => (
-                <option key={b} value={b} className="bg-muster-bg text-muster-fg">
-                  {b}
-                </option>
-              ))}
-            </select>
+            <BranchSelect
+              branch={info.branch}
+              branches={info.branches}
+              onSelect={switchToBranch}
+              onCreateBranch={createNewBranch}
+            />
             <button
               title={t("git.newBranch")}
-              onClick={() => {
-                const name = window.prompt(t("git.newBranchPrompt"));
-                if (!name) return;
-                runOp(
-                  t("git.createBranch", { name }),
-                  t("git.createBranchCli", { name }),
-                  api.git.createBranch(info.repo_root, name).then(() => t("git.createdBranch", { name }))
-                );
-              }}
+              onClick={createNewBranch}
               className="px-1 rounded ui-fs-xs text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg active:scale-[.97] transition-transform duration-muster ease-muster"
             >
               +

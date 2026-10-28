@@ -267,6 +267,8 @@ const en = {
     switchCli: ({ name }: { name: string }) => `git switch ${name}`,
     nowOn: ({ name }: { name: string }) => `now on ${name}`,
     switchBranch: "Switch branch",
+    filterBranches: "Filter branches",
+    noBranchMatch: "No matching branches",
     newBranch: "New branch",
     newBranchPrompt: "New branch name",
     createBranch: ({ name }: { name: string }) => `Create branch ${name}`,

@@ -267,6 +267,8 @@ const zh = {
     switchCli: ({ name }: { name: string }) => `git switch ${name}`,
     nowOn: ({ name }: { name: string }) => `当前位于 ${name}`,
     switchBranch: "切换分支",
+    filterBranches: "筛选分支",
+    noBranchMatch: "无匹配分支",
     newBranch: "新建分支",
     newBranchPrompt: "新分支名称",
     createBranch: ({ name }: { name: string }) => `创建分支 ${name}`,

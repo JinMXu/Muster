@@ -347,6 +347,40 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
             )}
           </div>
         </div>
+        {filterOpen && (
+          // Inline filter, expanded right where the search icon lives — a
+          // separate mid-panel row pushed the checkpoint/commit sections
+          // down and read as a stray floating input.
+          <div className="flex items-center gap-1 flex-shrink-0 bg-white/[0.05] rounded-md pl-1.5 pr-0.5 h-6 ring-1 ring-inset ring-transparent focus-within:ring-muster-accent/50 transition-shadow">
+            <span className="text-muster-muted flex items-center flex-shrink-0">
+              <IconSearch size={11} />
+            </span>
+            <input
+              autoFocus
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setFilter("");
+                  setFilterOpen(false);
+                }
+              }}
+              placeholder={t("git.filterPlaceholder")}
+              spellCheck={false}
+              className="w-28 focus:w-36 min-w-0 bg-transparent outline-none ui-fs-xs placeholder:text-muster-muted/60 transition-[width] duration-muster ease-muster"
+            />
+            {filter && (
+              <button
+                title={t("git.clearFilter")}
+                onClick={() => setFilter("")}
+                className="px-0.5 rounded ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
         <button
           title={t("git.filterFiles")}
           onClick={() => {
@@ -362,7 +396,6 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
       </div>
 
       {banner}
-
       {checkpoint && checkpoint.root === info.repo_root ? (
         <div className="flex-shrink-0 px-3 py-1.5 border-b border-white/[0.08]">
           <div className="flex items-center gap-2 ui-fs-xs text-muster-muted">
@@ -418,30 +451,6 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
           </button>
         </div>
       ) : null}
-
-      {filterOpen && (
-        <div className="px-3 pb-1 flex items-center gap-1.5">
-          <span className="text-muster-muted flex items-center">
-            <IconSearch size={11} />
-          </span>
-          <input
-            autoFocus
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={t("git.filterPlaceholder")}
-            className="flex-1 min-w-0 bg-white/[0.05] rounded-md px-2 py-1 ui-fs-sm outline-none"
-          />
-          {filter && (
-            <button
-              title={t("git.clearFilter")}
-              onClick={() => setFilter("")}
-              className="px-0.5 rounded ui-fs-2xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      )}
 
       <div className="px-3 py-2 space-y-1.5">
         <textarea

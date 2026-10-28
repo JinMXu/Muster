@@ -19,6 +19,8 @@ pub fn scan(ctx: &mut ScanCtx) {
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
+        // Events inherit cwd/model/session from earlier lines in the file, so
+        // a changed file must be re-parsed in full (no byte-offset resume).
         if !ctx.should_read(&path) {
             continue;
         }

@@ -143,6 +143,11 @@ pub fn search_in_project_cancellable(
             continue;
         }
         let path = entry.path();
+        // Pre-check via the walker's (cached) metadata so an oversized file is
+        // never pulled into memory just to be discarded after the read.
+        if entry.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_BYTES {
+            continue;
+        }
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(_) => continue,

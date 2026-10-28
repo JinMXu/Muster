@@ -191,6 +191,15 @@ impl TerminalSession {
     }
 
     pub fn spawn(self: &Arc<Self>, cols: u16, rows: u16) -> std::io::Result<()> {
+        // A session terminated while still pending (e.g. its tab was closed
+        // during the startup spawn queue) must not be spawned into an orphan
+        // PTY nobody will ever read or kill.
+        if self.is_exited() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "session terminated before spawn",
+            ));
+        }
         let mut conpty = ConPty::create(cols, rows)?;
 
         let shell = &self.shell;

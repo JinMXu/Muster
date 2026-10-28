@@ -1,3 +1,4 @@
+import { memo, useCallback, useRef, useState } from "react";
 import type { ProjectView, Uuid } from "../lib/types";
 import { IconFolder, IconPlus, IconSettings, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
@@ -42,6 +43,10 @@ export default function Sidebar({
 }) {
   const { t } = useT();
   const [dragging, setDragging] = useState<Uuid | null>(null);
+  // Stable id-based callbacks so the memoized ProjectRows skip re-rendering
+  // on unrelated App/Header state changes.
+  const handleDragStart = useCallback((id: Uuid) => setDragging(id), []);
+  const handleDragEnd = useCallback(() => setDragging(null), []);
 
   return (
     <aside
@@ -59,13 +64,13 @@ export default function Sidebar({
               index={i}
               isSelected={p.id === selected}
               isDragging={dragging === p.id}
-              onSelect={() => onSelect(p.id)}
-              onClose={() => onClose(p.id)}
-              onDragStart={() => setDragging(p.id)}
-              onDragEnd={() => setDragging(null)}
-              onMove={(to) => onMove(p.id, to)}
-              onRename={(name) => onRename(p.id, name)}
-              onMenu={(x, y, requestRename) => onProjectMenu(p, x, y, requestRename)}
+              onSelect={onSelect}
+              onClose={onClose}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onMove={onMove}
+              onRename={onRename}
+              onMenu={onProjectMenu}
             />
           ))}
         </div>
@@ -109,9 +114,12 @@ function FooterButton({
   );
 }
 
-import { useRef, useState } from "react";
-
-function ProjectRow({
+/// Memoized with a field-level comparator (project views are rebuilt with
+/// fresh identities on every state-changed event). The dragged project id
+/// rides the dataTransfer — same idiom as the Header tab strip — so `from`
+/// and `to` can never collapse into the same id like the old per-row closure
+/// did (which made drag-reordering a silent no-op).
+const ProjectRow = memo(function ProjectRow({
   project,
   index,
   isSelected,
@@ -128,13 +136,13 @@ function ProjectRow({
   index: number;
   isSelected: boolean;
   isDragging: boolean;
-  onSelect: () => void;
-  onClose: () => void;
-  onDragStart: () => void;
+  onSelect: (id: Uuid) => void;
+  onClose: (id: Uuid) => void;
+  onDragStart: (id: Uuid) => void;
   onDragEnd: () => void;
-  onMove: (to: Uuid) => void;
-  onRename: (name: string | null) => void;
-  onMenu: (x: number, y: number, requestRename: () => void) => void;
+  onMove: (from: Uuid, to: Uuid) => void;
+  onRename: (id: Uuid, name: string | null) => void;
+  onMenu: (project: ProjectView, x: number, y: number, requestRename: () => void) => void;
 }) {
   const [hovering, setHovering] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -151,28 +159,33 @@ function ProjectRow({
   const finish = (apply: boolean) => {
     if (apply) {
       const trimmed = draft.trim();
-      onRename(trimmed.length ? trimmed : null);
+      onRename(project.id, trimmed.length ? trimmed : null);
     }
     setRenaming(false);
   };
 
   return (
     <div
-      onClick={onSelect}
+      onClick={() => onSelect(project.id)}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       onDoubleClick={startRename}
       onContextMenu={(e) => {
         e.preventDefault();
-        onMenu(e.clientX, e.clientY, startRename);
+        onMenu(project, e.clientX, e.clientY, startRename);
       }}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("application/x-muster-project", project.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(project.id);
+      }}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
-        onMove(project.id);
+        const from = e.dataTransfer.getData("application/x-muster-project");
+        if (from && from !== project.id) onMove(from, project.id);
       }}
       className={`group rounded-md px-2 py-1.5 cursor-pointer flex items-center gap-2 ${
         isSelected ? "bg-muster-selected" : "hover:bg-muster-hover"
@@ -209,7 +222,7 @@ function ProjectRow({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onClose();
+            onClose(project.id);
           }}
           className="w-4 h-4 text-muster-muted hover:text-muster-fg flex items-center justify-center ui-fs-xs"
         >
@@ -222,4 +235,12 @@ function ProjectRow({
       )}
     </div>
   );
-}
+}, (a, b) =>
+  a.isSelected === b.isSelected &&
+  a.isDragging === b.isDragging &&
+  a.index === b.index &&
+  a.project.id === b.project.id &&
+  a.project.name === b.project.name &&
+  a.project.custom_name === b.project.custom_name &&
+  a.project.session_count === b.project.session_count
+);

@@ -52,19 +52,44 @@ export const MONACO_THEME = "muster-dynamic";
 
 // ── Lazy Monaco loader ────────────────────────────────────────────────
 
-type MonacoNS = typeof import("monaco-editor");
+// The editor is imported via `editor.api` (core + standalone editor) instead
+// of the package root (`editor.main`): the root also wires ALL ~90 language
+// tokenizers, every language service and the lsp client into the same
+// ~4 MB chunk. The app only ever assigns the languages in LANGUAGE_BY_EXT,
+// so those are registered explicitly below — everything else stays
+// plaintext, exactly as before.
+type MonacoNS = typeof import("monaco-editor/editor/editor.api");
 let monacoInstance: MonacoNS | null = null;
 let monacoPromise: Promise<MonacoNS> | null = null;
 /// Latest theme requested while Monaco was unloaded. Applied as soon as the
 /// editor chunk finishes loading, so settings can be applied at startup
-/// without triggering the (~4 MB) editor import.
+/// without triggering the editor import.
 let pendingTheme: { colors: ThemeColors; dark: boolean } | null = null;
 
 export function ensureMonaco(): Promise<MonacoNS> {
   if (monacoInstance) return Promise.resolve(monacoInstance);
   if (monacoPromise) return monacoPromise;
   monacoPromise = (async () => {
-    const monaco = await import("monaco-editor");
+    const monaco = await import("monaco-editor/editor/editor.api");
+    // Every editor contribution (find, folding, context menu, bracket
+    // matching…) minus the ~90 unused languages — see the generated module.
+    await import("./monaco-editor-contribs");
+    // Language services (worker-backed modes). Each registers its language
+    // ids: typescript/javascript, css/scss/less, html, json.
+    await import("monaco-editor/language/typescript/monaco.contribution");
+    await import("monaco-editor/language/css/monaco.contribution");
+    await import("monaco-editor/language/html/monaco.contribution");
+    await import("monaco-editor/language/json/monaco.contribution");
+    // Monarch tokenizers for the remaining LANGUAGE_BY_EXT ids.
+    await import("monaco-editor/languages/definitions/rust/register");
+    await import("monaco-editor/languages/definitions/python/register");
+    await import("monaco-editor/languages/definitions/ini/register");
+    await import("monaco-editor/languages/definitions/markdown/register");
+    await import("monaco-editor/languages/definitions/yaml/register");
+    await import("monaco-editor/languages/definitions/xml/register");
+    await import("monaco-editor/languages/definitions/powershell/register");
+    await import("monaco-editor/languages/definitions/bat/register");
+    await import("monaco-editor/languages/definitions/shell/register");
     const { loader } = await import("@monaco-editor/react");
     // NOTE: monaco-editor's package.json `exports` map rewrites `monaco-editor/x`
     // to `esm/vs/x.js`, so worker imports must NOT include the `esm/vs` prefix.

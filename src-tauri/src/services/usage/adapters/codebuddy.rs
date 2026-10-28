@@ -1,9 +1,6 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-
 use serde_json::Value;
 
-use super::{file_mtime_ms, home, num, walk_files, ScanCtx};
+use super::{file_mtime_ms, home, num, open_tail, walk_files, ScanCtx};
 use crate::services::agents::AgentKind;
 use crate::services::usage::model::TokenUsage;
 
@@ -18,9 +15,11 @@ pub fn scan(ctx: &mut ScanCtx) {
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
-        if !ctx.should_read(&path) {
+        // Append-only JSONL; lines are self-contained (the timestamp comes
+        // from the file mtime), so tails are parsed incrementally.
+        let Some(resume) = ctx.resume_at(&path) else {
             continue;
-        }
+        };
         // CodeBuddy's JSONL has no per-message timestamp; the file mtime is
         // the only temporal signal, so attribution is marked coarse.
         let ts = file_mtime_ms(&path);
@@ -28,10 +27,10 @@ pub fn scan(ctx: &mut ScanCtx) {
             continue;
         }
         let session = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned);
-        let Ok(file) = File::open(&path) else {
+        let Some(mut tail) = open_tail(&path, resume) else {
             continue;
         };
-        for (idx, line) in BufReader::new(file).lines().enumerate() {
+        for (idx, line) in tail.by_ref() {
             let Ok(line) = line else { continue };
             let Ok(v) = serde_json::from_str::<Value>(&line) else {
                 continue;
@@ -81,5 +80,6 @@ pub fn scan(ctx: &mut ScanCtx) {
                 true,
             );
         }
+        ctx.advance(&path, tail.consumed(), tail.next_line());
     }
 }

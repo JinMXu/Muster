@@ -17,13 +17,22 @@ export function usePanelWidth(key: string, def: number, side: "left" | "right", 
       e.preventDefault();
       const startX = e.clientX;
       const startW = widthRef.current;
+      // width lives on App, so every setWidth re-renders the whole tree.
+      // Coalesce mousemove floods to one update per frame (same approach as
+      // the pane-divider drag in PaneLayout).
+      let raf = 0;
+      const apply = () => {
+        raf = 0;
+        setWidth(widthRef.current);
+      };
       const onMove = (ev: MouseEvent) => {
         const dx = ev.clientX - startX;
         const w = Math.min(max, Math.max(min, side === "left" ? startW + dx : startW - dx));
         widthRef.current = w;
-        setWidth(w);
+        if (!raf) raf = requestAnimationFrame(apply);
       };
       const onUp = () => {
+        if (raf) cancelAnimationFrame(raf);
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";

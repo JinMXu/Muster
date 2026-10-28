@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppStateView, SearchMatch } from "../lib/types";
 import { api } from "../lib/invoke";
 import { useT } from "../lib/i18n/context";
@@ -18,10 +18,10 @@ function utf16Index(s: string, charIndex: number): number {
 
 interface MatchRowProps {
   m: SearchMatch;
-  id: string;
+  index: number;
   selected: boolean;
-  onSelect: () => void;
-  onOpen: () => void;
+  onSelect: (index: number) => void;
+  onOpen: (index: number) => void;
 }
 
 /// Project-wide full-text search, opened as a standalone overlay by
@@ -121,6 +121,20 @@ export default function SearchPanel({
     }
   }, [flat, selected, onClose]);
 
+  // Index-based and stable across selection changes, so the memoized
+  // MatchRows below only re-render when their own row flips selected.
+  const selectMatch = useCallback((i: number) => setSelected(i), []);
+  const openMatch = useCallback(
+    (i: number) => {
+      const m = flat[i];
+      if (m) {
+        api.openFile(m.path, false);
+        onClose();
+      }
+    },
+    [flat, onClose]
+  );
+
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -203,11 +217,11 @@ export default function SearchPanel({
                   return (
                     <MatchRow
                       key={`${m.path}:${m.line}:${m.column}`}
-                      id={`search-result-${i}`}
                       m={m}
+                      index={i}
                       selected={i === selected}
-                      onSelect={() => setSelected(i)}
-                      onOpen={openSelected}
+                      onSelect={selectMatch}
+                      onOpen={openMatch}
                     />
                   );
                 })}
@@ -220,7 +234,10 @@ export default function SearchPanel({
   );
 }
 
-function MatchRow({ m, id, selected, onSelect, onOpen }: MatchRowProps) {
+/// Memoized: hovering/keyboard-moving the selection changes `selected` on
+/// exactly two rows, and the callbacks are index-based + stable (excluded
+/// from the comparison on purpose, like FileTree's Row).
+const MatchRow = memo(function MatchRow({ m, index, selected, onSelect, onOpen }: MatchRowProps) {
   const start = utf16Index(m.line_text, m.match_start);
   const end = utf16Index(m.line_text, m.match_start + m.match_len);
   const before = m.line_text.slice(0, start);
@@ -229,9 +246,9 @@ function MatchRow({ m, id, selected, onSelect, onOpen }: MatchRowProps) {
 
   return (
     <div
-      id={id}
-      onClick={onOpen}
-      onMouseEnter={onSelect}
+      id={`search-result-${index}`}
+      onClick={() => onOpen(index)}
+      onMouseEnter={() => onSelect(index)}
       className={`cursor-pointer rounded px-1.5 py-0.5 ui-fs-sm ${
         selected ? "bg-muster-selected text-muster-fg" : "hover:bg-muster-hover text-muster-muted"
       }`}
@@ -246,4 +263,4 @@ function MatchRow({ m, id, selected, onSelect, onOpen }: MatchRowProps) {
       </code>
     </div>
   );
-}
+}, (a, b) => a.m === b.m && a.index === b.index && a.selected === b.selected);

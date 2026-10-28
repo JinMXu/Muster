@@ -69,9 +69,12 @@ export function LanguageProvider({
   }, [lang]);
 
   const t = useMemo(() => makeT(lang), [lang]);
+  // The context value must stay referentially stable across re-renders, or
+  // every useT() consumer re-renders on each parent render regardless of memo.
+  const value = useMemo(() => ({ lang, t }), [lang, t]);
 
   return (
-    <LangContext.Provider value={{ lang, t }}>
+    <LangContext.Provider value={value}>
       {children}
     </LangContext.Provider>
   );

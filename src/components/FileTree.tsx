@@ -383,8 +383,48 @@ export default function FileTree({ state, active }: { state: AppStateView | null
     return out;
   }, [children, expanded, draft, cwd]);
 
+  // ── Windowing ─────────────────────────────────────────────────────────
+  // Fully expanded trees hold thousands of rows; only the slice around the
+  // scroll position is rendered, with spacer divs standing in for the rest.
+  // Row height is uniform but font-size dependent (ui-fs-* follows the
+  // user's setting), so an invisible probe row with a Row's exact classes
+  // is measured via ResizeObserver.
+  const listRef = useRef<HTMLDivElement>(null);
+  const probeRef = useRef<HTMLDivElement>(null);
+  const [rowH, setRowH] = useState(26);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(600);
+
+  useEffect(() => {
+    const probe = probeRef.current;
+    const list = listRef.current;
+    if (!probe || !list) return;
+    const ro = new ResizeObserver(() => {
+      const h = probe.offsetHeight;
+      if (h > 0) setRowH((prev) => (prev === h ? prev : h));
+      setViewportH(list.clientHeight);
+    });
+    ro.observe(probe);
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, []);
+
+  const OVERSCAN = 8;
+  const sliceStart = Math.max(0, Math.floor(scrollTop / rowH) - OVERSCAN);
+  const sliceEnd = Math.min(flattened.length, Math.ceil((scrollTop + viewportH) / rowH) + OVERSCAN);
+  const visibleNodes = flattened.slice(sliceStart, sliceEnd);
+
   return (
-    <div className="h-full overflow-y-auto px-2 py-2">
+    <div
+      ref={listRef}
+      className="h-full overflow-y-auto px-2 py-2"
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+    >
+      {/* Row-height probe: same classes as a Row, kept out of view. */}
+      <div ref={probeRef} aria-hidden className="invisible absolute flex items-center gap-1 px-1.5 py-1 ui-fs-base">
+        <IconFile size={12} />
+        <span className="truncate">probe</span>
+      </div>
       <div className="flex items-center gap-1 mb-2 px-1">
         <div className="flex-1 min-w-0 flex items-center gap-1 ui-fs-base text-muster-muted truncate" title={cwd}>
           <IconFolder size={12} className="flex-shrink-0" />
@@ -397,7 +437,8 @@ export default function FileTree({ state, active }: { state: AppStateView | null
           <IconFolderPlus size={13} />
         </HeaderButton>
       </div>
-      {flattened.map((node) =>
+      <div aria-hidden style={{ height: sliceStart * rowH }} />
+      {visibleNodes.map((node) =>
         node.draft ? (
           <DraftRow
             key={node.path}
@@ -427,6 +468,7 @@ export default function FileTree({ state, active }: { state: AppStateView | null
           />
         )
       )}
+      <div aria-hidden style={{ height: (flattened.length - sliceEnd) * rowH }} />
       {flattened.length === 0 && (
         <div className="ui-fs-sm text-muster-muted/70 px-2 py-3">{t("fileTree.empty")}</div>
       )}

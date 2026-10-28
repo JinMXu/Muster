@@ -218,7 +218,7 @@ pub fn run() {
                 main.lock().new_project(None);
             }
 
-            spawn_pending(app.handle(), "main", &main);
+            spawn_pending_async(app.handle().clone(), "main".into(), main.clone());
 
             if let Some(window) = app.get_webview_window("main") {
                 let view = main.lock().view();
@@ -538,7 +538,7 @@ fn restore_secondary_windows(app: &AppHandle) {
                 g.new_project(None);
             }
         }
-        spawn_pending(app, &label, &s);
+        spawn_pending_async(app.clone(), label.clone(), s.clone());
         if let Err(e) = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
             .title("Muster")
             .inner_size(1000.0, 680.0)
@@ -662,6 +662,18 @@ pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>
     for h in handles {
         let _ = h.join();
     }
+}
+
+/// Run [`spawn_pending`] off the main thread. `setup` runs before the first
+/// frame is painted, and a restore of N tabs costs ~N×STAGGER ms of ConPTY
+/// creation — blocking on it delayed window first-paint by that much. Read
+/// loops are re-checked when the background spawn finishes, because the
+/// frontend's initial pump registration may already have run.
+pub fn spawn_pending_async(app: AppHandle, label: String, state: Arc<Mutex<AppState>>) {
+    std::thread::spawn(move || {
+        spawn_pending(&app, &label, &state);
+        start_read_loops(&app, &label, &state);
+    });
 }
 
 /// Start read pumps for all spawned sessions in the given window. Called by

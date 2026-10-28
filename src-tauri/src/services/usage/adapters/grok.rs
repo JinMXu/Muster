@@ -1,12 +1,10 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 
-use super::{home, num, walk_files, ScanCtx};
+use super::{home, num, open_tail, walk_files, ScanCtx};
 use crate::services::agents::AgentKind;
 use crate::services::usage::model::TokenUsage;
 use crate::services::usage::time::parse_iso_ms;
@@ -23,13 +21,15 @@ pub fn scan(ctx: &mut ScanCtx) {
         if path.file_name().and_then(|n| n.to_str()) != Some("unified.jsonl") {
             continue;
         }
-        if !ctx.should_read(&path) {
-            continue;
-        }
-        let Ok(file) = File::open(&path) else {
+        // unified.jsonl is append-only with self-contained lines; cwd comes
+        // from the sqlite index, so tails are parsed incrementally.
+        let Some(resume) = ctx.resume_at(&path) else {
             continue;
         };
-        for (idx, line) in BufReader::new(file).lines().enumerate() {
+        let Some(mut tail) = open_tail(&path, resume) else {
+            continue;
+        };
+        for (idx, line) in tail.by_ref() {
             let Ok(line) = line else { continue };
             if !line.contains("shell.turn.inference_done") {
                 continue;
@@ -73,6 +73,7 @@ pub fn scan(ctx: &mut ScanCtx) {
                 false,
             );
         }
+        ctx.advance(&path, tail.consumed(), tail.next_line());
     }
 }
 

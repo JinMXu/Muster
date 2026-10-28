@@ -1,10 +1,8 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use serde_json::Value;
 
-use super::{clean_model, home, num_at, walk_files, ScanCtx};
+use super::{clean_model, home, num_at, open_tail, walk_files, ScanCtx};
 use crate::services::agents::AgentKind;
 use crate::services::usage::model::TokenUsage;
 use crate::services::usage::time::parse_iso_ms;
@@ -19,13 +17,15 @@ pub fn scan(ctx: &mut ScanCtx) {
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
-        if !ctx.should_read(&path) {
-            continue;
-        }
-        let Ok(file) = File::open(&path) else {
+        // Transcripts are append-only and each event line is self-contained,
+        // so an appended tail is parsed incrementally.
+        let Some(resume) = ctx.resume_at(&path) else {
             continue;
         };
-        for (idx, line) in BufReader::new(file).lines().enumerate() {
+        let Some(mut tail) = open_tail(&path, resume) else {
+            continue;
+        };
+        for (idx, line) in tail.by_ref() {
             let Ok(line) = line else { continue };
             let Ok(v) = serde_json::from_str::<Value>(&line) else {
                 continue;
@@ -88,5 +88,6 @@ pub fn scan(ctx: &mut ScanCtx) {
                 false,
             );
         }
+        ctx.advance(&path, tail.consumed(), tail.next_line());
     }
 }

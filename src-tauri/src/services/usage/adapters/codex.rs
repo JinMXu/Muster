@@ -23,6 +23,9 @@ pub fn scan(ctx: &mut ScanCtx) {
             if !name.ends_with(".jsonl.zst") && !name.ends_with(".jsonl") {
                 continue;
             }
+            // No byte-offset resume: token events are deltas against a running
+            // total held across lines, and .zst files cannot be seeked into
+            // anyway (compressed offsets don't map to decompressed positions).
             if !ctx.should_read(&path) {
                 continue;
             }

@@ -784,8 +784,30 @@ export default function App() {
   // title bar draggable via the class `.drag-region` — Tauri picks up the
   // `data-tauri-drag-region` attribute automatically.
 
-  const selectProject = (id: Uuid) => api.selectProject(id);
-  const moveProject = (from: Uuid, to: Uuid) => api.moveProject(from, to);
+  // Stable, id-taking action callbacks: Header/Sidebar memoize their rows
+  // against these, so they must not change identity across renders.
+  const selectProject = useCallback((id: Uuid) => api.selectProject(id), []);
+  const moveProject = useCallback((from: Uuid, to: Uuid) => api.moveProject(from, to), []);
+  const closeProjectById = useCallback((id: Uuid) => closeProject(id), [closeProject]);
+  const renameProjectById = useCallback(
+    (id: Uuid, name: string | null) => api.renameProject(id, name),
+    []
+  );
+  const selectTabById = useCallback((id: Uuid) => api.selectTab(id), []);
+  const moveTabById = useCallback((from: Uuid, to: Uuid) => api.moveTab(from, to), []);
+  const renameTabById = useCallback(
+    (id: Uuid, name: string | null) => api.renameTab(id, name),
+    []
+  );
+  const toggleRightPanel = useCallback(() => api.toggleRightPanel(), []);
+  const exitZoom = useCallback(() => api.togglePaneZoom(), []);
+  const openSettingsGeneral = useCallback(() => {
+    setSettingsTab("general");
+    setShowSettings(true);
+  }, []);
+  const openUsagePanel = useCallback(() => setShowUsage(true), []);
+  const toggleAgentBar = useCallback(() => setAgentBarOpen((v) => !v), []);
+  const closeAgentBar = useCallback(() => setAgentBarOpen(false), []);
 
   // ---- context menus -------------------------------------------------------
   const tabMenu = useCallback(
@@ -870,17 +892,17 @@ export default function App() {
               projects={stateView?.projects ?? []}
               selected={stateView?.selected_project_id ?? null}
               onSelect={selectProject}
-              onClose={(id) => closeProject(id)}
+              onClose={closeProjectById}
               onNewProject={newProjectBlank}
               onMove={moveProject}
-              onRename={(id, name) => api.renameProject(id, name)}
+              onRename={renameProjectById}
               onProjectMenu={projectMenu}
-              onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
-              onOpenUsage={() => setShowUsage(true)}
+              onOpenSettings={openSettingsGeneral}
+              onOpenUsage={openUsagePanel}
               width={leftPanel.width}
               agentBarOpen={agentBarOpen}
-              onAgentBarToggle={() => setAgentBarOpen((v) => !v)}
-              onAgentBarClose={() => setAgentBarOpen(false)}
+              onAgentBarToggle={toggleAgentBar}
+              onAgentBarClose={closeAgentBar}
             />
             <ResizeHandle onMouseDown={leftPanel.onHandleMouseDown} />
           </>
@@ -890,14 +912,14 @@ export default function App() {
             project={selectedProject}
             onNewSession={newSession}
             onCloseTab={closeTabById}
-            onSelectTab={(id) => api.selectTab(id)}
-            onMoveTab={(from, to) => api.moveTab(from, to)}
-            onRenameTab={(id, name) => api.renameTab(id, name)}
+            onSelectTab={selectTabById}
+            onMoveTab={moveTabById}
+            onRenameTab={renameTabById}
             onTabMenu={tabMenu}
-            togglePanel={() => api.toggleRightPanel()}
+            togglePanel={toggleRightPanel}
             panelVisible={stateView?.is_panel_visible ?? false}
             isPaneZoomed={stateView?.is_pane_zoomed ?? false}
-            onExitZoom={() => api.togglePaneZoom()}
+            onExitZoom={exitZoom}
           />
           <div className="flex-1 min-h-0 relative">
             {selectedProject && selectedProject.tabs.length > 0 ? (
@@ -926,8 +948,8 @@ export default function App() {
             onClearTerminal={clearTerminal}
             onCloseProject={closeSelectedProject}
             onCloseTab={closeTab}
-            onOpenSettings={() => { setSettingsTab("general"); setShowSettings(true); }}
-            onOpenUsage={() => setShowUsage(true)}
+            onOpenSettings={openSettingsGeneral}
+            onOpenUsage={openUsagePanel}
             onOpenShortcuts={() => { setSettingsTab("shortcuts"); setShowSettings(true); }}
             onOpenSearch={() => setShowSearch(true)}
             onReopenClosed={reopenClosedTab}

@@ -597,6 +597,10 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
     // memory and exe paths for every process on the machine).
     let procs_cache = crate::services::procs::refresh_and_snapshot_light();
     let mut live_agents: HashSet<Uuid> = HashSet::new();
+    // Run observations collected under the window lock but applied after it:
+    // resolving the branch does a git `Repository::discover` on disk, which
+    // must never stall this window's commands for a poll cycle.
+    let mut pending_obs: Vec<crate::services::usage::RunObservation> = Vec::new();
 
     for (label, state) in shared.all() {
         let mut g = state.lock();
@@ -634,19 +638,13 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
                         persisted_changed = true;
                     }
                     live_agents.insert(sid);
-                    let cwd = session.current_directory();
-                    let branch = if shared.usage.needs_run(sid, detected.kind, &cwd) {
-                        crate::services::usage::branch_for(&cwd)
-                    } else {
-                        None
-                    };
-                    shared.usage.observe_run(crate::services::usage::RunObservation {
+                    pending_obs.push(crate::services::usage::RunObservation {
                         session_id: sid,
                         agent: detected.kind,
                         project_id: project.id,
                         project: project.name(&g),
-                        cwd,
-                        branch,
+                        cwd: session.current_directory(),
+                        branch: None,
                         now_ms,
                     });
                     // Reading the tail activates the capture ring for this
@@ -712,6 +710,17 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
         if persisted_changed {
             g.bump();
         }
+    }
+    // Apply run observations now that no window state lock is held. The
+    // branch lookup only fires for genuinely new runs (needs_run), cached per
+    // cwd inside `branch_for`.
+    for mut obs in pending_obs {
+        obs.branch = if shared.usage.needs_run(obs.session_id, obs.agent, &obs.cwd) {
+            crate::services::usage::branch_for(&obs.cwd)
+        } else {
+            None
+        };
+        shared.usage.observe_run(obs);
     }
     // Runs whose agent disappeared or whose session closed are finished.
     shared.usage.end_missing_runs(&live_agents, now_ms);

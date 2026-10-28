@@ -1,31 +1,23 @@
-import { useMemo } from "react";
-import { useTauriEventOf } from "./useTauriEvent";
-import { events } from "../lib/bindings";
-import type { AgentAttention, AgentKind, AgentState, AgentStatusEvent, Uuid } from "../lib/types";
+import type { AgentKind, Uuid } from "../lib/types";
+import {
+  useAgentStatus as useSharedAgentStatus,
+  type LiveAgentStatus,
+} from "../lib/agentStatusStore";
 
 /// A live agent status: the hook only stores rows whose agent/state are
 /// present (removal rows are deleted instead).
-export interface LiveAgentStatus {
-  id: Uuid;
-  agent: AgentKind;
-  state: AgentState;
-  attention: AgentAttention | null;
-}
+export type { LiveAgentStatus };
 
 /// Live coding-agent status per session, fed by the backend's
 /// `agent-status-changed` event (emitted when a session's agent detection
 /// changes). Returns a map of session id -> status; sessions without an
 /// agent are simply absent.
+///
+/// Backed by a single shared listener (see `lib/agentStatusStore`): every
+/// consumer of this hook used to register its own Tauri listener, and each
+/// event then fanned out into one setState per consumer.
 export function useAgentStatus(): Record<Uuid, LiveAgentStatus> {
-  const [event] = useTauriEventOf(events.agentStatusChanged, null);
-  return useMemo(() => {
-    const map: Record<Uuid, LiveAgentStatus> = {};
-    for (const row of event?.sessions ?? []) {
-      if (row.agent && row.state) map[row.id] = row as LiveAgentStatus;
-      else delete map[row.id];
-    }
-    return map;
-  }, [event]);
+  return useSharedAgentStatus();
 }
 
 /// Display name for an agent kind (brand names are not translated).

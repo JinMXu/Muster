@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import type { AppStateView } from "./types";
+import type { AppStateView, SessionInfo } from "./types";
 import { api } from "./invoke";
 import { events } from "./bindings";
 
@@ -40,6 +40,13 @@ interface Entry {
   projectId: string;
   pinned: string | null;
   anchor: ProjectAnchor;
+  /// Last `list_all_sessions` result, shared with `useProjectSessions`
+  /// consumers (InfoPanel) so the same 5s poll feeds both instead of each
+  /// holding its own interval.
+  sessions: SessionInfo[];
+  /// Fingerprint of the session fields consumers render; the raw array is a
+  /// fresh object per poll, so notify only when something actually changed.
+  sessionsKey: string;
   listeners: Set<() => void>;
   timer: ReturnType<typeof setInterval> | null;
   unlisten: UnlistenFn | null;
@@ -91,6 +98,23 @@ async function tick(e: Entry) {
   try {
     const sessions = await api.listAllSessions().catch(() => null);
     if (!sessions || e.disposed || e.pinned) return;
+    const key = JSON.stringify(
+      sessions.map((s) => [
+        s.id,
+        s.project_id,
+        s.pid,
+        s.has_exited,
+        s.working_directory,
+        s.shell_name,
+        s.agent,
+        s.agent_command,
+      ])
+    );
+    if (key !== e.sessionsKey) {
+      e.sessions = sessions;
+      e.sessionsKey = key;
+      notify(e);
+    }
     const cwd = sessions.find((s) => s.project_id === e.projectId)?.working_directory ?? null;
     if (cwd === e.anchor.cwd) return;
     setAnchor(e, cwd, e.anchor.root);
@@ -138,6 +162,8 @@ function acquire(projectId: string, pinned: string | null): Entry {
       projectId,
       pinned,
       anchor: pinned ? { cwd: pinned, root: pinned } : EMPTY,
+      sessions: [],
+      sessionsKey: "",
       listeners: new Set(),
       timer: null,
       unlisten: null,
@@ -194,4 +220,45 @@ export function useProjectCwd(state: AppStateView | null): ProjectAnchor {
   }, [projectId, pinned]);
 
   return anchor;
+}
+
+/// The selected project's session list, served by the SAME shared poller as
+/// `useProjectCwd` (one `list_all_sessions` round-trip every 5s feeds the
+/// cwd anchor, InfoPanel and anything else — previously InfoPanel ran its
+/// own identical interval in parallel).
+export function useProjectSessions(state: AppStateView | null): SessionInfo[] {
+  const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
+  const projectId = project?.id ?? null;
+  const pinned = project?.custom_directory ?? null;
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setSessions([]);
+      return;
+    }
+    const e = acquire(projectId, pinned);
+    const listener = () => setSessions(e.sessions);
+    e.listeners.add(listener);
+    listener();
+    return () => {
+      const cur = entries.get(projectId);
+      if (!cur) return;
+      cur.listeners.delete(listener);
+      if (cur.listeners.size === 0) {
+        disposeEntry(cur);
+        entries.delete(projectId);
+      }
+    };
+  }, [projectId, pinned]);
+
+  return sessions;
+}
+
+/// Force an immediate poll of the selected project's shared entry (backs
+/// the InfoPanel refresh button).
+export function forceProjectPoll(projectId: string | null) {
+  if (!projectId) return;
+  const e = entries.get(projectId);
+  if (e) void tick(e);
 }

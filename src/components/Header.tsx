@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { events } from "../lib/bindings";
 import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
@@ -52,6 +52,15 @@ export default function Header({
 }) {
   const { t } = useT();
   const [dragging, setDragging] = useState<Uuid | null>(null);
+  // Stable per-id drag callbacks so the memoized TabItems don't re-render on
+  // every Header render (progress/agent events re-render Header often).
+  const handleDragStart = useCallback((id: Uuid) => setDragging(id), []);
+  const handleDragEnd = useCallback(() => setDragging(null), []);
+  const handlePaneDrop = useCallback(
+    (paneId: Uuid, sourceTabId: Uuid, to: Uuid) =>
+      api.movePaneCrossTab(sourceTabId, paneId, to),
+    []
+  );
   // Coding-agent status per session, fed by the backend poller
   // (`agent-status-changed`). Drives the colored dot on agent tabs.
   const agents = useAgentStatus();
@@ -132,16 +141,14 @@ export default function Header({
               isDragging={dragging === tab.id}
               progress={sessionId ? progressBySession[sessionId] ?? null : null}
               agent={sessionId ? agents[sessionId] ?? null : null}
-              onSelect={() => onSelectTab(tab.id)}
-              onClose={() => onCloseTab(tab.id)}
-              onMove={(from) => onMoveTab(from, tab.id)}
-              onDragStart={() => setDragging(tab.id)}
-              onDragEnd={() => setDragging(null)}
-              onRename={(name) => onRenameTab(tab.id, name)}
-              onMenu={(x, y, requestRename) => onTabMenu(tab, x, y, requestRename)}
-              onPaneDrop={(paneId, sourceTabId) =>
-                api.movePaneCrossTab(sourceTabId, paneId, tab.id)
-              }
+              onSelect={onSelectTab}
+              onClose={onCloseTab}
+              onMove={onMoveTab}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onRename={onRenameTab}
+              onMenu={onTabMenu}
+              onPaneDrop={handlePaneDrop}
             />
           );
         })}
@@ -182,7 +189,11 @@ export default function Header({
   );
 }
 
-function TabItem({
+/// Memoized with a field-level comparator: every `state-changed` event
+/// rebuilds the whole AppStateView (fresh object identities), and progress /
+/// agent-status events re-render Header on their own — without this, every
+/// tab re-renders on each of those. Callbacks are id-taking and stable.
+const TabItem = memo(function TabItem({
   tab,
   isSelected,
   isDragging,
@@ -204,18 +215,18 @@ function TabItem({
   progress: PtyProgress | null;
   /// Coding agent detected in the tab's session, null when there is none.
   agent: LiveAgentStatus | null;
-  onSelect: () => void;
-  onClose: () => void;
+  onSelect: (id: Uuid) => void;
+  onClose: (id: Uuid) => void;
   /// A tab was dropped on this tab to reorder: `from` is the dragged tab's
   /// id (this tab is the drop target).
-  onMove: (from: Uuid) => void;
-  onDragStart: () => void;
+  onMove: (from: Uuid, to: Uuid) => void;
+  onDragStart: (id: Uuid) => void;
   onDragEnd: () => void;
-  onRename: (name: string | null) => void;
-  onMenu: (x: number, y: number, requestRename: () => void) => void;
+  onRename: (id: Uuid, name: string | null) => void;
+  onMenu: (tab: ProjectView["tabs"][number], x: number, y: number, requestRename: () => void) => void;
   /// A pane dragged from another tab and dropped on this tab: moves the pane
   /// out of its source tab into this one as a new column.
-  onPaneDrop: (paneId: Uuid, sourceTabId: Uuid) => void;
+  onPaneDrop: (paneId: Uuid, sourceTabId: Uuid, to: Uuid) => void;
 }) {
   const { t } = useT();
   const [hovering, setHovering] = useState(false);
@@ -232,14 +243,14 @@ function TabItem({
   const finish = (apply: boolean) => {
     if (apply) {
       const trimmed = draft.trim();
-      onRename(trimmed.length ? trimmed : null);
+      onRename(tab.id, trimmed.length ? trimmed : null);
     }
     setRenaming(false);
   };
 
   return (
     <div
-      onClick={onSelect}
+      onClick={() => onSelect(tab.id)}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       onDoubleClick={startRename}
@@ -250,7 +261,7 @@ function TabItem({
         // id back to reorder.
         e.dataTransfer.setData("application/x-muster-tab", tab.id);
         e.dataTransfer.effectAllowed = "move";
-        onDragStart();
+        onDragStart(tab.id);
       }}
       onDragEnd={onDragEnd}
       onDragOver={(e) => {
@@ -273,17 +284,17 @@ function TabItem({
         const paneId = e.dataTransfer.getData("application/x-muster-pane");
         const sourceTabId = e.dataTransfer.getData("application/x-muster-pane-source-tab");
         if (paneId && sourceTabId && sourceTabId !== tab.id) {
-          onPaneDrop(paneId, sourceTabId);
+          onPaneDrop(paneId, sourceTabId, tab.id);
           return;
         }
         // Otherwise it's a tab-reorder drag: the dragged tab's id rides the
         // dataTransfer; this tab is the drop target.
         const draggedTabId = e.dataTransfer.getData("application/x-muster-tab");
-        if (draggedTabId && draggedTabId !== tab.id) onMove(draggedTabId);
+        if (draggedTabId && draggedTabId !== tab.id) onMove(draggedTabId, tab.id);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        onMenu(e.clientX, e.clientY, startRename);
+        onMenu(tab, e.clientX, e.clientY, startRename);
       }}
       className={`group relative rounded-md px-2 py-1 max-w-[220px] flex items-center gap-1 cursor-pointer whitespace-nowrap ui-fs-base flex-shrink-0 ${
         isSelected ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted hover:bg-muster-hover"
@@ -338,7 +349,7 @@ function TabItem({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onClose();
+                onClose(tab.id);
               }}
               className="ml-1 w-3.5 h-3.5 rounded flex items-center justify-center text-muster-muted hover:text-muster-fg"
             >
@@ -363,4 +374,15 @@ function TabItem({
       )}
     </div>
   );
-}
+}, (a, b) =>
+  // The tab view object is rebuilt (new identity) on every state-changed
+  // event; compare the fields TabItem actually renders instead.
+  a.isSelected === b.isSelected &&
+  a.isDragging === b.isDragging &&
+  a.progress === b.progress &&
+  a.agent === b.agent &&
+  a.tab.id === b.tab.id &&
+  a.tab.custom_name === b.tab.custom_name &&
+  a.tab.display_title === b.tab.display_title &&
+  a.tab.pane_count === b.tab.pane_count
+);

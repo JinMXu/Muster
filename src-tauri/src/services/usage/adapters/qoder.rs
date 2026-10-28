@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::{clean_model, home, walk_files, ScanCtx};
+use super::{clean_model, home, open_tail, walk_files, ScanCtx};
 use crate::services::agents::AgentKind;
 use crate::services::usage::model::TokenUsage;
 use crate::services::usage::time::parse_iso_ms;
@@ -22,13 +22,15 @@ pub fn scan(ctx: &mut ScanCtx) {
         if path.file_name().and_then(|n| n.to_str()) != Some("qodercli.log") {
             continue;
         }
-        if !ctx.should_read(&path) {
-            continue;
-        }
-        let Ok(file) = File::open(&path) else {
+        // Append-only run log; each completion line is self-contained (cwd
+        // comes from the project index), so tails are parsed incrementally.
+        let Some(resume) = ctx.resume_at(&path) else {
             continue;
         };
-        for (idx, line) in BufReader::new(file).lines().enumerate() {
+        let Some(mut tail) = open_tail(&path, resume) else {
+            continue;
+        };
+        for (idx, line) in tail.by_ref() {
             let Ok(line) = line else { continue };
             if !line.contains("model.response.completed") {
                 continue;
@@ -72,6 +74,7 @@ pub fn scan(ctx: &mut ScanCtx) {
                 false,
             );
         }
+        ctx.advance(&path, tail.consumed(), tail.next_line());
     }
 }
 

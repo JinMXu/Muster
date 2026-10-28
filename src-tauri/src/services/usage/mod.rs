@@ -314,21 +314,27 @@ impl UsageStore {
         }
         today.runs = today_runs.len() as u64;
 
-        let mut active: Vec<UsageRunView> = Vec::new();
-        for run in inner.active.values() {
-            let mut acc = RunAcc::default();
-            for (ev, hit, conf) in &attrs {
-                if hit.map(|r| r.id) == Some(run.id) {
-                    acc.tokens.add(&ev.tokens);
-                    acc.turns += ev.turns;
-                    acc.confidence = acc.confidence.max(conf_rank(*conf));
-                    if let Some(model) = &ev.model {
-                        *acc.models.entry(model.clone()).or_default() += ev.tokens.total();
-                    }
-                }
+        // One pass over the attributions, bucketed per run id (the old code
+        // rescanned the full attrs vector once per run).
+        let mut accs: HashMap<Uuid, RunAcc> = HashMap::new();
+        for (ev, hit, conf) in &attrs {
+            let Some(run) = hit else { continue };
+            let acc = accs.entry(run.id).or_default();
+            acc.tokens.add(&ev.tokens);
+            acc.turns += ev.turns;
+            acc.confidence = acc.confidence.max(conf_rank(*conf));
+            if let Some(model) = &ev.model {
+                *acc.models.entry(model.clone()).or_default() += ev.tokens.total();
             }
-            active.push(run_view(run, &acc));
         }
+        let mut active: Vec<UsageRunView> = inner
+            .active
+            .values()
+            .map(|run| {
+                let empty = RunAcc::default();
+                run_view(run, accs.get(&run.id).unwrap_or(&empty))
+            })
+            .collect();
         active.sort_by_key(|r| std::cmp::Reverse(r.started_at));
 
         UsageOverview {
@@ -473,6 +479,18 @@ impl UsageStore {
         let inner = self.inner.lock();
         let runs = all_runs(&inner);
         let attrs = attribute(&inner.events, &runs, now);
+        // Single pass over attributions, bucketed per run id.
+        let mut accs: HashMap<Uuid, RunAcc> = HashMap::new();
+        for (ev, hit, conf) in &attrs {
+            let Some(run) = hit else { continue };
+            let acc = accs.entry(run.id).or_default();
+            acc.tokens.add(&ev.tokens);
+            acc.turns += ev.turns;
+            acc.confidence = acc.confidence.max(conf_rank(*conf));
+            if let Some(model) = &ev.model {
+                *acc.models.entry(model.clone()).or_default() += ev.tokens.total();
+            }
+        }
         let mut views = Vec::new();
         for run in runs {
             let end = run.ended_at.unwrap_or(now);
@@ -482,18 +500,8 @@ impl UsageStore {
             if project_id.is_some_and(|pid| run.project_id != pid) {
                 continue;
             }
-            let mut acc = RunAcc::default();
-            for (ev, hit, conf) in &attrs {
-                if hit.map(|r| r.id) == Some(run.id) {
-                    acc.tokens.add(&ev.tokens);
-                    acc.turns += ev.turns;
-                    acc.confidence = acc.confidence.max(conf_rank(*conf));
-                    if let Some(model) = &ev.model {
-                        *acc.models.entry(model.clone()).or_default() += ev.tokens.total();
-                    }
-                }
-            }
-            views.push(run_view(run, &acc));
+            let empty = RunAcc::default();
+            views.push(run_view(run, accs.get(&run.id).unwrap_or(&empty)));
         }
         views.sort_by_key(|r| std::cmp::Reverse(r.started_at));
         views.truncate(limit.clamp(1, 1_000));
@@ -537,7 +545,30 @@ pub fn spawn_scanner(app: AppHandle) {
     });
 }
 
+/// Branch resolution cache TTL: a run started within this window of a previous
+/// lookup for the same cwd reuses the cached name. Short enough that a branch
+/// switch is picked up by the next run in practice, long enough that a burst
+/// of run starts in one repo costs a single `discover`.
+const BRANCH_CACHE_TTL_MS: i64 = 30_000;
+
 pub fn branch_for(cwd: &str) -> Option<String> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Mutex<HashMap<String, (i64, Option<String>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    let now = now_ms();
+    let key = normalize_path(cwd);
+    if let Some((ts, v)) = cache.lock().get(&key) {
+        if now.saturating_sub(*ts) < BRANCH_CACHE_TTL_MS {
+            return v.clone();
+        }
+    }
+    let resolved = branch_for_uncached(cwd);
+    cache.lock().insert(key, (now, resolved.clone()));
+    resolved
+}
+
+fn branch_for_uncached(cwd: &str) -> Option<String> {
     let repo = git2::Repository::discover(cwd).ok()?;
     let head = repo.head().ok()?;
     head.shorthand().map(str::to_owned)
@@ -585,6 +616,21 @@ fn attribute<'a>(
             .or_default()
             .push(run);
     }
+    // Fallback lookup (events without a cwd match): per-agent runs sorted by
+    // started_at plus that agent's longest duration. A run can only overlap
+    // timestamp ts when started_at >= ts - grace - max_duration, so the
+    // "exactly one candidate" check binary-searches that bounded window
+    // instead of scanning every run for every event (O(events x runs) with
+    // months of ledger).
+    let mut by_agent: HashMap<AgentKind, (Vec<&AgentRun>, i64)> = HashMap::new();
+    for run in runs {
+        by_agent.entry(run.agent).or_default().0.push(run);
+    }
+    for (_, (list, max_dur)) in by_agent.iter_mut() {
+        *max_dur = list.iter().map(|r| duration_ms(r, now)).max().unwrap_or(0);
+        list.sort_by_key(|r| r.started_at);
+    }
+
     let mut out = Vec::with_capacity(events.len());
     for ev in events {
         let mut hit = None;
@@ -609,16 +655,21 @@ fn attribute<'a>(
             Confidence::High
         };
         if hit.is_none() {
-            let cands: Vec<&AgentRun> = runs
-                .iter()
-                .copied()
-                .filter(|run| {
+            let mut cands: Vec<&AgentRun> = Vec::new();
+            if let Some((list, max_dur)) = by_agent.get(&ev.agent) {
+                let lo = ev.ts_ms - ATTRIBUTION_GRACE_MS - max_dur;
+                let hi = ev.ts_ms + ATTRIBUTION_GRACE_MS;
+                let start = list.partition_point(|r| r.started_at < lo);
+                for &run in &list[start..] {
+                    if run.started_at > hi {
+                        break;
+                    }
                     let end = run.ended_at.unwrap_or(now);
-                    run.agent == ev.agent
-                        && ev.ts_ms + ATTRIBUTION_GRACE_MS >= run.started_at
-                        && ev.ts_ms <= end + ATTRIBUTION_GRACE_MS
-                })
-                .collect();
+                    if end + ATTRIBUTION_GRACE_MS >= ev.ts_ms {
+                        cands.push(run);
+                    }
+                }
+            }
             if cands.len() == 1 {
                 hit = Some(cands[0]);
                 confidence = if ev.coarse {

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AppStateView, ListenPort, ProcessInfo, SessionInfo } from "../lib/types";
+import type { AppStateView, ListenPort, ProcessInfo } from "../lib/types";
 import { api } from "../lib/invoke";
 import { refreshGitStatus, useGitStatus } from "../lib/gitStatusStore";
-import { useProjectCwd } from "../lib/useProjectCwd";
+import { forceProjectPoll, useProjectCwd, useProjectSessions } from "../lib/useProjectCwd";
 import { reloadSettings, useSettings } from "../lib/settingsStore";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconArrowUpRight, IconGlobe, IconRefresh, IconX } from "./icons";
@@ -17,7 +17,10 @@ import { agentLabel, useAgentStatus } from "../hooks/useAgentStatus";
 /// on, also any process working in the project directory, so externally
 /// started dev servers still show).
 export default function InfoPanel({ state, active }: { state: AppStateView | null; active: boolean }) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  // Sessions come from the shared per-project poller (one 5s
+  // list_all_sessions round-trip feeds this panel and the cwd anchor),
+  // not a private interval that ran in parallel with it.
+  const sessions = useProjectSessions(state);
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
   const projSession = sessions.find((s) => s.project_id === project?.id) ?? null;
   const { root, cwd } = useProjectCwd(state);
@@ -35,6 +38,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
   const refresh = () => {
     setSpinning(true);
     setNonce((n) => n + 1);
+    forceProjectPoll(project?.id ?? null);
     if (root) refreshGitStatus(root);
     setTimeout(() => setSpinning(false), 600);
   };
@@ -42,24 +46,6 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
   const { t } = useT();
   const liveAgents = useAgentStatus();
   const shellPid = projSession && !projSession.has_exited ? projSession.pid : null;
-
-  // Only poll while the Info tab is actually visible: the panel stays mounted
-  // (hidden via CSS) so switching tabs keeps its state, but a hidden panel
-  // must not keep enumerating sessions/processes in the background.
-  useEffect(() => {
-    if (!active) return;
-    let alive = true;
-    const tick = () => {
-      if (document.hidden) return;
-      api.listAllSessions().then((s) => alive && setSessions(s));
-    };
-    tick();
-    const i = setInterval(tick, 5000);
-    return () => {
-      alive = false;
-      clearInterval(i);
-    };
-  }, [nonce, active]);
 
   // PROCESSES + PORTS: poll the session's tracked processes (Job Object
   // members, falling back to the shell's descendant tree), then the listening

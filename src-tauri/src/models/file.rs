@@ -50,6 +50,15 @@ impl FileTab {
             return Self::placeholder(path, FileContent::Image);
         }
 
+        // Size pre-check before reading: a 2 GiB log must not be slurped into
+        // memory only to be rejected by the cap below.
+        if fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_TEXT_BYTES as u64 {
+            return Self::placeholder(
+                path,
+                FileContent::Unavailable { reason: "File is too large to open".into() },
+            );
+        }
+
         match fs::read(path) {
             Err(e) => Self::placeholder(
                 path,

@@ -12,12 +12,17 @@
 // Parses the Ghostty `key = value` format, derives the app's extra fields
 // (accent/sidebar/divider and any missing palette/cursor/selection entries),
 // and emits a static Rust table.
+//
+// Only the curated allowlist (CURATED_THEMES below) is emitted — 10 dark +
+// 10 light picks; the app always offers Default Dark/Light on top of these.
+// Empty the set to emit the full catalog again.
 
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CURATED_THEMES } from "./theme-allowlist.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -226,6 +231,11 @@ const files = SOURCE_DIR
     });
 const themes = files
   .map((f) => toTheme(f.name, parseGhostty(f.text)))
+  .filter((t) => CURATED_THEMES.has(t.name))
   .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+const missing = [...CURATED_THEMES].filter((n) => !themes.some((t) => t.name === n));
+if (missing.length) {
+  console.error(`warning: allowlist names not found upstream: ${missing.join(", ")}`);
+}
 await writeFile(OUT, emitRust(themes), "utf8");
 console.log(`wrote ${themes.length} themes to ${path.relative(ROOT, OUT)}`);

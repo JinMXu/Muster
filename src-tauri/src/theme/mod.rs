@@ -20,13 +20,16 @@ pub struct ThemeColors {
 }
 
 /// Lightweight theme metadata for the settings picker: name, dark/light
-/// classification, and two swatch colors for a visual preview.
+/// classification, swatch colors, and a small ANSI strip for the grid tile.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ThemeInfo {
     pub name: String,
     pub is_dark: bool,
     pub background: String,
     pub accent: String,
+    /// Picker tile material: background, foreground, cursor, selection_bg,
+    /// then palette colors 0–7.
+    pub preview: Vec<String>,
 }
 
 impl ThemeColors {
@@ -48,11 +51,23 @@ impl ThemeColors {
     }
 
     pub fn to_info(&self) -> ThemeInfo {
+        // Preview material for the picker tile: background, foreground,
+        // cursor, selection, then the first eight palette entries.
+        let preview: Vec<String> = [
+            self.background.clone(),
+            self.foreground.clone(),
+            self.cursor.clone(),
+            self.selection_bg.clone(),
+        ]
+        .into_iter()
+        .chain(self.palette[..8].to_vec())
+        .collect();
         ThemeInfo {
             name: self.name.clone(),
             is_dark: self.is_dark(),
             background: self.background.clone(),
             accent: self.accent.clone(),
+            preview,
         }
     }
 }

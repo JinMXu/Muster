@@ -19,15 +19,48 @@
   --muster-divider: #30363d;
   --muster-fg: #e6edf3;
   --muster-muted: #7d8590;
-  /* Interaction overlays */
-  --muster-hover: rgba(255, 255, 255, 0.05);
-  --muster-hover-btn: rgba(255, 255, 255, 0.08);
-  --muster-selected: rgba(255, 255, 255, 0.1);
+  /* Interaction overlays, derived from the foreground color so they flip
+     automatically between dark themes (near-white fg → white overlays) and
+     light themes (near-black fg → dark overlays). */
+  --muster-hover: color-mix(in srgb, var(--muster-fg) 5%, transparent);
+  --muster-hover-btn: color-mix(in srgb, var(--muster-fg) 8%, transparent);
+  --muster-selected: color-mix(in srgb, var(--muster-fg) 10%, transparent);
+  /* Hairlines & fills, same scheme. hairline = popup/card outer border,
+     border = internal dividers, border-strong = emphasized/hover borders,
+     card = group card background, fill(-weak/strong) = control surfaces. */
+  --muster-hairline: color-mix(in srgb, var(--muster-fg) 8%, transparent);
+  --muster-border: color-mix(in srgb, var(--muster-fg) 6%, transparent);
+  --muster-border-strong: color-mix(in srgb, var(--muster-fg) 12%, transparent);
+  --muster-card: color-mix(in srgb, var(--muster-fg) 2%, transparent);
+  --muster-fill-weak: color-mix(in srgb, var(--muster-fg) 4%, transparent);
+  --muster-fill: color-mix(in srgb, var(--muster-fg) 6%, transparent);
+  --muster-fill-strong: color-mix(in srgb, var(--muster-fg) 12%, transparent);
+  /* Backdrop scrims and inset wells — black works over both appearances. */
+  --muster-scrim: rgba(0, 0, 0, 0.35);
+  --muster-scrim-dim: rgba(0, 0, 0, 0.15);
+  --muster-well: rgba(0, 0, 0, 0.2);
+  /* Veil over unfocused panes: a hint of dim, not a wall. */
+  --muster-veil: rgba(0, 0, 0, 0.05);
   /* Shared motion token */
   --muster-motion: 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
 
+  /* Shadows: strong in the dark; the light appearance overrides these to
+     hairline-grade shadows (a light card lies flat, per the reference). */
+  --muster-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --muster-shadow-pop-sm: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --muster-shadow-pop-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+
   /* UI font scale: settingsStore sets this from ui_font_size / 12. */
   --ui-font-scale: 1;
+}
+
+/* Light appearance: shadows quiet down to a whisper — surfaces separate by
+   hairline, not by drop shadow (kero's "a pane lies flat on the theme"). */
+[data-appearance="light"] {
+  --muster-shadow-pop: 0 8px 24px rgba(20, 24, 40, 0.08);
+  --muster-shadow-pop-sm: 0 4px 14px rgba(20, 24, 40, 0.07);
+  --muster-shadow-pop-lg: 0 12px 32px rgba(20, 24, 40, 0.1);
+  --muster-veil: rgba(0, 0, 0, 0.04);
 }
 
 /* UI shell font sizes that follow the ui_font_size setting (Tailwind's
@@ -47,7 +80,14 @@ body,
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: var(--muster-bg-float);
+  /* The window base wears a soft glow of the theme's accent from the top
+     right (kero's wash) — it shows through the translucent panel layer of
+     the sidebar and the gaps between panes, and is the strongest visual
+     cue separating themes. */
+  background:
+    radial-gradient(130% 100% at 100% 0%, var(--muster-glow, transparent) 0%, transparent 55%),
+    var(--muster-bg-float);
+  background-attachment: fixed;
   color: var(--muster-fg);
   overflow: hidden;
   user-select: none;
@@ -77,17 +117,18 @@ select option {
   color: var(--muster-fg);
 }
 
-/* Global 6px thin scrollbars: transparent track, subtle thumb (covers xterm too) */
+/* Global 6px thin scrollbars: transparent track, subtle thumb (covers xterm too).
+   Thumb derives from the foreground so it stays visible on light themes. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--muster-fg) 12%, transparent);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--muster-fg) 20%, transparent);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

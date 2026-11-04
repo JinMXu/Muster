@@ -21,7 +21,7 @@
 
 <img src="docs/screenshots/main-window.png" alt="Muster 主界面" width="100%" />
 
-<sub><b>主界面一览</b> — niri 风格分屏终端里运行 Claude Code；右侧信息面板实时呈现 Shell 状态、Git 分支、进程树与监听端口</sub>
+<sub><b>主界面一览</b> — niri 风格分屏终端里同屏运行 Claude Code / Codex / opencode；右侧信息面板实时呈现 Shell 状态、Git 分支、进程树与监听端口</sub>
 
 </div>
 

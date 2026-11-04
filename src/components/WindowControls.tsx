@@ -41,7 +41,7 @@ export default function WindowControls() {
         onClick={() => getCurrentWindow().toggleMaximize()}
         className="w-[46px] flex items-center justify-center text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn"
       >
-        {maximized ? <IconRestore size={12} /> : <IconSquare size={12} />}
+        {maximized ? <IconRestore size={14} /> : <IconSquare size={14} />}
       </button>
       <button
         title={t("window.close")}

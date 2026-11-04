@@ -43,16 +43,16 @@ export default function RightSidebar({
       style={{ width }}
     >
       <div className="h-9 flex items-center flex-shrink-0 pl-2" data-tauri-drag-region>
-        <Tab active={tab === "info"} onClick={() => api.togglePanel("info")} icon={<IconInfo size={12} />} label={t("rightSidebar.info")} />
-        <Tab active={tab === "files"} onClick={() => api.togglePanel("files")} icon={<IconFolder size={12} />} label={t("rightSidebar.files")} />
-        <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={12} />} label={t("rightSidebar.git")} />
+        <Tab active={tab === "info"} onClick={() => api.togglePanel("info")} icon={<IconInfo size={14} />} label={t("rightSidebar.info")} />
+        <Tab active={tab === "files"} onClick={() => api.togglePanel("files")} icon={<IconFolder size={14} />} label={t("rightSidebar.files")} />
+        <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={14} />} label={t("rightSidebar.git")} />
         <div className="flex-1 self-stretch" data-tauri-drag-region />
         <button
           onClick={onToggle}
           title={t("header.toggleRightSidebarTooltip")}
-          className="w-5 h-5 mr-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
+          className="w-6 h-6 mr-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
         >
-          <IconPanelRightClose size={13} />
+          <IconPanelRightClose size={15} />
         </button>
         <WindowControls />
       </div>

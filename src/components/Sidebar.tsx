@@ -128,9 +128,9 @@ export default function Sidebar({
         <button
           onClick={onToggle}
           title={t("header.toggleLeftSidebarTooltip")}
-          className="w-5 h-5 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
+          className="w-6 h-6 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
         >
-          <IconPanelLeftClose size={13} />
+          <IconPanelLeftClose size={15} />
         </button>
         <div className="flex-1 self-stretch" data-tauri-drag-region />
       </div>

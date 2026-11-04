@@ -139,9 +139,9 @@ export default function Header({
         <button
           onClick={toggleLeftSidebar}
           title={t("header.toggleLeftSidebarTooltip")}
-          className="w-5 h-5 mr-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0"
+          className="w-6 h-6 mr-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0"
         >
-          <IconPanelLeftOpen size={13} />
+          <IconPanelLeftOpen size={15} />
         </button>
       )}
       <div
@@ -194,9 +194,9 @@ export default function Header({
           <button
             onClick={togglePanel}
             title={t("header.toggleRightSidebarTooltip")}
-            className="w-5 h-5 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
+            className="w-6 h-6 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
           >
-            <IconPanelRightOpen size={13} />
+            <IconPanelRightOpen size={15} />
           </button>
         )}
       </div>

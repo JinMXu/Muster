@@ -73,7 +73,9 @@ const en = {
 
   settings: {
     title: "Settings",
-    tabGeneral: "General",
+    tabAppearance: "Appearance",
+    tabTerminal: "Terminal",
+    tabEditor: "Editor",
     tabFont: "Font & Editor",
     tabShortcuts: "Shortcuts",
     tabIntegrations: "Integrations",
@@ -163,6 +165,7 @@ const en = {
     osLabel: "Operating system",
     archLabel: "Architecture",
     configFile: "Config file",
+    openConfigFile: "Open config file",
     copyright: "\u00a9 2026 JinMXu \u00b7 MIT License",
   },
 

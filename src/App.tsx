@@ -13,6 +13,8 @@ import type { SettingsTab } from "./components/Settings";
 import ContextMenu from "./components/ContextMenu";
 import PasteWarning, { looksDangerousPaste } from "./components/PasteWarning";
 import DiffHosts from "./components/DiffHosts";
+import { Modal } from "./components/ui/Modal";
+import { Button } from "./components/ui/Button";
 import { IconTerminal } from "./components/icons";
 import { api } from "./lib/invoke";
 import { openMenu } from "./lib/menuStore";
@@ -23,6 +25,8 @@ import { popClosedTab, pushClosedTab, filePathOf, diffMetaOf, untrackTab } from 
 import { useTauriEventOf } from "./hooks/useTauriEvent";
 import { usePanelWidth } from "./hooks/usePanelWidth";
 import { initSettings, reloadSettings, useSettings } from "./lib/settingsStore";
+import { useProjectCwd } from "./lib/useProjectCwd";
+import { startScreenPush } from "./lib/screenPush";
 import { LanguageProvider, detectInitialLang, makeT, useT } from "./lib/i18n/context";
 import { getFocusedSessionId } from "./lib/sessionUtils";
 import { openTerminalSearch } from "./lib/terminalSearch";
@@ -57,7 +61,7 @@ export default function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
   const [showSearch, setShowSearch] = useState(false);
   const [agentBarOpen, setAgentBarOpen] = useState(false);
   const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
@@ -75,12 +79,15 @@ export default function App() {
     // (the IPC round-trip completes). Starting them earlier drops their
     // initial output — restored sessions would show a blank terminal.
     ensureListeners().then(() => invoke('init_read_loops'));
+    // Feed the backend's screen-level agent detection: the visible viewport
+    // of every open terminal, every poll.
+    startScreenPush();
     // A tray "Settings" click that had to rebuild this window queues its
     // action here; consume it now that the webview is up (a one-shot event
     // emitted before mount would be lost).
     api.takePendingAction().then((action) => {
       if (action === "open-settings") {
-        setSettingsTab("general");
+        setSettingsTab("appearance");
         setShowSettings(true);
       }
     }).catch(() => {});
@@ -91,7 +98,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     events.openSettings.listen(() => {
-      setSettingsTab("general");
+      setSettingsTab("appearance");
       setShowSettings(true);
     }).then((u) => {
       if (cancelled) u();
@@ -123,6 +130,9 @@ export default function App() {
     () => stateView?.projects.find((p) => p.id === stateView.selected_project_id) ?? null,
     [stateView]
   );
+  // Anchored repo root of the selected project (shared poller with the
+  // right-side panels) — feeds the pane headers' branch/diff-stat line.
+  const anchor = useProjectCwd(stateView);
 
   // Ctrl+Tab switcher subtitles, cached per tab id (see the switcher below).
   const subtitleCache = useRef(new Map<Uuid, string>());
@@ -542,7 +552,7 @@ export default function App() {
       "ctrl+s": saveFile,
       "ctrl+k": clearTerminal,
       "ctrl+shift+t": reopenClosedTab,
-      "ctrl+,": () => { setSettingsTab("general"); setShowSettings(true); },
+      "ctrl+,": () => { setSettingsTab("appearance"); setShowSettings(true); },
       "ctrl+shift+a": () => setAgentBarOpen((v) => !v),
     };
     const onKey = (e: KeyboardEvent) => {
@@ -802,7 +812,7 @@ export default function App() {
   const toggleRightPanel = useCallback(() => api.toggleRightPanel(), []);
   const exitZoom = useCallback(() => api.togglePaneZoom(), []);
   const openSettingsGeneral = useCallback(() => {
-    setSettingsTab("general");
+    setSettingsTab("appearance");
     setShowSettings(true);
   }, []);
   const openUsagePanel = useCallback(() => setShowUsage(true), []);
@@ -923,7 +933,7 @@ export default function App() {
           />
           <div className="flex-1 min-h-0 relative">
             {selectedProject && selectedProject.tabs.length > 0 ? (
-              <PaneLayout project={selectedProject} />
+              <PaneLayout project={selectedProject} root={anchor.root} />
             ) : (
               <EmptyState onNewProject={newProjectWithDialog} onNewSession={newSession} hasProject={!!selectedProject} />
             )}
@@ -990,93 +1000,85 @@ export default function App() {
       </Suspense>
       <ContextMenu />
       {closePrompt && (
-        <div
-          className="absolute inset-0 z-50 bg-black/30 flex items-center justify-center"
-          onClick={() => setClosePrompt(null)}
-        >
-          <div
-            className="w-[380px] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] p-4 muster-pop"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="ui-fs-base font-medium mb-1">
-              {closePrompt.files.length > 0 ? t("app.unsavedChangesTitle") : t("app.confirmCloseTitle")}
+        <Modal onClose={() => setClosePrompt(null)} fixed={false} width={380} className="p-4">
+          <div className="ui-fs-base font-medium mb-1">
+            {closePrompt.files.length > 0 ? t("app.unsavedChangesTitle") : t("app.confirmCloseTitle")}
+          </div>
+          {closePrompt.files.length > 0 && (
+            <div className="ui-fs-sm text-muster-muted mb-2">
+              {closePrompt.files.length === 1
+                ? t("app.unsavedChangesSingular")
+                : t("app.unsavedChangesPlural", { n: closePrompt.files.length })}
             </div>
-            {closePrompt.files.length > 0 && (
-              <div className="ui-fs-sm text-muster-muted mb-2">
-                {closePrompt.files.length === 1
-                  ? t("app.unsavedChangesSingular")
-                  : t("app.unsavedChangesPlural", { n: closePrompt.files.length })}
-              </div>
-            )}
-            {closePrompt.agents.length > 0 && (
-              <div className="ui-fs-sm text-muster-muted mb-2">
-                {closePrompt.agents.length === 1
-                  ? t("app.runningAgentSingular")
-                  : t("app.runningAgentsPlural", { n: closePrompt.agents.length })}
-              </div>
-            )}
-            <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
-              {closePrompt.agents.map((a, i) => (
-                <div key={`agent-${i}`} className="ui-fs-base text-muster-fg/80 truncate">
-                  • {agentLabel(a.agent)} — {a.title}
-                </div>
-              ))}
-              {closePrompt.files.map((f) => (
-                <div key={f.id} className="ui-fs-base text-muster-fg/80 truncate">
-                  • {f.name}
-                </div>
-              ))}
+          )}
+          {closePrompt.agents.length > 0 && (
+            <div className="ui-fs-sm text-muster-muted mb-2">
+              {closePrompt.agents.length === 1
+                ? t("app.runningAgentSingular")
+                : t("app.runningAgentsPlural", { n: closePrompt.agents.length })}
             </div>
-            <div className="flex justify-end gap-2 ui-fs-sm">
-              <button
-                className="px-2.5 py-1 rounded-md text-muster-muted hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-                onClick={() => setClosePrompt(null)}
-              >
-                {t("common.cancel")}
-              </button>
-              {closePrompt.files.length > 0 ? (
-                <>
-                  <button
-                    className="px-2.5 py-1 rounded-md text-red-400 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-                    onClick={() => {
-                      const p = closePrompt;
-                      setClosePrompt(null);
-                      p.proceed();
-                    }}
-                  >
-                    {t("app.dontSave")}
-                  </button>
-                  <button
-                    className="px-2.5 py-1 rounded-md bg-muster-accent text-white active:scale-[.97] transition-transform duration-muster ease-muster"
-                    onClick={async () => {
-                      const p = closePrompt;
-                      setClosePrompt(null);
-                      await Promise.all(p.files.map((f) => {
-                        const text = getLatestText(f.id);
-                        if (text !== undefined) clearLatestText(f.id);
-                        return api.saveFile(f.id, text);
-                      }));
-                      p.proceed();
-                    }}
-                  >
-                    {t("app.saveAndClose")}
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="px-2.5 py-1 rounded-md text-red-400 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+          )}
+          <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
+            {closePrompt.agents.map((a, i) => (
+              <div key={`agent-${i}`} className="ui-fs-base text-muster-fg/80 truncate">
+                • {agentLabel(a.agent)} — {a.title}
+              </div>
+            ))}
+            {closePrompt.files.map((f) => (
+              <div key={f.id} className="ui-fs-base text-muster-fg/80 truncate">
+                • {f.name}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 ui-fs-sm">
+            <Button size="sm" onClick={() => setClosePrompt(null)}>
+              {t("common.cancel")}
+            </Button>
+            {closePrompt.files.length > 0 ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="dangerGhost"
                   onClick={() => {
                     const p = closePrompt;
                     setClosePrompt(null);
                     p.proceed();
                   }}
                 >
-                  {t("app.closeAnyway")}
-                </button>
+                  {t("app.dontSave")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={async () => {
+                    const p = closePrompt;
+                    setClosePrompt(null);
+                    await Promise.all(p.files.map((f) => {
+                      const text = getLatestText(f.id);
+                      if (text !== undefined) clearLatestText(f.id);
+                      return api.saveFile(f.id, text);
+                    }));
+                    p.proceed();
+                  }}
+                >
+                  {t("app.saveAndClose")}
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="dangerGhost"
+                onClick={() => {
+                  const p = closePrompt;
+                  setClosePrompt(null);
+                  p.proceed();
+                }}
+              >
+                {t("app.closeAnyway")}
+              </Button>
               )}
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
       {pasteWarning && (
         <PasteWarning

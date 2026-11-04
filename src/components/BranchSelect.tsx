@@ -135,7 +135,7 @@ export default function BranchSelect({
         <div className="fixed inset-0 z-50" onClick={close}>
           <div
             ref={popRef}
-            className="fixed z-50 w-[248px] max-w-[calc(100vw-16px)] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop flex flex-col overflow-hidden"
+            className="fixed z-50 w-[248px] max-w-[calc(100vw-16px)] bg-muster-bg rounded-[10px] border border-muster-hairline shadow-pop muster-pop flex flex-col overflow-hidden"
             style={{
               left: pos?.left ?? triggerRef.current?.getBoundingClientRect().left ?? 0,
               top: pos?.top ?? (triggerRef.current?.getBoundingClientRect().bottom ?? 0) + 6,
@@ -144,7 +144,7 @@ export default function BranchSelect({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Filter input */}
-            <div className="flex items-center gap-1.5 px-2.5 h-8 flex-shrink-0 border-b border-white/[0.06]">
+            <div className="flex items-center gap-1.5 px-2.5 h-8 flex-shrink-0 border-b border-muster-border">
               <span className="text-muster-muted/70 flex items-center flex-shrink-0">
                 <IconSearch size={12} />
               </span>
@@ -204,7 +204,7 @@ export default function BranchSelect({
                       title={b}
                       className={`w-full px-2 h-7 rounded-md flex items-center gap-1.5 ui-fs-sm text-left ${
                         i === active
-                          ? "bg-white/[0.09] text-muster-fg"
+                          ? "bg-muster-selected text-muster-fg"
                           : isCurrent
                             ? "text-muster-fg/90"
                             : "text-muster-muted hover:text-muster-fg"
@@ -221,13 +221,13 @@ export default function BranchSelect({
             </div>
 
             {/* Footer actions */}
-            <div className="flex-shrink-0 border-t border-white/[0.06] p-1">
+            <div className="flex-shrink-0 border-t border-muster-border p-1">
               <button
                 onClick={() => {
                   close();
                   onCreateBranch();
                 }}
-                className="w-full px-2 h-7 rounded-md flex items-center gap-1.5 ui-fs-sm text-muster-muted hover:bg-white/[0.09] hover:text-muster-fg text-left"
+                className="w-full px-2 h-7 rounded-md flex items-center gap-1.5 ui-fs-sm text-muster-muted hover:bg-muster-selected hover:text-muster-fg text-left"
               >
                 <span className="w-3 flex-shrink-0 flex items-center">
                   <IconPlus size={11} />

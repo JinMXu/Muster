@@ -10,6 +10,8 @@ import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconChevronDown, IconGitBranch, IconSearch } from "./icons";
 import BranchSelect from "./BranchSelect";
 import FileHistory from "./FileHistory";
+import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
 import { useT } from "../lib/i18n/context";
 
 /// One entry in the operation banner: a git mutation with running/ok/failed
@@ -351,7 +353,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
           // Inline filter, expanded right where the search icon lives — a
           // separate mid-panel row pushed the checkpoint/commit sections
           // down and read as a stray floating input.
-          <div className="flex items-center gap-1 flex-shrink-0 bg-white/[0.05] rounded-md pl-1.5 pr-0.5 h-6 ring-1 ring-inset ring-transparent focus-within:ring-muster-accent/50 transition-shadow">
+          <div className="flex items-center gap-1 flex-shrink-0 bg-muster-hover rounded-md pl-1.5 pr-0.5 h-6 ring-1 ring-inset ring-transparent focus-within:ring-muster-accent/50 transition-shadow">
             <span className="text-muster-muted flex items-center flex-shrink-0">
               <IconSearch size={11} />
             </span>
@@ -397,7 +399,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
 
       {banner}
       {checkpoint && checkpoint.root === info.repo_root ? (
-        <div className="flex-shrink-0 px-3 py-1.5 border-b border-white/[0.08]">
+        <div className="flex-shrink-0 px-3 py-1.5 border-b border-muster-hairline">
           <div className="flex items-center gap-2 ui-fs-xs text-muster-muted">
             <span className="text-muster-accent flex items-center">
               <IconGitBranch size={11} />
@@ -434,7 +436,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
           )}
         </div>
       ) : info.is_repo && info.repo_root ? (
-        <div className="flex-shrink-0 px-3 py-1.5 border-b border-white/[0.08] flex items-center">
+        <div className="flex-shrink-0 px-3 py-1.5 border-b border-muster-hairline flex items-center">
           <button
             onClick={() =>
               api.git.headOid(info.repo_root).then((oid) => {
@@ -463,7 +465,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
               defaultCommit();
             }
           }}
-          className="w-full bg-white/[0.05] rounded-md px-2 py-1.5 ui-fs-sm outline-none resize-none"
+          className="w-full bg-muster-hover rounded-md px-2 py-1.5 ui-fs-sm outline-none resize-none"
         />
         <div className="flex">
           <button
@@ -476,7 +478,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
           <button
             onClick={openCommitMenu}
             title={t("git.commitOptions")}
-            className="px-1.5 rounded-r-md bg-muster-accent/85 text-white border-l border-white/20 flex items-center active:scale-[.97] transition-transform duration-muster ease-muster"
+            className="px-1.5 rounded-r-md bg-muster-accent/85 text-white border-l border-muster-border-strong flex items-center active:scale-[.97] transition-transform duration-muster ease-muster"
           >
             <IconChevronDown size={11} />
           </button>
@@ -599,51 +601,37 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
       </div>
 
       {discardTarget && (
-        <div
-          className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
-          onClick={() => setDiscardTarget(null)}
-        >
-          <div
-            className="w-[380px] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] p-4 muster-pop"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="ui-fs-base font-medium mb-1">{t("git.discardConfirmTitle")}</div>
-            <div className="ui-fs-sm text-muster-muted mb-2">
-              {discardTarget.kind === "single"
-                ? discardTarget.is_untracked
-                  ? t("git.discardConfirmSingularUntracked")
-                  : t("git.discardConfirmSingularTracked")
-                : discardTarget.has_untracked
-                  ? t("git.discardConfirmPluralMixed", { n: discardTarget.guard.entries.length })
-                  : t("git.discardConfirmPluralTracked", { n: discardTarget.guard.entries.length })}
-            </div>
-            <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
-              {discardTarget.kind === "single" ? (
-                <div className="ui-fs-base text-muster-fg/80 truncate">• {discardTarget.path}</div>
-              ) : (
-                discardTarget.guard.entries.map((entry) => (
-                  <div key={entry.path} className="ui-fs-base text-muster-fg/80 truncate">
-                    • {entry.path}
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="flex justify-end gap-2 ui-fs-sm">
-              <button
-                className="px-2.5 py-1 rounded-md text-muster-muted hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-                onClick={() => setDiscardTarget(null)}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                className="px-2.5 py-1 rounded-md text-red-400 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-                onClick={confirmDiscard}
-              >
-                {t("git.discard")}
-              </button>
-            </div>
+        <Modal onClose={() => setDiscardTarget(null)} width={380} className="p-4">
+          <div className="ui-fs-base font-medium mb-1">{t("git.discardConfirmTitle")}</div>
+          <div className="ui-fs-sm text-muster-muted mb-2">
+            {discardTarget.kind === "single"
+              ? discardTarget.is_untracked
+                ? t("git.discardConfirmSingularUntracked")
+                : t("git.discardConfirmSingularTracked")
+              : discardTarget.has_untracked
+                ? t("git.discardConfirmPluralMixed", { n: discardTarget.guard.entries.length })
+                : t("git.discardConfirmPluralTracked", { n: discardTarget.guard.entries.length })}
           </div>
-        </div>
+          <div className="max-h-32 overflow-y-auto mb-4 space-y-0.5">
+            {discardTarget.kind === "single" ? (
+              <div className="ui-fs-base text-muster-fg/80 truncate">• {discardTarget.path}</div>
+            ) : (
+              discardTarget.guard.entries.map((entry) => (
+                <div key={entry.path} className="ui-fs-base text-muster-fg/80 truncate">
+                  • {entry.path}
+                </div>
+              ))
+            )}
+          </div>
+          <div className="flex justify-end gap-2 ui-fs-sm">
+            <Button size="sm" onClick={() => setDiscardTarget(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button size="sm" variant="dangerGhost" onClick={confirmDiscard}>
+              {t("git.discard")}
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {history && (
@@ -827,8 +815,8 @@ function SmallButton({
       disabled={disabled || loading}
       className={`flex-1 px-1.5 py-1 rounded ui-fs-xs transition-all duration-muster ease-muster ${
         loading
-          ? "bg-white/[0.08] text-muster-fg opacity-60"
-          : "bg-white/[0.05] enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97]"
+          ? "bg-muster-hover-btn text-muster-fg opacity-60"
+          : "bg-muster-hover enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97]"
       }`}
     >
       <span className={loading ? "inline-flex items-center gap-1" : ""}>

@@ -73,7 +73,9 @@ const zh = {
 
   settings: {
     title: "设置",
-    tabGeneral: "通用",
+    tabAppearance: "外观",
+    tabTerminal: "终端",
+    tabEditor: "编辑器",
     tabFont: "字体与编辑器",
     tabShortcuts: "快捷键",
     tabIntegrations: "集成",
@@ -163,6 +165,7 @@ const zh = {
     osLabel: "操作系统",
     archLabel: "架构",
     configFile: "配置文件",
+    openConfigFile: "打开配置文件",
     copyright: "© 2026 JinMXu · MIT License",
   },
 

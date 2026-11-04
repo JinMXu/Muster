@@ -9,20 +9,34 @@ import {
 } from "../lib/updater";
 import type { Settings as SettingsType, ShellOption, ThemeInfo } from "../lib/types";
 import { useT, type TKey } from "../lib/i18n/context";
+import { mixHex } from "../lib/colorUtils";
+import { cn } from "./ui/cn";
+import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
+import { Toggle } from "./ui/Toggle";
+import { Segmented } from "./ui/Segmented";
+import { Modal } from "./ui/Modal";
 import {
   IconArrowUpRight,
   IconCheck,
-  IconChevronDown,
+  IconFolder,
   IconInfo,
   IconKeyboard,
   IconPlug,
   IconSearch,
   IconSettings,
+  IconTerminal,
   IconType,
   IconX,
 } from "./icons";
 
-export type SettingsTab = "general" | "font" | "shortcuts" | "integrations" | "about";
+export type SettingsTab =
+  | "appearance"
+  | "terminal"
+  | "editor"
+  | "shortcuts"
+  | "integrations"
+  | "about";
 
 interface ShortcutItem {
   keys: string;
@@ -83,8 +97,9 @@ const RELEASES_URL = `${GITHUB_URL}/releases`;
 const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
 
 const TABS: { id: SettingsTab; labelKey: TKey; icon: React.ReactNode }[] = [
-  { id: "general", labelKey: "settings.tabGeneral", icon: <IconSettings size={15} /> },
-  { id: "font", labelKey: "settings.tabFont", icon: <IconType size={15} /> },
+  { id: "appearance", labelKey: "settings.tabAppearance", icon: <IconSettings size={15} /> },
+  { id: "terminal", labelKey: "settings.tabTerminal", icon: <IconTerminal size={15} /> },
+  { id: "editor", labelKey: "settings.tabEditor", icon: <IconType size={15} /> },
   { id: "shortcuts", labelKey: "settings.tabShortcuts", icon: <IconKeyboard size={15} /> },
   { id: "integrations", labelKey: "settings.tabIntegrations", icon: <IconPlug size={15} /> },
   { id: "about", labelKey: "settings.tabAbout", icon: <IconInfo size={15} /> },
@@ -125,197 +140,150 @@ async function osInfo(): Promise<{ os: string; arch: string }> {
 
 export default function Settings({
   onClose,
-  initialTab = "general",
+  initialTab = "appearance",
 }: {
   onClose: () => void;
   initialTab?: SettingsTab;
 }) {
-  // `saved` is the persisted snapshot the draft is diffed against; `draft` is
-  // what the controls edit. Save persists the draft, Reset reloads defaults
-  // into the draft — neither applies until Save.
-  const [saved, setSaved] = useState<SettingsType | null>(null);
+  // Settings apply live: every control change persists immediately (and
+  // re-applies across windows via the settings-changed event). `draft` is
+  // simply the current settings; there is no Save step.
   const [draft, setDraft] = useState<SettingsType | null>(null);
   const [themes, setThemes] = useState<ThemeInfo[]>([]);
   const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [version, setVersion] = useState("");
   // Updater lives here (not in AboutTab) so its phase survives tab switches.
   const [phase, setPhase] = useState<UpdaterPhase>({ kind: "idle" });
   const ctrlRef = useRef<UpdaterController | null>(null);
+  // Debounced persistence (see update() below): the last draft state and its
+  // timer, flushed on dialog close.
+  const pendingRef = useRef<SettingsType | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   const { t } = useT();
 
   useEffect(() => {
-    api.settings().then((s) => {
-      setSaved(s);
-      setDraft(s);
-    });
+    api.settings().then(setDraft);
     api.availableThemesWithInfo().then(setThemes);
     getVersion().then(setVersion).catch(() => {});
     ctrlRef.current = createUpdater(setPhase);
+    return () => {
+      // Close (unmount) flushes a pending debounced write.
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      const p = pendingRef.current;
+      pendingRef.current = null;
+      if (p) api.saveSettings(p);
+    };
   }, []);
 
-  const dirty = useMemo(
-    () => !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved),
-    [draft, saved],
-  );
+  if (!draft) return null;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (confirmDiscard) setConfirmDiscard(false);
-      else if (dirty) setConfirmDiscard(true);
-      else onClose();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [confirmDiscard, dirty, onClose]);
-
-  const requestClose = () => {
-    if (dirty) setConfirmDiscard(true);
-    else onClose();
+  // Persisting runs through a short debounce: sliders fire onChange
+  // continuously while dragging and text inputs per keystroke, and each
+  // save rewrites the TOML, re-themes every window and rebuilds the tray.
+  // The pending write flushes when the dialog closes.
+  const update = (patch: Partial<SettingsType>) => {
+    if (!draft) return;
+    const next = { ...draft, ...patch };
+    setDraft(next);
+    pendingRef.current = next;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      const p = pendingRef.current;
+      pendingRef.current = null;
+      if (p) api.saveSettings(p);
+    }, 250);
   };
-
-  if (!draft || !saved) return null;
-
-  const update = (patch: Partial<SettingsType>) =>
-    setDraft((d) => (d ? { ...d, ...patch } : d));
-  const save = () => {
-    if (!dirty) return;
-    api.saveSettings(draft).then(onClose);
+  const reset = () => api.defaultSettings().then((s) => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    pendingRef.current = null;
+    setDraft(s);
+    api.saveSettings(s);
+  });
+  const revealConfig = () => {
+    api.configPath().then((p) => revealItemInDir(p)).catch(() => {});
   };
-  const reset = () => api.defaultSettings().then(setDraft);
 
   return (
-    <div
-      className="fixed inset-0 z-40 bg-black/35 flex items-center justify-center"
-      onClick={requestClose}
+    <Modal
+      onClose={onClose}
+      z="z-40"
+      labelledBy="settings-title"
+      /* Fixed size on purpose: the dialog must not resize when switching
+         tabs — only the content area scrolls. */
+      className="flex flex-col overflow-hidden w-[800px] h-[min(620px,calc(100vh-48px))]"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        /* Fixed size on purpose: the dialog must not resize when switching
-           tabs — only the content area scrolls. */
-        className="relative bg-muster-bg border border-white/[0.08] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop flex flex-col overflow-hidden"
-        style={{ width: 760, height: "min(600px, calc(100vh - 48px))" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between pl-5 pr-3 py-3 border-b border-white/[0.06] flex-shrink-0">
-          <h2 id="settings-title" className="ui-fs-base font-semibold">
-            {t("settings.title")}
-          </h2>
-          <button
-            onClick={requestClose}
-            aria-label={t("common.close")}
-            className="p-1 rounded-md text-muster-muted hover:text-muster-fg hover:bg-muster-hover transition-colors duration-muster ease-muster"
-          >
-            <IconX size={16} />
-          </button>
-        </div>
+      {/* Header */}
+      <div className="flex items-center justify-between pl-5 pr-3 py-3 border-b border-muster-border flex-shrink-0">
+        <h2 id="settings-title" className="ui-fs-base font-semibold">
+          {t("settings.title")}
+        </h2>
+        <IconButton size="md" onClick={onClose} aria-label={t("common.close")}>
+          <IconX size={16} />
+        </IconButton>
+      </div>
 
-        {/* Body: sidebar + content */}
-        <div className="flex flex-1 min-h-0">
-          <nav className="w-[192px] flex-shrink-0 py-3 px-2.5 border-r border-white/[0.06] flex flex-col">
-            <div className="flex flex-col gap-0.5">
-              {TABS.map((item) => (
-                <TabButton
-                  key={item.id}
-                  active={tab === item.id}
-                  onClick={() => setTab(item.id)}
-                  icon={item.icon}
-                  label={t(item.labelKey)}
-                />
-              ))}
-            </div>
-            <div className="mt-auto px-2 pb-1 ui-fs-2xs text-muster-muted tabular-nums select-none">
+      {/* Body: sidebar + content */}
+      <div className="flex flex-1 min-h-0">
+        <nav className="w-[192px] flex-shrink-0 py-3 px-2.5 border-r border-muster-border flex flex-col">
+          <div className="flex flex-col gap-0.5">
+            {TABS.map((item) => (
+              <TabButton
+                key={item.id}
+                active={tab === item.id}
+                onClick={() => setTab(item.id)}
+                icon={item.icon}
+                label={t(item.labelKey)}
+              />
+            ))}
+          </div>
+          <div className="mt-auto flex flex-col gap-1">
+            <button
+              onClick={revealConfig}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md ui-fs-xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover transition-colors duration-muster ease-muster outline-none"
+            >
+              <span className="flex items-center">
+                <IconFolder size={13} />
+              </span>
+              {t("settings.openConfigFile")}
+            </button>
+            <div className="px-3 pb-1 ui-fs-2xs text-muster-muted tabular-nums select-none">
               Muster{version ? ` · v${version}` : ""}
             </div>
-          </nav>
-
-          {/* Content */}
-          <div
-            key={tab}
-            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-6 py-5 muster-fade"
-          >
-            {tab === "general" && (
-              <GeneralTab s={draft} update={update} themes={themes} t={t} />
-            )}
-            {tab === "font" && <FontTab s={draft} update={update} t={t} />}
-            {tab === "shortcuts" && <ShortcutsTab t={t} />}
-            {tab === "integrations" && <IntegrationsTab t={t} />}
-            {tab === "about" && (
-              <AboutTab t={t} version={version} phase={phase} ctrl={ctrlRef.current} />
-            )}
           </div>
+        </nav>
+
+        {/* Content */}
+        <div
+          key={tab}
+          className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-6 py-5 muster-fade"
+        >
+          <h3 className="ui-fs-md font-semibold mb-4">
+            {t(TABS.find((it) => it.id === tab)?.labelKey ?? "settings.title")}
+          </h3>
+          {tab === "appearance" && (
+            <AppearanceTab s={draft} update={update} themes={themes} t={t} />
+          )}
+          {tab === "terminal" && <TerminalTab s={draft} update={update} t={t} />}
+          {tab === "editor" && <EditorTab s={draft} update={update} t={t} />}
+          {tab === "shortcuts" && <ShortcutsTab t={t} />}
+          {tab === "integrations" && <IntegrationsTab t={t} />}
+          {tab === "about" && (
+            <AboutTab t={t} version={version} phase={phase} ctrl={ctrlRef.current} />
+          )}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center px-5 py-3 border-t border-white/[0.06] flex-shrink-0">
-          <div className="flex items-center gap-1.5 ui-fs-xs min-w-0">
-            {dirty && (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                <span className="text-muster-muted truncate">
-                  {t("settings.unsavedChanges")}
-                </span>
-              </>
-            )}
-          </div>
-          <div className="flex justify-end gap-2 ml-auto">
-            <button
-              onClick={reset}
-              className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-            >
-              {t("settings.reset")}
-            </button>
-            <button
-              onClick={save}
-              disabled={!dirty}
-              className="px-4 py-1.5 rounded-md bg-muster-accent text-white ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-40 disabled:pointer-events-none"
-            >
-              {t("settings.save")}
-            </button>
-          </div>
-        </div>
-
-        {/* Discard-changes confirm */}
-        {confirmDiscard && (
-          <div
-            className="absolute inset-0 z-10 bg-black/45 flex items-center justify-center"
-            onClick={() => setConfirmDiscard(false)}
-          >
-            <div
-              className="bg-muster-bg border border-white/[0.1] rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.4)] muster-pop w-[320px] px-5 py-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="ui-fs-base font-semibold mb-1">
-                {t("settings.discardTitle")}
-              </div>
-              <div className="ui-fs-sm text-muster-muted mb-4">
-                {t("settings.discardBody")}
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setConfirmDiscard(false)}
-                  className="px-3 py-1.5 rounded-md bg-white/[0.05] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-                >
-                  {t("settings.keepEditing")}
-                </button>
-                <button
-                  onClick={onClose}
-                  className="px-3 py-1.5 rounded-md bg-red-500/90 text-white ui-fs-sm hover:bg-red-500 active:scale-[.97] transition-transform duration-muster ease-muster"
-                >
-                  {t("settings.discard")}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-    </div>
+
+      {/* Footer: settings apply live, so only the defaults escape hatch remains */}
+      <div className="flex items-center justify-end px-5 py-3 border-t border-muster-border flex-shrink-0">
+        <Button size="md" onClick={reset}>
+          {t("settings.reset")}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -337,7 +305,7 @@ function TabButton({
       onClick={onClick}
       className={`relative flex items-center gap-2.5 px-3 py-2 rounded-md ui-fs-sm transition-colors duration-muster ease-muster ${
         active
-          ? "bg-white/[0.09] text-muster-fg"
+          ? "bg-muster-selected text-muster-fg"
           : "text-muster-muted hover:bg-muster-hover hover:text-muster-fg"
       }`}
     >
@@ -350,22 +318,25 @@ function TabButton({
   );
 }
 
-/** Titled group card: all rows inside share one bordered container. */
+/** Group card: all rows inside share one bordered container. The title is
+ * optional — tabs whose page title already says it all go without. */
 function Section({
   title,
   children,
 }: {
-  title: string;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="mb-5 last:mb-0">
-      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-2 px-0.5">
-        {title}
-      </div>
+      {title && (
+        <div className="ui-fs-xs text-muster-muted uppercase tracking-wide mb-2 px-0.5">
+          {title}
+        </div>
+      )}
       {/* No overflow-hidden here: dropdown popovers (theme picker) must be
           able to paint outside the card boundary. */}
-      <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg divide-y divide-white/[0.05]">
+      <div className="bg-muster-card border border-muster-border rounded-lg divide-y divide-muster-border">
         {children}
       </div>
     </div>
@@ -384,11 +355,11 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-3.5 py-2.5 min-h-[52px]">
+    <div className="flex items-center justify-between gap-6 px-3.5 py-3 min-h-[56px]">
       <div className="min-w-0">
         <div className="ui-fs-base text-muster-fg">{title}</div>
         {desc && (
-          <div className="ui-fs-xs text-muster-muted mt-0.5 truncate" title={desc}>
+          <div className="ui-fs-xs text-muster-muted mt-1 leading-relaxed [word-break:break-word]">
             {desc}
           </div>
         )}
@@ -398,206 +369,105 @@ function Row({
   );
 }
 
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative w-9 h-5 rounded-full transition-colors duration-muster ease-muster flex-shrink-0 ${
-        checked ? "bg-muster-accent" : "bg-white/[0.12]"
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-muster ease-muster ${
-          checked ? "translate-x-4" : "translate-x-0"
-        }`}
-      />
-    </button>
-  );
-}
-
-function Swatch({ background, accent }: { background: string; accent: string }) {
-  return (
-    <span
-      className="w-4 h-4 rounded-full flex-shrink-0 border-2"
-      style={{
-        backgroundColor: `#${background}`,
-        borderColor: `#${accent}`,
-      }}
-    />
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex bg-white/[0.05] rounded-md p-0.5">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`px-2.5 py-1 rounded ui-fs-sm transition-colors duration-muster ease-muster ${
-            value === opt.value
-              ? "bg-muster-accent text-white"
-              : "text-muster-muted hover:text-muster-fg"
-          }`}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const BUILT_IN_THEMES = new Set([
-  "Default Dark", "Default Light", "Dracula", "Tokyo Night", "Gruvbox Dark", "Monokai Pro",
-]);
-
-function ThemePicker({
+/** One row of theme tiles (dark or light), previewed the way kero draws
+ * them: a mini terminal window on the theme's wash — "Aa" in the theme's
+ * foreground, a selection chip, a cursor block and its first eight ANSI
+ * colors — so the grid reads at a glance like the terminal will. */
+function ThemeGrid({
   themes,
   dark,
   value,
   onChange,
+  t,
 }: {
   themes: ThemeInfo[];
   dark: boolean;
   value: string;
   onChange: (name: string) => void;
+  t: ReturnType<typeof useT>["t"];
 }) {
-  const { t } = useT();
-  const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
-  const [query, setQuery] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Approximate rendered height of the popover (search input + list).
-  const POPOVER_H = 280;
-
-  const toggleOpen = () => {
-    if (open) {
-      setOpen(false);
-      setQuery("");
-      return;
-    }
-    // Open upward when there isn't enough room below inside the nearest
-    // scrollable ancestor (the settings scroll area clips its content).
-    const el = ref.current;
-    if (el) {
-      let p: HTMLElement | null = el.parentElement;
-      while (p) {
-        const s = getComputedStyle(p);
-        if (/(auto|scroll)/.test(s.overflowY)) break;
-        p = p.parentElement;
-      }
-      const rect = el.getBoundingClientRect();
-      if (p) {
-        const pr = p.getBoundingClientRect();
-        const below = pr.bottom - rect.bottom;
-        const above = rect.top - pr.top;
-        setDropUp(below < POPOVER_H && above > below);
-      } else {
-        setDropUp(false);
-      }
-    }
-    setOpen(true);
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setQuery("");
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const filtered = themes.filter(
-    (th) =>
-      th.is_dark === dark &&
-      th.name.toLowerCase().includes(query.toLowerCase())
-  );
-  const selected = themes.find((th) => th.name === value);
-
+  const list = themes.filter((th) => th.is_dark === dark);
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={toggleOpen}
-        className="w-[190px] flex items-center gap-2 bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent hover:border-white/[0.12] transition-colors"
-      >
-        {selected && <Swatch background={selected.background} accent={selected.accent} />}
-        <span className="flex-1 text-left truncate">{value}</span>
-        <span className={`text-muster-muted transition-transform duration-muster ease-muster ${open ? "rotate-180" : ""}`}>
-          <IconChevronDown size={12} />
-        </span>
-      </button>
-      {open && (
-        <div
-          className={`absolute z-50 right-0 w-[280px] bg-muster-bg border border-white/[0.1] rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.4)] overflow-hidden ${
-            dropUp ? "bottom-full mb-1" : "top-full mt-1"
-          }`}
-        >
-          <div className="p-1.5 border-b border-white/[0.06]">
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("settings.themeSearchPlaceholder")}
-              className="w-full bg-white/[0.05] px-2 py-1 rounded ui-fs-sm outline-none"
-            />
-          </div>
-          <div className="max-h-[220px] overflow-y-auto py-1">
-            {filtered.map((th, i) => {
-              const showSeparator =
-                i > 0 &&
-                BUILT_IN_THEMES.has(th.name) &&
-                !BUILT_IN_THEMES.has(filtered[i - 1].name);
-              return (
-                <div key={th.name}>
-                  {showSeparator && (
-                    <div className="my-1 border-t border-white/[0.06]" />
-                  )}
-                  <button
-                    onClick={() => {
-                      onChange(th.name);
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 ui-fs-sm text-left hover:bg-white/[0.06] transition-colors ${
-                      th.name === value ? "text-muster-accent" : "text-muster-fg"
-                    }`}
+    <div className="px-3.5 py-3">
+      <div className="ui-fs-xs text-muster-muted mb-2">
+        {dark ? t("settings.darkTheme") : t("settings.lightTheme")}
+      </div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {list.map((th) => {
+          const selected = th.name === value;
+          const [bg, fg, cursor, selBg, ...ansi] = th.preview;
+          // The wash behind the mini window: one step away from the theme's
+          // own background, with a glow of the cursor color from the corner.
+          const wash = dark ? mixHex(th.background, "000000", 0.14) : mixHex(th.background, "ffffff", 0.1);
+          const [cr, cg, cb] = [0, 2, 4].map((i) =>
+            parseInt(cursor.replace(/^#/, "").slice(i, i + 2), 16),
+          );
+          return (
+            <button
+              key={th.name}
+              onClick={() => onChange(th.name)}
+              title={th.name}
+              className={cn(
+                "relative rounded-lg p-1.5 outline-none transition-colors duration-muster ease-muster",
+                selected
+                  ? "ring-1 ring-muster-accent"
+                  : "ring-1 ring-transparent hover:ring-muster-border-strong",
+              )}
+              style={{
+                background: `radial-gradient(120% 90% at 100% 0%, rgba(${cr}, ${cg}, ${cb}, 0.3) 0%, transparent 60%), #${wash}`,
+              }}
+            >
+              {/* The mini terminal window */}
+              <span
+                className="relative flex h-[58px] flex-col justify-between rounded-md px-1.5 py-1.5"
+                style={{ background: `#${bg}` }}
+              >
+                <span className="flex items-center gap-1">
+                  <span
+                    className="text-[12px] leading-none font-semibold"
+                    style={{ color: `#${fg}` }}
                   >
-                    <Swatch background={th.background} accent={th.accent} />
-                    <span className="flex-1 truncate">{th.name}</span>
-                    {th.name === value && <IconCheck size={12} />}
-                  </button>
-                </div>
-              );
-            })}
-            {filtered.length === 0 && (
-              <div className="px-2.5 py-2 ui-fs-sm text-muster-muted">
-                {t("settings.noThemesFound")}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                    Aa
+                  </span>
+                  <span className="flex-1" />
+                  <span
+                    className="rounded-[3px] px-1 text-[8px] leading-[12px] font-mono"
+                    style={{ background: `#${selBg}`, color: `#${fg}` }}
+                  >
+                    ~/
+                  </span>
+                  <span
+                    className="h-[10px] w-[3px] rounded-[1px]"
+                    style={{ background: `#${cursor}` }}
+                  />
+                </span>
+                <span className="flex gap-[3px]">
+                  {ansi.map((c, i) => (
+                    <span
+                      key={i}
+                      className="h-[7px] w-[7px] rounded-full"
+                      style={{ background: `#${c}` }}
+                    />
+                  ))}
+                </span>
+                {selected && (
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-muster-accent text-white flex items-center justify-center">
+                    <IconCheck size={9} />
+                  </span>
+                )}
+              </span>
+              <span
+                className={cn(
+                  "block pt-1 pb-0.5 text-center ui-fs-2xs truncate",
+                  selected ? "text-muster-fg font-medium" : "text-muster-muted",
+                )}
+              >
+                {th.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -656,7 +526,7 @@ function NumberRow({
           onChange={(e) => setText(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => e.key === "Enter" && commit()}
-          className="w-[72px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors tabular-nums"
+          className="w-[72px] bg-muster-hover px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors tabular-nums"
         />
         <span className="ui-fs-sm text-muster-muted">{suffix}</span>
       </div>
@@ -704,7 +574,7 @@ function SliderRow({
 
 /* ---------- tabs ---------- */
 
-function GeneralTab({
+function AppearanceTab({
   s,
   update,
   themes,
@@ -713,6 +583,61 @@ function GeneralTab({
   s: SettingsType;
   update: (patch: Partial<SettingsType>) => void;
   themes: ThemeInfo[];
+  t: ReturnType<typeof useT>["t"];
+}) {
+  return (
+    <div>
+      <Section>
+        <Row title={t("settings.appearanceMode")}>
+          <Segmented
+            value={s.theme}
+            options={[
+              { value: "system", label: t("settings.themeSystem") },
+              { value: "light", label: t("settings.themeLight") },
+              { value: "dark", label: t("settings.themeDark") },
+            ]}
+            onChange={(v) => update({ theme: v })}
+          />
+        </Row>
+        <ThemeGrid
+          themes={themes}
+          dark
+          value={s.theme_dark}
+          onChange={(name) => update({ theme_dark: name })}
+          t={t}
+        />
+        <ThemeGrid
+          themes={themes}
+          dark={false}
+          value={s.theme_light}
+          onChange={(name) => update({ theme_light: name })}
+          t={t}
+        />
+        <Row title={t("settings.language")}>
+          <select
+            value={s.language}
+            onChange={(e) =>
+              update({ language: e.target.value as SettingsType["language"] })
+            }
+            className="w-[190px] bg-muster-hover px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
+          >
+            <option value="system">{t("settings.languageSystem")}</option>
+            <option value="en">{t("settings.languageEn")}</option>
+            <option value="zh">{t("settings.languageZh")}</option>
+          </select>
+        </Row>
+      </Section>
+    </div>
+  );
+}
+
+function TerminalTab({
+  s,
+  update,
+  t,
+}: {
+  s: SettingsType;
+  update: (patch: Partial<SettingsType>) => void;
   t: ReturnType<typeof useT>["t"];
 }) {
   // Available shells for the default-shell picker, resolved live on open
@@ -729,66 +654,13 @@ function GeneralTab({
   }, []);
   return (
     <div>
-      <Section title={t("settings.appearance")}>
-        <Row title={t("settings.appearanceMode")}>
-          <Segmented
-            value={s.theme}
-            options={[
-              { value: "system", label: t("settings.themeSystem") },
-              { value: "light", label: t("settings.themeLight") },
-              { value: "dark", label: t("settings.themeDark") },
-            ]}
-            onChange={(v) => update({ theme: v })}
-          />
-        </Row>
-        <Row title={t("settings.darkTheme")}>
-          <ThemePicker
-            themes={themes}
-            dark
-            value={s.theme_dark}
-            onChange={(name) => update({ theme_dark: name })}
-          />
-        </Row>
-        <Row title={t("settings.lightTheme")}>
-          <ThemePicker
-            themes={themes}
-            dark={false}
-            value={s.theme_light}
-            onChange={(name) => update({ theme_light: name })}
-          />
-        </Row>
-        <Row title={t("settings.language")}>
-          <select
-            value={s.language}
-            onChange={(e) =>
-              update({ language: e.target.value as SettingsType["language"] })
-            }
-            className="w-[190px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
-          >
-            <option value="system">{t("settings.languageSystem")}</option>
-            <option value="en">{t("settings.languageEn")}</option>
-            <option value="zh">{t("settings.languageZh")}</option>
-          </select>
-        </Row>
-      </Section>
-
-      <Section title={t("settings.behavior")}>
-        <Row title={t("settings.rightClick")} desc={t("settings.rightClickDesc")}>
-          <Segmented
-            value={s.terminal_right_click}
-            options={[
-              { value: "menu", label: t("settings.rightClickMenu") },
-              { value: "smart", label: t("settings.rightClickSmart") },
-            ]}
-            onChange={(v) => update({ terminal_right_click: v })}
-          />
-        </Row>
+      <Section>
         <Row title={t("settings.defaultShell")} desc={t("settings.defaultShellDesc")}>
           <select
             value={s.default_shell}
             onChange={(e) => update({ default_shell: e.target.value })}
             title={shells?.find((sh) => sh.id === s.default_shell)?.path || undefined}
-            className="w-[190px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
+            className="w-[190px] bg-muster-hover px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
           >
             <option value="auto">{t("settings.shellAuto")}</option>
             {(shells ?? [])
@@ -799,6 +671,16 @@ function GeneralTab({
                 </option>
               ))}
           </select>
+        </Row>
+        <Row title={t("settings.rightClick")} desc={t("settings.rightClickDesc")}>
+          <Segmented
+            value={s.terminal_right_click}
+            options={[
+              { value: "menu", label: t("settings.rightClickMenu") },
+              { value: "smart", label: t("settings.rightClickSmart") },
+            ]}
+            onChange={(v) => update({ terminal_right_click: v })}
+          />
         </Row>
         <Row title={t("settings.projectPorts")}>
           <Toggle
@@ -811,7 +693,7 @@ function GeneralTab({
   );
 }
 
-function FontTab({
+function EditorTab({
   s,
   update,
   t,
@@ -823,7 +705,7 @@ function FontTab({
   return (
     <div>
       {/* Live preview: reacts to family/size/thicken as they are edited. */}
-      <div className="mb-5 rounded-lg border border-white/[0.06] bg-black/20 px-4 py-3">
+      <div className="mb-5 rounded-lg border border-muster-border bg-muster-well px-4 py-3">
         <div className="ui-fs-xs text-muster-muted mb-1.5">
           {t("settings.fontPreview")}
         </div>
@@ -847,7 +729,7 @@ function FontTab({
             list="muster-mono-fonts"
             value={s.font_family}
             onChange={(e) => update({ font_family: e.target.value })}
-            className="w-[220px] bg-white/[0.05] px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
+            className="w-[220px] bg-muster-hover px-2.5 py-1.5 rounded-md ui-fs-sm outline-none border border-transparent focus:border-muster-accent/30 transition-colors"
             placeholder={t("settings.fontFamilyPlaceholder")}
           />
           <datalist id="muster-mono-fonts">
@@ -928,7 +810,7 @@ function ShortcutsTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("settings.searchShortcuts")}
-          className="w-full bg-white/[0.05] border border-transparent focus:border-muster-accent/30 pl-8 pr-3 py-1.5 rounded-md ui-fs-sm outline-none transition-colors"
+          className="w-full bg-muster-hover border border-transparent focus:border-muster-accent/30 pl-8 pr-3 py-1.5 rounded-md ui-fs-sm outline-none transition-colors"
         />
       </div>
 
@@ -942,7 +824,7 @@ function ShortcutsTab({ t }: { t: ReturnType<typeof useT>["t"] }) {
               <span className="ui-fs-sm text-muster-fg/80">
                 {t(item.labelKey)}
               </span>
-              <kbd className="bg-white/[0.06] rounded px-1.5 py-0.5 ui-fs-xs font-mono text-muster-muted whitespace-nowrap">
+              <kbd className="bg-muster-fill rounded px-1.5 py-0.5 ui-fs-xs font-mono text-muster-muted whitespace-nowrap">
                 {item.keys}
               </kbd>
             </div>
@@ -1043,13 +925,9 @@ function ActionStatus({
           {result.ok ? t("settings.integrationsInstalled") : result.text}
         </span>
       )}
-      <button
-        onClick={onClick}
-        disabled={busy}
-        className="px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
-      >
+      <Button size="md" onClick={onClick} disabled={busy}>
         {label}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -1067,13 +945,10 @@ function LinkRow({
 }) {
   return (
     <Row title={title} desc={desc}>
-      <button
-        onClick={() => openUrl(url)}
-        className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
-      >
+      <Button size="md" onClick={() => openUrl(url)} className="gap-1">
         {t("settings.openOnGithub")}
         <IconArrowUpRight size={12} />
-      </button>
+      </Button>
     </Row>
   );
 }
@@ -1138,7 +1013,7 @@ function AboutTab({
     <div>
       {/* App identity */}
       <div className="flex flex-col items-center gap-1.5 pt-3 pb-6">
-        <img src="app-icon.png" alt="Muster" className="w-16 h-16 rounded-[14px] shadow-[0_4px_16px_rgba(0,0,0,0.35)]" />
+        <img src="app-icon.png" alt="Muster" className="w-16 h-16 rounded-[14px] shadow-pop-sm" />
         <div className="ui-fs-md font-semibold mt-1">Muster</div>
         <div className="ui-fs-xs text-muster-muted">{t("settings.tagline")}</div>
         <div className="ui-fs-xs text-muster-muted/80 tabular-nums mt-0.5">
@@ -1150,7 +1025,7 @@ function AboutTab({
         <Row title={t("settings.updates")} desc={t("settings.updatesDesc")}>
           <div className="flex items-center gap-2.5">
             {phase.kind === "downloading" ? (
-              <div className="w-[120px] h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+              <div className="w-[120px] h-1.5 rounded-full bg-muster-hover-btn overflow-hidden">
                 <div
                   className="h-full rounded-full bg-muster-accent transition-all duration-muster ease-muster"
                   style={{ width: `${phase.progress}%` }}
@@ -1165,24 +1040,22 @@ function AboutTab({
               </span>
             ) : null}
             {button ? (
-              <button
+              <Button
+                size="md"
+                variant={button.primary ? "primary" : "default"}
                 onClick={button.onClick}
-                className={`px-3 py-1.5 rounded-md ui-fs-sm active:scale-[.97] transition-transform duration-muster ease-muster ${
-                  button.primary
-                    ? "bg-muster-accent text-white"
-                    : "bg-white/[0.06] hover:bg-muster-hover-btn"
-                }`}
               >
                 {button.label}
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
+                size="md"
+                loading={busy}
                 onClick={() => ctrl?.checkForUpdates()}
                 disabled={busy || !ctrl}
-                className="px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
               >
                 {busy ? t("settings.checkingForUpdates") : t("settings.checkForUpdates")}
-              </button>
+              </Button>
             )}
           </div>
         </Row>
@@ -1208,13 +1081,13 @@ function AboutTab({
           <span className="ui-fs-sm text-muster-muted">{arch || "…"}</span>
         </Row>
         <Row title={t("settings.configFile")} desc={configFile || undefined}>
-          <button
+          <Button
+            size="md"
             onClick={() => configFile && revealItemInDir(configFile)}
             disabled={!configFile}
-            className="px-3 py-1.5 rounded-md bg-white/[0.06] ui-fs-sm hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("common.revealInExplorer")}
-          </button>
+          </Button>
         </Row>
       </Section>
 

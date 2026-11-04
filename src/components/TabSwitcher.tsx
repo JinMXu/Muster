@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { PaneContentKind, Uuid } from "../lib/types";
+import { Modal } from "./ui/Modal";
+import { MenuItem } from "./ui/MenuList";
 
 export interface SwitcherTab {
   id: Uuid;
@@ -39,41 +41,39 @@ export default function TabSwitcher({
   }, [index]);
 
   return (
-    <div
-      className="absolute inset-0 z-50 bg-black/15 flex justify-center items-start"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      fixed={false}
+      align="top"
+      topOffset={80}
+      scrim="dim"
+      className="w-[440px] max-w-[90vw]"
     >
-      <div
-        className="mt-20 w-[440px] max-w-[90vw] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div ref={listRef} className="max-h-80 overflow-y-auto p-1.5">
-          {tabs.map((tab, i) => (
-            <button
-              key={tab.id}
-              data-idx={i}
-              onClick={() => onSelect(tab.id)}
-              className={`w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-[12.5px] text-left ${
-                i === index ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted"
+      <div ref={listRef} className="max-h-80 overflow-y-auto p-1.5">
+        {tabs.map((tab, i) => (
+          <MenuItem
+            key={tab.id}
+            dataIdx={i}
+            height="md"
+            selected={i === index}
+            onClick={() => onSelect(tab.id)}
+          >
+            <span
+              className={`w-6 text-center ui-fs-sm font-mono ${
+                i === index ? "text-muster-accent" : "text-muster-muted"
               }`}
             >
-              <span
-                className={`w-6 text-center ui-fs-sm font-mono ${
-                  i === index ? "text-muster-accent" : "text-muster-muted"
-                }`}
-              >
-                {tab.kind ? KIND_ICON[tab.kind] : "·"}
+              {tab.kind ? KIND_ICON[tab.kind] : "·"}
+            </span>
+            <span className="flex-1 truncate">{tab.title}</span>
+            {tab.subtitle && (
+              <span className="max-w-[45%] truncate ui-fs-sm text-muster-muted/80" dir="rtl">
+                {tab.subtitle}
               </span>
-              <span className="flex-1 truncate">{tab.title}</span>
-              {tab.subtitle && (
-                <span className="max-w-[45%] truncate ui-fs-sm text-muster-muted/80" dir="rtl">
-                  {tab.subtitle}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+            )}
+          </MenuItem>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }

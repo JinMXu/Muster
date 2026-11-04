@@ -1,9 +1,70 @@
-import { memo, useCallback, useRef, useState } from "react";
-import type { ProjectView, Uuid } from "../lib/types";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { AgentAttention, AgentState, ProjectView, Uuid } from "../lib/types";
+import { api } from "../lib/invoke";
+import { useGitStatus } from "../lib/gitStatusStore";
+import { useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
 import { IconFolder, IconPlus, IconSettings, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import AgentMiniBar from "./AgentMiniBar";
 import UsageMiniMeter from "./UsageMiniMeter";
+
+type DotKind = AgentState | "approval";
+
+/// Tailwind dot-class per kind — mirrors the colors used in `AgentMiniBar`.
+const DOT_CLASS: Record<DotKind, string> = {
+  approval: "bg-rose-400 animate-pulse",
+  working: "bg-emerald-400",
+  waiting: "bg-amber-400 animate-pulse",
+  done: "bg-sky-400",
+};
+
+function dotOf(r: LiveAgentStatus): DotKind {
+  return r.attention === "approval" ? "approval" : (r.state as AgentState);
+}
+
+/// Compact number: 1493 → "1.5k".
+function fmtCount(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/// Sidebar-only: resolve each open project's repo root (its first session's
+/// cwd → `resolveProjectRoot`), so every project row can show its branch and
+/// change stats. One shared 5s poll; root lookups are cached upstream.
+function useProjectRepoRoots(projects: ProjectView[]): Record<string, string | null> {
+  const [roots, setRoots] = useState<Record<string, string | null>>({});
+  const keyRef = useRef("");
+  const lastRunRef = useRef(0);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      // State events re-run this effect; skip when a poll just happened.
+      const now = Date.now();
+      if (now - lastRunRef.current < 2000) return;
+      lastRunRef.current = now;
+      const sessions = await api.listAllSessions().catch(() => []);
+      const firstCwd = new Map<string, string>();
+      for (const p of projects) {
+        const s = sessions.find((x) => x.project_id === p.id);
+        if (s) firstCwd.set(p.id, s.working_directory);
+      }
+      const key = [...firstCwd].map(([id, cwd]) => `${id}:${cwd}`).join("|");
+      if (key === keyRef.current) return;
+      keyRef.current = key;
+      const next: Record<string, string | null> = {};
+      for (const [id, cwd] of firstCwd) {
+        next[id] = await api.resolveProjectRoot(cwd).catch(() => cwd);
+      }
+      if (alive) setRoots(next);
+    };
+    void tick();
+    const timer = setInterval(tick, 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [projects]);
+  return roots;
+}
 
 export default function Sidebar({
   projects,
@@ -47,6 +108,10 @@ export default function Sidebar({
   // on unrelated App/Header state changes.
   const handleDragStart = useCallback((id: Uuid) => setDragging(id), []);
   const handleDragEnd = useCallback(() => setDragging(null), []);
+  // Live agent status (shared store) + per-project repo roots, feeding the
+  // project rows' second line (dots · branch · change stats).
+  const agentStates = useAgentStatus();
+  const roots = useProjectRepoRoots(projects);
 
   return (
     <aside
@@ -57,22 +122,43 @@ export default function Sidebar({
       <div className="h-9" data-tauri-drag-region />
       <div className="flex-1 overflow-y-auto px-2">
         <div className="space-y-1">
-          {projects.map((p, i) => (
-            <ProjectRow
-              key={p.id}
-              project={p}
-              index={i}
-              isSelected={p.id === selected}
-              isDragging={dragging === p.id}
-              onSelect={onSelect}
-              onClose={onClose}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              onMove={onMove}
-              onRename={onRename}
-              onMenu={onProjectMenu}
-            />
-          ))}
+          {projects.map((p, i) => {
+            // Session ids across this project's panes → their agent dots.
+            const sessionIds: string[] = [];
+            for (const tab of p.tabs) {
+              for (const col of tab.columns) {
+                for (const pane of col.panes) {
+                  if (pane.content.kind === "session") sessionIds.push(pane.content.id);
+                }
+              }
+            }
+            const dots: DotKind[] = [
+              ...new Set(
+                sessionIds
+                  .map((id) => agentStates[id])
+                  .filter((s): s is LiveAgentStatus => !!s)
+                  .map(dotOf),
+              ),
+            ];
+            return (
+              <ProjectRow
+                key={p.id}
+                project={p}
+                index={i}
+                isSelected={p.id === selected}
+                isDragging={dragging === p.id}
+                dots={dots}
+                root={roots[p.id] ?? null}
+                onSelect={onSelect}
+                onClose={onClose}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onMove={onMove}
+                onRename={onRename}
+                onMenu={onProjectMenu}
+              />
+            );
+          })}
         </div>
       </div>
       <div className="px-2 py-1.5 flex items-center gap-1">
@@ -124,6 +210,8 @@ const ProjectRow = memo(function ProjectRow({
   index,
   isSelected,
   isDragging,
+  dots,
+  root,
   onSelect,
   onClose,
   onDragStart,
@@ -136,6 +224,10 @@ const ProjectRow = memo(function ProjectRow({
   index: number;
   isSelected: boolean;
   isDragging: boolean;
+  /** Agent status dots across this project's panes. */
+  dots: DotKind[];
+  /** Repo root (resolved from the project's first session) or null. */
+  root: string | null;
   onSelect: (id: Uuid) => void;
   onClose: (id: Uuid) => void;
   onDragStart: (id: Uuid) => void;
@@ -149,6 +241,9 @@ const ProjectRow = memo(function ProjectRow({
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const { t } = useT();
+  // Branch + change stats for the second line. Only the selected project
+  // polls at the active cadence; the rest ride the idle one.
+  const git = useGitStatus(root, isSelected);
 
   // Same inline-rename UX as the tab strip in Header.
   const startRename = () => {
@@ -212,9 +307,32 @@ const ProjectRow = memo(function ProjectRow({
         ) : (
           <div className="ui-fs-base truncate text-muster-fg/90">{project.name}</div>
         )}
-        {project.session_count > 1 && (
-          <div className="ui-fs-xs text-muster-muted">
-            {t("sidebar.sessions", { n: project.session_count })}
+        {(project.session_count > 1 || dots.length > 0 || (git?.is_repo && git.branch)) && (
+          <div className="ui-fs-xs text-muster-muted flex items-center gap-1.5 min-w-0">
+            {project.session_count > 1 && (
+              <span className="flex-shrink-0">
+                {t("sidebar.sessions", { n: project.session_count })}
+              </span>
+            )}
+            {dots.slice(0, 3).map((d, i) => (
+              <span key={i} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${DOT_CLASS[d]}`} />
+            ))}
+            {dots.length > 3 && (
+              <span className="flex-shrink-0 tabular-nums">+{dots.length - 3}</span>
+            )}
+            {git?.is_repo && git.branch && (
+              <span className="truncate min-w-0">{git.branch}</span>
+            )}
+            {git?.is_repo && git.line_additions > 0 && (
+              <span className="text-emerald-400/90 tabular-nums flex-shrink-0">
+                +{fmtCount(git.line_additions)}
+              </span>
+            )}
+            {git?.is_repo && git.line_deletions > 0 && (
+              <span className="text-red-400/90 tabular-nums flex-shrink-0">
+                −{fmtCount(git.line_deletions)}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -242,5 +360,8 @@ const ProjectRow = memo(function ProjectRow({
   a.project.id === b.project.id &&
   a.project.name === b.project.name &&
   a.project.custom_name === b.project.custom_name &&
-  a.project.session_count === b.project.session_count
+  a.project.session_count === b.project.session_count &&
+  a.root === b.root &&
+  a.dots.length === b.dots.length &&
+  a.dots.every((d, i) => d === b.dots[i])
 );

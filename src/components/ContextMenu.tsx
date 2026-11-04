@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { closeMenu, useMenuState } from "../lib/menuStore";
+import { useEscapeClose } from "./ui/Modal";
+import { MenuItem } from "./ui/MenuList";
 
 /// The single right-click menu for the whole app, driven by `menuStore`.
 /// Closes on backdrop click, Escape, or when an item is chosen; the position
@@ -25,17 +27,7 @@ export default function ContextMenu() {
     });
   }, [menu]);
 
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        closeMenu();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [menu]);
+  useEscapeClose(menu ? closeMenu : null);
 
   if (!menu) return null;
 
@@ -50,7 +42,7 @@ export default function ContextMenu() {
     >
       <div
         ref={ref}
-        className="absolute min-w-[180px] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] p-1.5 muster-pop"
+        className="absolute min-w-[180px] bg-muster-bg rounded-[10px] border border-muster-hairline shadow-pop p-1.5 muster-pop"
         style={{
           left: pos?.x ?? menu.x,
           top: pos?.y ?? menu.y,
@@ -60,21 +52,19 @@ export default function ContextMenu() {
       >
         {menu.items.map((item, i) =>
           item === "sep" ? (
-            <div key={i} className="my-1 border-t border-white/[0.08]" />
+            <div key={i} className="my-1 border-t border-muster-hairline" />
           ) : (
-            <button
+            <MenuItem
               key={i}
+              danger={item.danger}
               disabled={item.disabled}
               onClick={() => {
                 closeMenu();
                 item.action();
               }}
-              className={`w-full px-2.5 h-7 rounded-md text-[12.5px] text-left flex items-center disabled:opacity-40 enabled:hover:bg-white/[0.09] ${
-                item.danger ? "text-red-400" : "text-muster-muted enabled:hover:text-muster-fg"
-              }`}
             >
               {item.label}
-            </button>
+            </MenuItem>
           )
         )}
       </div>

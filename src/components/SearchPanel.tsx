@@ -4,6 +4,7 @@ import { api } from "../lib/invoke";
 import { useT } from "../lib/i18n/context";
 import { useProjectCwd } from "../lib/useProjectCwd";
 import { IconSearch, IconFile } from "./icons";
+import { Modal } from "./ui/Modal";
 
 /// Map a char index into a JS string to its UTF-16 offset (Rust sends char
 /// indices; emoji / astral chars need more than one UTF-16 unit).
@@ -145,25 +146,21 @@ export default function SearchPanel({
     } else if (e.key === "Enter") {
       e.preventDefault();
       openSelected();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
     }
   };
 
   const totalMatches = results?.length ?? 0;
 
   return (
-    <div
-      className="absolute inset-0 z-50 bg-black/35 flex justify-center items-start"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      fixed={false}
+      align="top"
+      topOffset={64}
+      className="w-[760px] max-w-[92vw] max-h-[72vh] flex flex-col"
     >
-      <div
-        className="mt-16 w-[760px] max-w-[92vw] max-h-[72vh] flex flex-col bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
         {/* Input row — flex-shrink-0 so the results list can't squash it. */}
-        <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2 border-b border-white/[0.08]">
+        <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2 border-b border-muster-hairline">
           <span className="text-muster-muted flex items-center">
             <IconSearch size={15} />
           </span>
@@ -229,8 +226,7 @@ export default function SearchPanel({
             ))
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

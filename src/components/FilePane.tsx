@@ -259,7 +259,7 @@ export default function FilePane({
 
   return (
     <div className="relative w-full h-full flex flex-col bg-muster-bg">
-      <div className="flex-shrink-0 flex items-center gap-0.5 px-2 h-8 border-b border-white/[0.08] ui-fs-xs text-muster-muted">
+      <div className="flex-shrink-0 flex items-center gap-0.5 px-2 h-8 border-b border-muster-hairline ui-fs-xs text-muster-muted">
         <button
           onClick={() => setDiffOn(!diffOn)}
           disabled={!tracked}
@@ -337,7 +337,7 @@ export default function FilePane({
       </div>
       {blameEntry && (
         <div
-          className="flex-shrink-0 flex items-center gap-2 px-3 h-7 border-t border-white/[0.08] ui-fs-xs text-muster-muted cursor-pointer hover:text-muster-fg"
+          className="flex-shrink-0 flex items-center gap-2 px-3 h-7 border-t border-muster-hairline ui-fs-xs text-muster-muted cursor-pointer hover:text-muster-fg"
           title={t("filePane.blameOpenHistory")}
           onClick={() => canGit && setShowHistory(true)}
         >

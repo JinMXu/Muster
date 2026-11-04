@@ -6,6 +6,8 @@ import { useProjectCwd } from "../lib/useProjectCwd";
 import type { AgentState, AppStateView, SessionInfo, Uuid } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 import { IconFile, IconSearch } from "./icons";
+import { Modal } from "./ui/Modal";
+import { MenuItem } from "./ui/MenuList";
 
 interface CommandItem {
   id: string;
@@ -231,62 +233,56 @@ export default function CommandPalette({
         picked.action();
         onClose();
       }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
     }
   };
 
   return (
-    <div
-      className="absolute inset-0 z-50 bg-black/15 flex justify-center items-start"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      fixed={false}
+      align="top"
+      topOffset={80}
+      scrim="dim"
+      className="w-[560px] max-w-[90vw]"
     >
-      <div
-        className="mt-20 w-[560px] max-w-[90vw] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2">
-          <span className="text-muster-muted flex items-center">
-            <IconSearch size={15} />
-          </span>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={t("commandPalette.searchPlaceholder")}
-            spellCheck={false}
-            className="flex-1 bg-transparent outline-none text-[15px] text-muster-fg placeholder:text-muster-muted/60"
-          />
-        </div>
-        <div className="border-t border-white/[0.08]" />
-        <div className="max-h-80 overflow-y-auto p-1.5">
-          {filtered.length === 0 && (
-            <div className="text-muster-muted text-center py-6">{t("commandPalette.noMatches")}</div>
-          )}
-          {filtered.map((cmd, i) => (
-            <button
-              key={cmd.id}
-              onClick={() => {
-                cmd.action();
-                onClose();
-              }}
-              onMouseEnter={() => setSelection(i)}
-              className={`w-full flex items-center gap-2 px-2.5 h-7 rounded-md text-[12.5px] text-left ${
-                i === selection ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted"
-              }`}
-            >
-              <span className={`ui-fs-sm flex-shrink-0 ${i === selection ? "text-muster-accent" : "text-muster-muted"}`}>
-                {cmd.icon}
-              </span>
-              <span className="flex-1 truncate">{cmd.title}</span>
-              {cmd.hint && <span className="ui-fs-sm text-muster-muted/60 truncate max-w-[220px]">{cmd.hint}</span>}
-              {cmd.shortcut && <span className="ui-fs-sm text-muster-muted/80">{cmd.shortcut}</span>}
-            </button>
-          ))}
-        </div>
+      <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2">
+        <span className="text-muster-muted flex items-center">
+          <IconSearch size={15} />
+        </span>
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onKey}
+          placeholder={t("commandPalette.searchPlaceholder")}
+          spellCheck={false}
+          className="flex-1 bg-transparent outline-none text-[15px] text-muster-fg placeholder:text-muster-muted/60"
+        />
       </div>
-    </div>
+      <div className="border-t border-muster-hairline" />
+      <div className="max-h-80 overflow-y-auto p-1.5">
+        {filtered.length === 0 && (
+          <div className="text-muster-muted text-center py-6">{t("commandPalette.noMatches")}</div>
+        )}
+        {filtered.map((cmd, i) => (
+          <MenuItem
+            key={cmd.id}
+            selected={i === selection}
+            onClick={() => {
+              cmd.action();
+              onClose();
+            }}
+            onMouseEnter={() => setSelection(i)}
+          >
+            <span className={`ui-fs-sm flex-shrink-0 ${i === selection ? "text-muster-accent" : "text-muster-muted"}`}>
+              {cmd.icon}
+            </span>
+            <span className="flex-1 truncate">{cmd.title}</span>
+            {cmd.hint && <span className="ui-fs-sm text-muster-muted/60 truncate max-w-[220px]">{cmd.hint}</span>}
+            {cmd.shortcut && <span className="ui-fs-sm text-muster-muted/80">{cmd.shortcut}</span>}
+          </MenuItem>
+        ))}
+      </div>
+    </Modal>
   );
 }

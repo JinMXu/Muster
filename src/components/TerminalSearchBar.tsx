@@ -64,7 +64,7 @@ export default function TerminalSearchBar({ sessionId, nonce }: Props) {
   }, [addon]);
 
   return (
-    <div className="absolute top-2 right-2 z-20 flex items-center gap-1 bg-muster-panel border border-white/[0.08] rounded-md shadow-[0_4px_12px_rgba(0,0,0,0.4)] px-2 py-1">
+    <div className="absolute top-2 right-2 z-20 flex items-center gap-1 bg-muster-panel border border-muster-hairline rounded-md shadow-pop-sm px-2 py-1">
       <input
         ref={inputRef}
         value={query}

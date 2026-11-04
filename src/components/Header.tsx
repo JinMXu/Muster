@@ -297,7 +297,7 @@ const TabItem = memo(function TabItem({
         onMenu(tab, e.clientX, e.clientY, startRename);
       }}
       className={`group relative rounded-md px-2 py-1 max-w-[220px] flex items-center gap-1 cursor-pointer whitespace-nowrap ui-fs-base flex-shrink-0 ${
-        isSelected ? "bg-white/[0.09] text-muster-fg" : "text-muster-muted hover:bg-muster-hover"
+        isSelected ? "bg-muster-selected text-muster-fg" : "text-muster-muted hover:bg-muster-hover"
       } ${isDragging ? "opacity-65" : ""} ${paneDragOver ? "ring-1 ring-inset ring-muster-accent" : ""}`}
     >
       {renaming ? (
@@ -359,7 +359,7 @@ const TabItem = memo(function TabItem({
         </>
       )}
       {progress && (
-        <div className="absolute left-1 right-1 bottom-0 h-[2px] rounded-full bg-white/10 overflow-hidden pointer-events-none">
+        <div className="absolute left-1 right-1 bottom-0 h-[2px] rounded-full bg-muster-selected overflow-hidden pointer-events-none">
           <div
             className={`h-full rounded-full ${
               progress.state === 2

@@ -149,7 +149,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       {cwd && root && normalize(cwd) !== normalize(root) && (
         <Row label={t("info.currentDirectory")} value={cwd} />
       )}
-      <hr className="border-white/[0.08]" />
+      <hr className="border-muster-hairline" />
       <Row
         label={t("info.shell")}
         value={
@@ -177,7 +177,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       )}
       {git?.is_repo && (
         <>
-          <hr className="border-white/[0.08]" />
+          <hr className="border-muster-hairline" />
           <Row label={t("info.branch")} value={git.branch ?? t("info.detached")} />
           <Row
             label={t("info.remote")}
@@ -191,7 +191,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       )}
       {shellPid != null && (
         <>
-          <hr className="border-white/[0.08]" />
+          <hr className="border-muster-hairline" />
           <Section label={t("info.processes")}>
             {procs.length === 0 ? (
               <div className="ui-fs-sm text-muster-muted/70 px-1">{t("info.noRunningProcesses")}</div>

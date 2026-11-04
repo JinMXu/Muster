@@ -165,10 +165,10 @@ export default function AgentMiniBar({
               shouldn't darken the whole screen like the big modals do). */}
           <div className="fixed inset-0 z-40" onClick={onClose} />
           <div
-            className="absolute bottom-full left-0 mb-1 z-50 w-[280px] max-w-[80vw] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop flex flex-col"
+            className="absolute bottom-full left-0 mb-1 z-50 w-[280px] max-w-[80vw] bg-muster-bg rounded-[10px] border border-muster-hairline shadow-pop muster-pop flex flex-col"
             ref={listRef}
           >
-            <div className="flex items-center gap-2 px-3 h-9 flex-shrink-0 border-b border-white/[0.08]">
+            <div className="flex items-center gap-2 px-3 h-9 flex-shrink-0 border-b border-muster-hairline">
               <span className="text-muster-accent flex items-center">
                 <IconTerminal size={13} />
               </span>

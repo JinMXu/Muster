@@ -128,7 +128,7 @@ export default function DiffPane({ diffId, visible }: { diffId: string; visible:
 
   return (
     <div className="w-full h-full flex flex-col bg-muster-bg">
-      <div className="flex items-center gap-2 border-b border-white/[0.08] px-3 py-1 ui-fs-base text-muster-muted">
+      <div className="flex items-center gap-2 border-b border-muster-hairline px-3 py-1 ui-fs-base text-muster-muted">
         <span className="flex-1 truncate">
           {diff.path}
           {diff.staged ? t("diffPane.stagedSuffix") : ""}

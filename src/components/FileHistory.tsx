@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FileCommit } from "../lib/types";
 import { api } from "../lib/invoke";
 import { useT } from "../lib/i18n/context";
 import { IconGitBranch, IconX } from "./icons";
+import { Modal } from "./ui/Modal";
 
 /// File history overlay (opened from a Git panel row's context menu): lists
 /// every commit that touched the file, newest first. Click a commit to diff
@@ -33,18 +34,6 @@ export default function FileHistory({
     };
   }, [repoRoot, path]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
-
   /// Open a diff of the file between two commits, ordered chronologically.
   const compare = (a: FileCommit, b: FileCommit) => {
     const [oldC, newC] = a.date_ms <= b.date_ms ? [a, b] : [b, a];
@@ -73,32 +62,34 @@ export default function FileHistory({
   }, [path]);
 
   return (
-    <div className="absolute inset-0 z-50 bg-black/35 flex justify-center items-start" onClick={onClose}>
-      <div
-        className="mt-16 w-[440px] max-w-[92vw] max-h-[70vh] flex flex-col bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.5)] muster-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2 border-b border-white/[0.08]">
-          <span className="text-muster-accent flex items-center">
-            <IconGitBranch size={14} />
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="ui-fs-base font-medium truncate">{fileName}</div>
-            <div className="ui-fs-xs text-muster-muted truncate" title={path}>
-              {path}
-            </div>
+    <Modal
+      onClose={onClose}
+      fixed={false}
+      align="top"
+      topOffset={64}
+      className="w-[440px] max-w-[92vw] max-h-[70vh] flex flex-col"
+    >
+      <div className="px-4 h-11 flex-shrink-0 flex items-center gap-2 border-b border-muster-hairline">
+        <span className="text-muster-accent flex items-center">
+          <IconGitBranch size={14} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="ui-fs-base font-medium truncate">{fileName}</div>
+          <div className="ui-fs-xs text-muster-muted truncate" title={path}>
+            {path}
           </div>
-          <button
-            onClick={onClose}
-            title={t("common.close")}
-            className="px-1 rounded text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg flex items-center"
-          >
-            <IconX size={13} />
-          </button>
         </div>
+        <button
+          onClick={onClose}
+          title={t("common.close")}
+          className="px-1 rounded text-muster-muted hover:bg-muster-hover-btn hover:text-muster-fg flex items-center"
+        >
+          <IconX size={13} />
+        </button>
+      </div>
 
         {base && (
-          <div className="flex-shrink-0 px-3 py-1.5 flex items-center gap-2 bg-white/[0.03] border-b border-white/[0.08]">
+          <div className="flex-shrink-0 px-3 py-1.5 flex items-center gap-2 bg-muster-panel border-b border-muster-hairline">
             <span className="ui-fs-sm text-muster-fg/80 flex-1 truncate">
               {t("fileHistory.comparing", { hash: base.short_hash })}
             </span>
@@ -156,7 +147,6 @@ export default function FileHistory({
             })
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

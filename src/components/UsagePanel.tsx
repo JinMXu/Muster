@@ -4,6 +4,7 @@ import { events } from "../lib/bindings";
 import { useTauriEventOf } from "../hooks/useTauriEvent";
 import { useT, type TKey } from "../lib/i18n/context";
 import { agentLabel } from "../hooks/useAgentStatus";
+import { Modal } from "./ui/Modal";
 import {
   formatDuration,
   formatPercent,
@@ -108,15 +109,12 @@ export default function UsagePanel({
   const isEmpty = !compare || compare.rows.length === 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      z="z-50"
+      className="w-[min(1100px,96vw)] h-[min(720px,90vh)] flex flex-col overflow-hidden"
     >
-      <div
-        className="w-[min(1100px,96vw)] h-[min(720px,90vh)] bg-muster-bg rounded-[10px] border border-white/[0.08] shadow-[0_18px_48px_rgba(0,0,0,0.55)] muster-pop flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2.5 px-4 h-12 flex-shrink-0 border-b border-white/[0.08]">
+        <div className="flex items-center gap-2.5 px-4 h-12 flex-shrink-0 border-b border-muster-hairline">
           <IconChartBar size={16} className="text-muster-accent flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="ui-fs-base font-medium">{t("usage.title")}</div>
@@ -142,7 +140,7 @@ export default function UsagePanel({
           </button>
         </div>
 
-        <div className="flex items-center gap-3 px-4 py-2 flex-shrink-0 border-b border-white/[0.08]">
+        <div className="flex items-center gap-3 px-4 py-2 flex-shrink-0 border-b border-muster-hairline">
           <div className="flex items-center rounded-md bg-muster-hover/50 p-0.5">
             {(["today", "7d", "30d", "all"] as UsageRange[]).map((r) => (
               <button
@@ -161,7 +159,7 @@ export default function UsagePanel({
           <select
             value={projectId ?? ""}
             onChange={(e) => setProjectId(e.target.value || null)}
-            className="bg-muster-hover/50 border border-white/[0.08] rounded px-2 py-1 ui-fs-xs text-muster-fg/80 outline-none max-w-[220px]"
+            className="bg-muster-hover/50 border border-muster-hairline rounded px-2 py-1 ui-fs-xs text-muster-fg/80 outline-none max-w-[220px]"
           >
             <option value="">{t("usage.allProjects")}</option>
             {(state?.projects ?? []).map((p) => (
@@ -200,7 +198,7 @@ export default function UsagePanel({
           {tab === "coverage" && <CoverageGrid coverage={coverage} />}
         </div>
 
-        <div className="flex items-center gap-4 px-4 h-9 flex-shrink-0 border-t border-white/[0.08] ui-fs-xs text-muster-muted/80">
+        <div className="flex items-center gap-4 px-4 h-9 flex-shrink-0 border-t border-muster-hairline ui-fs-xs text-muster-muted/80">
           <span>
             {t("usage.summary", {
               runs: total?.runs ?? 0,
@@ -210,8 +208,7 @@ export default function UsagePanel({
           <span className="flex-1" />
           <span>{t("usage.localOnly")}</span>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -255,7 +252,7 @@ function CompareTable({
         {rows.map((r) => (
           <tr
             key={`${r.agent}-${r.model ?? "unknown"}`}
-            className="border-t border-white/[0.05] hover:bg-muster-hover/40"
+            className="border-t border-muster-border hover:bg-muster-hover/40"
           >
             <td className="px-4 py-2">
               <div className="flex items-center gap-2 min-w-0">
@@ -334,7 +331,7 @@ function RunsTable({ runs, onClose }: { runs: UsageRunView[]; onClose: () => voi
                 api.focusAgentSession(r.session_id).catch(() => {});
                 onClose();
               }}
-              className="border-t border-white/[0.05] hover:bg-muster-hover/40 cursor-pointer"
+              className="border-t border-muster-border hover:bg-muster-hover/40 cursor-pointer"
               title={t("usage.jumpToSession")}
             >
               <td className="px-4 py-2 whitespace-nowrap text-muster-muted/80">
@@ -396,7 +393,7 @@ function CoverageGrid({ coverage }: { coverage: AgentCoverage[] }) {
           return (
             <div
               key={c.agent}
-              className="rounded border border-white/[0.06] bg-muster-panel/40 px-3 py-2"
+              className="rounded border border-muster-border bg-muster-panel/40 px-3 py-2"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="ui-fs-sm font-medium truncate">{agentLabel(c.agent)}</span>
@@ -406,7 +403,7 @@ function CoverageGrid({ coverage }: { coverage: AgentCoverage[] }) {
                       ? c.events
                         ? "bg-emerald-400/15 text-emerald-300"
                         : "bg-amber-400/15 text-amber-300"
-                      : "bg-white/[0.06] text-muster-muted"
+                      : "bg-muster-fill text-muster-muted"
                   }`}
                 >
                   {status}

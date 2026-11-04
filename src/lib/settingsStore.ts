@@ -27,8 +27,10 @@ async function applyAll(s: SettingsType): Promise<void> {
   const colors = await api.themeColors(dark ? s.theme_dark : s.theme_light, dark);
   applyFullTheme(colors);
   // Keep native chrome (select popups, scrollbars) on the same light/dark
-  // scheme as the theme, or dropdown options render light-on-white.
+  // scheme as the theme, or dropdown options render light-on-white. The
+  // data attribute drives CSS that varies by appearance (shadow strength).
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
+  document.documentElement.dataset.appearance = dark ? "dark" : "light";
   if (s.theme === "system" && !systemListenerRegistered) {
     systemListenerRegistered = true;
     darkQuery.addEventListener("change", () => {

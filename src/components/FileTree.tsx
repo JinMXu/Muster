@@ -27,6 +27,8 @@ interface Node {
   path: string;
   is_directory: boolean;
   depth: number;
+  /// Excluded by gitignore rules — the row renders faded (kero's Files tab).
+  is_ignored?: boolean;
   /// Inline "new file/folder" draft row, rendered at the top of a dir.
   draft?: boolean;
 }
@@ -535,7 +537,7 @@ function DraftRow({
           else if (e.key === "Escape") onCancel();
         }}
         onBlur={(e) => onCommit(e.target.value)}
-        className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 ui-fs-sm outline-none text-muster-fg"
+        className="flex-1 min-w-0 bg-muster-hover-btn rounded px-1 ui-fs-sm outline-none text-muster-fg"
       />
     </div>
   );
@@ -571,6 +573,7 @@ function rowPropsEqual(a: RowProps, b: RowProps): boolean {
     a.node.name === b.node.name &&
     a.node.depth === b.node.depth &&
     a.node.is_directory === b.node.is_directory &&
+    a.node.is_ignored === b.node.is_ignored &&
     a.isExpanded === b.isExpanded &&
     a.isSelected === b.isSelected &&
     a.isRenaming === b.isRenaming &&
@@ -629,7 +632,7 @@ const Row = memo(function Row({
       ) : (
         <span className="w-2" />
       )}
-      <span className={`flex items-center ${node.is_directory ? "text-muster-accent/80" : "text-muster-muted"}`}>
+      <span className={`flex items-center ${node.is_directory ? "text-muster-accent/80" : "text-muster-muted"} ${node.is_ignored && !badge ? "opacity-45" : ""}`}>
         {node.is_directory ? <IconFolder size={12} /> : <FileIcon name={node.name} size={12} />}
       </span>
       {isRenaming ? (
@@ -642,10 +645,14 @@ const Row = memo(function Row({
             else if (e.key === "Escape") onCancelRename();
           }}
           onBlur={(e) => onRename(e.target.value)}
-          className="flex-1 min-w-0 bg-white/[0.08] rounded px-1 ui-fs-sm outline-none text-muster-fg"
+          className="flex-1 min-w-0 bg-muster-hover-btn rounded px-1 ui-fs-sm outline-none text-muster-fg"
         />
       ) : (
-        <span className={`flex-1 truncate ${!node.is_directory && badge ? badge.className : ""}`}>
+        <span
+          className={`flex-1 truncate ${!node.is_directory && badge ? badge.className : ""} ${
+            node.is_ignored && !badge ? "opacity-45" : ""
+          }`}
+        >
           {node.name}
         </span>
       )}

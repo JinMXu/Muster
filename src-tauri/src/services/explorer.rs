@@ -94,6 +94,8 @@ pub struct DirEntry {
     pub name: String,
     pub path: String,
     pub is_directory: bool,
+    /// The entry is excluded by git/gitignore rules (the tree fades it).
+    pub is_ignored: bool,
 }
 
 /// Directory listing for the file tree: skips `.git` / `.` / `..`, sorted
@@ -101,6 +103,19 @@ pub struct DirEntry {
 /// yields an empty list (the tree shows it as empty).
 pub fn list_directory(path: &str) -> Vec<DirEntry> {
     let Ok(entries) = std::fs::read_dir(path) else { return Vec::new() };
+    // Which entries do the ignore rules drop? Walk the same directory with
+    // the `ignore` crate (respects .gitignore / .ignore up the tree, global
+    // excludes included). Entries present on disk but absent from the walk
+    // are ignored; a fully ignored directory yields no children, fading
+    // everything inside it. `hidden(false)` keeps dotfiles in the walk so
+    // only real ignore rules fade them.
+    let walked: std::collections::HashSet<String> = ignore::WalkBuilder::new(path)
+        .max_depth(Some(1))
+        .hidden(false)
+        .build()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
     // Sort key is precomputed once per entry: lowercasing inside the
     // comparator allocates twice per comparison (O(n log n) allocations).
     let mut items: Vec<(DirEntry, String)> = entries
@@ -111,9 +126,10 @@ pub fn list_directory(path: &str) -> Vec<DirEntry> {
                 return None;
             }
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let is_ignored = !walked.contains(&name);
             let sort_key = name.to_lowercase();
             Some((
-                DirEntry { name, path: e.path().to_string_lossy().to_string(), is_directory: is_dir },
+                DirEntry { name, path: e.path().to_string_lossy().to_string(), is_directory: is_dir, is_ignored },
                 sort_key,
             ))
         })

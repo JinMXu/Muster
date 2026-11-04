@@ -321,7 +321,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
     <div className="h-full flex flex-col ui-fs-base">
       <div className="px-3 pt-2 pb-1 flex items-center gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 min-w-0">
             <BranchSelect
               branch={info.branch}
               branches={info.branches}
@@ -393,7 +393,7 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
               })
             }
             title={t("git.setCheckpoint")}
-            className="px-1 rounded ui-fs-xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0"
+            className="whitespace-nowrap px-1 rounded ui-fs-xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0"
           >
             {t("git.setCheckpoint")}
           </button>
@@ -489,7 +489,12 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
           </div>
         </div>
       )}
-      <div className="px-3 pb-2 flex items-center gap-0.5">
+      {/* Narrow panels scroll this toolbar horizontally rather than letting
+          the two-character labels wrap into vertical stacks of glyphs. */}
+      <div
+        className="px-3 pb-2 flex items-center gap-0.5 overflow-x-auto"
+        style={{ scrollbarWidth: "none" }}
+      >
         <ToolButton
           onClick={() =>
             runOp(t("git.fetch"), t("git.fetchCli"), api.git.fetch(info.repo_root).then(() => t("git.fetched")))
@@ -546,9 +551,12 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
 
       <div className="flex-1 overflow-y-auto px-2 pb-3">
         {isClean && q.length === 0 && (
-          <div className="flex items-center gap-1.5 px-2 py-2 ui-fs-sm text-muster-muted">
-            <span className="text-green-400">✓</span>
-            {t("git.workingTreeClean")}
+          <div
+            className="flex items-center gap-1.5 px-2 py-2 ui-fs-sm text-muster-muted whitespace-nowrap"
+            title={t("git.workingTreeClean")}
+          >
+            <span className="text-green-400 flex-shrink-0">✓</span>
+            <span className="truncate">{t("git.workingTreeClean")}</span>
           </div>
         )}
         {mergeEntries.length > 0 && (
@@ -827,7 +835,7 @@ function ToolButton({
       onClick={onClick}
       disabled={disabled || loading}
       title={title}
-      className={`px-1.5 h-6 rounded ui-fs-xs transition-all duration-muster ease-muster ${
+      className={`whitespace-nowrap flex-shrink-0 px-1.5 h-6 rounded ui-fs-xs transition-all duration-muster ease-muster ${
         loading
           ? "bg-muster-hover-btn text-muster-fg/80"
           : "text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97]"

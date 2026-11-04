@@ -113,7 +113,7 @@ export default function BranchSelect({
         ref={triggerRef}
         title={t("git.switchBranch")}
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 rounded-md pl-1.5 pr-1 h-6 max-w-[190px] transition-colors duration-muster ease-muster ${
+        className={`flex items-center gap-1 rounded-md pl-1.5 pr-1 h-6 max-w-[190px] min-w-0 transition-colors duration-muster ease-muster ${
           open ? "bg-muster-hover text-muster-fg" : "text-muster-fg hover:bg-muster-hover"
         }`}
       >

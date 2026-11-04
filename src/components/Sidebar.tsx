@@ -175,9 +175,9 @@ export default function Sidebar({
           })}
         </div>
       </div>
-      <div className="px-2 py-1.5 flex items-center gap-1">
+      <div className="px-2 py-1.5 flex items-center gap-1 border-t border-muster-hairline">
 <FooterButton title={t("sidebar.newProjectTooltip")} onClick={onNewProject}>
-        <IconPlus size={14} />
+        <IconPlus size={15} />
       </FooterButton>
       <AgentMiniBar
         open={agentBarOpen}
@@ -187,7 +187,7 @@ export default function Sidebar({
       <UsageMiniMeter onOpen={onOpenUsage} />
       <div className="flex-1" />
       <FooterButton title={t("sidebar.settingsTooltip")} onClick={onOpenSettings}>
-        <IconSettings size={14} />
+        <IconSettings size={15} />
       </FooterButton>
       </div>
     </aside>

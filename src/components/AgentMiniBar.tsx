@@ -146,7 +146,7 @@ export default function AgentMiniBar({
       <button
         title={tooltip}
         onClick={onToggle}
-        className="flex items-center gap-1 px-1.5 h-6 rounded-full bg-muster-hover/60 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
+        className="flex items-center gap-1 px-1.5 h-6 rounded-md bg-muster-hover/60 hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster"
         aria-label={t("agents.title")}
       >
         <span className="flex items-center gap-0.5">

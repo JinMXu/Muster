@@ -42,12 +42,14 @@ jobs:
           releaseName: "Muster ${{ github.ref_name }}"
           releaseBody: "Windows installers below (MSI and NSIS).
 
-- Coding-agent support expanded to 26 CLI agents with safer process/cmdline matching
-- Permission prompts now surface as an approval state; the last agent can be restarted after a relaunch
-- New `muster mcp` server exposes 12 tools to MCP clients such as Claude Code and Cursor
-- Agent usage panel compares token efficiency by agent and model, with native adapters for Claude Code, Qoder, Kimi Code, Pi, OpenCode, Grok, CodeBuddy and Codex
-- `MUSTER_SESSION_ID` is injected into terminal sessions for agent integrations
-- CLI: `muster usage` for compare, runs and coverage
+Highlights:
+
+- Screen-level agent state detection (kero's rule engine, per-agent manifests): working / blocked-on-approval / idle now read from what the agent actually renders, with separate notification cooldowns for approvals
+- Restored sessions are stable: terminals refit when font settings apply, PTY resizes that land mid-spawn are no longer lost, restored terminals keep their viewports pinned
+- Info and Git panels redesigned around what matters (agent hero card with state pill, git chip line, conditional commit block); sidebars gained visible collapse toggles in their top corners, a minimum width, and icon-only tab chips when narrow
+- Pane headers show the running agent's brand icon; gitignored entries fade in the file tree; the settings dialog was rebuilt on shared UI primitives
+- Performance: no AppState lock across file/diff loads or agent polling, incremental usage ledger, cached git status, faster startup and tray reopen
+- Security: hardened local IPC bridge (connection cap, request deadlines, constant-time token check), replay-safe agent restart commands, screen content kept out of the log file
 
 > Note: auto-updates work from 0.1.3 onwards; first-time installs should run the installer manually."
           releaseDraft: true

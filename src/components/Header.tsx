@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { events } from "../lib/bindings";
 import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
-import { IconColumns, IconMaximize2, IconPanelRight, IconPlus, IconX } from "./icons";
+import { IconColumns, IconMaximize2, IconPanelLeft, IconPanelRight, IconPlus, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import { api } from "../lib/invoke";
 import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
@@ -33,6 +33,8 @@ export default function Header({
   onTabMenu,
   togglePanel,
   panelVisible,
+  toggleLeftSidebar,
+  leftSidebarVisible,
   isPaneZoomed,
   onExitZoom,
 }: {
@@ -47,6 +49,10 @@ export default function Header({
   onTabMenu: (tab: ProjectView["tabs"][number], x: number, y: number, requestRename: () => void) => void;
   togglePanel: () => void;
   panelVisible: boolean;
+  /// Left sidebar visibility + toggle (same backend command as Ctrl+B), the
+  /// discoverable mouse twin of the shortcut.
+  toggleLeftSidebar: () => void;
+  leftSidebarVisible: boolean;
   isPaneZoomed: boolean;
   onExitZoom: () => void;
 }) {
@@ -126,6 +132,19 @@ export default function Header({
       className="h-9 flex items-center pl-2"
       data-tauri-drag-region
     >
+      {/* Left sidebar toggle — the mouse twin of Ctrl+B. Mirrors the right
+          panel's toggle on the opposite edge: accent while visible, muted
+          when hidden. Sits flush to the content's left edge, so with the
+          sidebar hidden it is the top-left corner's visible way back. */}
+      <button
+        onClick={toggleLeftSidebar}
+        title={t("header.toggleLeftSidebarTooltip")}
+        className={`w-5 h-5 mr-1 rounded flex items-center justify-center ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0 ${
+          leftSidebarVisible ? "text-muster-accent" : "text-muster-muted"
+        }`}
+      >
+        <IconPanelLeft size={13} />
+      </button>
       <div
         className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto self-stretch"
         style={{ scrollbarWidth: "none" }}

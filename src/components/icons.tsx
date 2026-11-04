@@ -28,6 +28,7 @@ import {
   Maximize2,
   MessageCircle,
   Minus,
+  PanelLeft,
   PanelRight,
   Pencil,
   Plug,
@@ -72,6 +73,7 @@ export const IconChevronLeft = fromLucide(ChevronLeft);
 export const IconPencil = fromLucide(Pencil);
 export const IconTrash = fromLucide(Trash);
 export const IconMaximize2 = fromLucide(Maximize2);
+export const IconPanelLeft = fromLucide(PanelLeft);
 export const IconPanelRight = fromLucide(PanelRight);
 export const IconSquare = fromLucide(Square);
 export const IconRefresh = fromLucide(RefreshCw);

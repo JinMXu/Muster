@@ -216,6 +216,7 @@ const zh = {
   header: {
     newSessionTooltip: "新建会话 (Ctrl+T)",
     exitZoomTooltip: "退出窗格缩放 (Ctrl+Shift+Enter)",
+    toggleLeftSidebarTooltip: "切换左侧边栏 (Ctrl+B)",
     toggleRightSidebarTooltip: "切换右侧边栏 (Ctrl+Shift+B)",
     untitled: "未命名",
     agentWorking: ({ agent }: { agent: string }) => `${agent} 正在运行`,

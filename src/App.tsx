@@ -810,6 +810,7 @@ export default function App() {
     []
   );
   const toggleRightPanel = useCallback(() => api.toggleRightPanel(), []);
+  const toggleLeftSidebar = useCallback(() => api.toggleLeftSidebar(), []);
   const exitZoom = useCallback(() => api.togglePaneZoom(), []);
   const openSettingsGeneral = useCallback(() => {
     setSettingsTab("appearance");
@@ -928,6 +929,8 @@ export default function App() {
             onTabMenu={tabMenu}
             togglePanel={toggleRightPanel}
             panelVisible={stateView?.is_panel_visible ?? false}
+            toggleLeftSidebar={toggleLeftSidebar}
+            leftSidebarVisible={stateView?.is_left_sidebar_visible ?? false}
             isPaneZoomed={stateView?.is_pane_zoomed ?? false}
             onExitZoom={exitZoom}
           />

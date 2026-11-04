@@ -216,6 +216,7 @@ const en = {
   header: {
     newSessionTooltip: "New Session (Ctrl+T)",
     exitZoomTooltip: "Exit Pane Zoom (Ctrl+Shift+Enter)",
+    toggleLeftSidebarTooltip: "Toggle Left Sidebar (Ctrl+B)",
     toggleRightSidebarTooltip: "Toggle Right Sidebar (Ctrl+Shift+B)",
     untitled: "untitled",
     agentWorking: ({ agent }: { agent: string }) => `${agent} is working`,

@@ -123,6 +123,12 @@ pub struct ConPty {
     pty: Box<PseudoConsole>,
     signal: Option<OwnedHandle>,
     conhost: Option<OwnedHandle>,
+    /// The ConDrv reference client handle; its only consumer is the
+    /// pseudoconsole attribute in `spawn_shell`, which closes it (drops to
+    /// None) once the shell process exists — see the CreatePseudoConsole
+    /// reference sample. Held here (not inside `pty` as a raw value) so
+    /// error paths before the spawn close it deterministically.
+    reference: Option<OwnedHandle>,
     child: Option<OwnedHandle>,
     child_pid: Option<u32>,
     reader: Option<OwnedHandle>,
@@ -140,7 +146,7 @@ impl ConPty {
             ensure_driver_loaded();
             create_server_handle(true)
         })?;
-        let reference = create_client_handle(server, "\\Reference", false)?;
+        let reference = create_client_handle(&server, "\\Reference", false)?;
 
         let (sig_read, sig_write) = new_pipe()?;
         let (in_read, in_write) = new_pipe()?;
@@ -152,22 +158,26 @@ impl ConPty {
 
         let conhost = spawn_openconsole(
             &openconsole_path(), cols, rows,
-            raw(&sig_read), server, raw(&in_read), raw(&out_write),
+            raw(&sig_read), raw(&server), raw(&in_read), raw(&out_write),
         )?;
 
         drop(sig_read);
         drop(in_read);
         drop(out_write);
-        let _ = unsafe { CloseHandle(server) };
+        // server/reference are OwnedHandles now: this drop closes the
+        // server (the old code closed it manually and leaked both on any
+        // `?` early return above).
+        drop(server);
 
         let pty = Box::new(PseudoConsole {
             h_signal: raw(&sig_write),
-            h_pty_reference: reference,
+            h_pty_reference: raw(&reference),
             h_conpty_process: raw(&conhost),
         });
 
         Ok(ConPty {
             pty, signal: Some(sig_write), conhost: Some(conhost),
+            reference: Some(reference),
             child: None, child_pid: None,
             reader: Some(out_read), writer: Some(in_write),
         })
@@ -222,7 +232,9 @@ impl ConPty {
         let _ = unsafe { CloseHandle(pi.hThread) };
 
         // Release the reference handle (ReleasePseudoConsole semantics).
-        unsafe { let _ = CloseHandle(self.pty.h_pty_reference); }
+        // Dropping the OwnedHandle closes it once; the stale raw copy inside
+        // `pty` is never read again (the attribute list is gone).
+        self.reference = None;
         self.pty.h_pty_reference = HANDLE::default();
 
         let pid = pi.dwProcessId;
@@ -283,6 +295,10 @@ impl ConPty {
 impl Drop for ConPty {
     fn drop(&mut self) {
         self.kill_child();
+        // Close the ConPTY host explicitly. The handle is otherwise only
+        // held (never read), and dropping it here states the intent: the
+        // pseudoconsole tears down when the session is gone.
+        self.conhost.take();
     }
 }
 
@@ -297,8 +313,10 @@ fn ensure_driver_loaded() {
     }
 }
 
-fn create_server_handle(inheritable: bool) -> io::Result<HANDLE> {
-    let us = to_unicode_string("\\Device\\ConDrv\\Server");
+fn create_server_handle(inheritable: bool) -> io::Result<OwnedHandle> {
+    // The Vec returned alongside the UnicodeString must outlive the struct:
+    // `buffer` points into it (see to_unicode_string).
+    let (us, _buffer) = to_unicode_string("\\Device\\ConDrv\\Server");
     let oa = ObjectAttributes {
         length: std::mem::size_of::<ObjectAttributes>() as u32,
         root_directory: HANDLE::default(),
@@ -313,14 +331,14 @@ fn create_server_handle(inheritable: bool) -> io::Result<HANDLE> {
     if status < 0 {
         return Err(io::Error::other(format!("NtOpenFile(Server) NTSTATUS 0x{:08X}", status as u32)));
     }
-    Ok(handle)
+    Ok(unsafe { OwnedHandle::from_raw_handle(handle.0) })
 }
 
-fn create_client_handle(server: HANDLE, name: &str, inheritable: bool) -> io::Result<HANDLE> {
-    let us = to_unicode_string(name);
+fn create_client_handle(server: &OwnedHandle, name: &str, inheritable: bool) -> io::Result<OwnedHandle> {
+    let (us, _buffer) = to_unicode_string(name);
     let oa = ObjectAttributes {
         length: std::mem::size_of::<ObjectAttributes>() as u32,
-        root_directory: server,
+        root_directory: raw(server),
         object_name: &us,
         attributes: OBJ_CASE_INSENSITIVE | if inheritable { OBJ_INHERIT } else { 0 },
         security_descriptor: ptr::null(),
@@ -334,13 +352,25 @@ fn create_client_handle(server: HANDLE, name: &str, inheritable: bool) -> io::Re
     if status < 0 {
         return Err(io::Error::other(format!("NtOpenFile({}) NTSTATUS 0x{:08X}", name, status as u32)));
     }
-    Ok(handle)
+    Ok(unsafe { OwnedHandle::from_raw_handle(handle.0) })
 }
 
-fn to_unicode_string(s: &str) -> UnicodeString {
+/// The returned Vec is the storage `us.buffer` points into — callers must
+/// keep it alive for as long as the kernel reads the string (the NtOpenFile
+/// call). The old version returned the struct alone, leaving `buffer`
+/// dangling the moment this fn returned: a latent use-after-free that only
+/// survived because the allocator rarely reused the block that fast.
+fn to_unicode_string(s: &str) -> (UnicodeString, Vec<u16>) {
     let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
     let len = (wide.len() - 1) * 2;
-    UnicodeString { length: len as u16, maximum_length: (len + 2) as u16, buffer: wide.as_ptr() }
+    (
+        UnicodeString {
+            length: len as u16,
+            maximum_length: (len + 2) as u16,
+            buffer: wide.as_ptr(),
+        },
+        wide,
+    )
 }
 
 fn new_pipe() -> io::Result<(OwnedHandle, OwnedHandle)> {

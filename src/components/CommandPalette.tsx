@@ -6,6 +6,7 @@ import { useProjectCwd } from "../lib/useProjectCwd";
 import type { AgentState, AppStateView, SessionInfo, Uuid } from "../lib/types";
 import { useT } from "../lib/i18n/context";
 import { IconFile, IconSearch } from "./icons";
+import { DOT_CLASS, dotKind, type DotKind } from "../lib/agentColors";
 import { Modal } from "./ui/Modal";
 import { MenuItem } from "./ui/MenuList";
 
@@ -21,15 +22,6 @@ interface CommandItem {
 
 /// File-row glyph reused for both project files and recent files.
 const fileIcon = <IconFile size={12} />;
-
-/// Agent status dot colors, matching the AgentMiniBar.
-type AgentDotKind = AgentState | "approval";
-const AGENT_DOT: Record<AgentDotKind, string> = {
-  approval: "bg-rose-400 animate-pulse",
-  working: "bg-emerald-400",
-  waiting: "bg-amber-400 animate-pulse",
-  done: "bg-sky-400",
-};
 
 /// Centered Ctrl+P overlay: project-file quick open (VS Code style) + app
 /// actions + open sessions, all fuzzy-filtered. Recent files surface first.
@@ -67,7 +59,7 @@ export default function CommandPalette({
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [agentStates, setAgentStates] = useState<Record<Uuid, AgentDotKind>>({});
+  const [agentStates, setAgentStates] = useState<Record<Uuid, DotKind>>({});
   const [projectFiles, setProjectFiles] = useState<string[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recent = useSyncExternalStore(subscribeRecentFiles, getRecentFiles);
@@ -78,9 +70,9 @@ export default function CommandPalette({
     // dot immediately (the push events only fire on changes, so a fresh
     // palette mount would otherwise render without any dots).
     api.agentStatusSnapshot().then((rows) => {
-      const map: Record<Uuid, AgentDotKind> = {};
+      const map: Record<Uuid, DotKind> = {};
       for (const r of rows) {
-        map[r.session_id] = r.attention === "approval" ? "approval" : r.state;
+        map[r.session_id] = dotKind(r);
       }
       setAgentStates(map);
     }).catch(() => {});
@@ -180,7 +172,7 @@ export default function CommandPalette({
           id: `session-${s.id}`,
           title: s.title,
           icon: st ? (
-            <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${AGENT_DOT[st]}`} />
+            <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${DOT_CLASS[st]}`} />
           ) : (
             ">"
           ),

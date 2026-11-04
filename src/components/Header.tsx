@@ -3,6 +3,7 @@ import { events } from "../lib/bindings";
 import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
 import { IconColumns, IconMaximize2, IconPanelLeftOpen, IconPanelRightOpen, IconPlus, IconX } from "./icons";
+import { DOT_CLASS, dotKind } from "../lib/agentColors";
 import { useT } from "../lib/i18n/context";
 import { api } from "../lib/invoke";
 import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
@@ -346,15 +347,7 @@ const TabItem = memo(function TabItem({
                       ? t("header.agentDone", { agent: agentLabel(agent.agent) })
                       : t("header.agentWorking", { agent: agentLabel(agent.agent) })
               }
-              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                agent.attention === "approval"
-                  ? "bg-rose-400 animate-pulse"
-                  : agent.state === "waiting"
-                    ? "bg-amber-400 animate-pulse"
-                    : agent.state === "done"
-                      ? "bg-sky-400"
-                      : "bg-emerald-400"
-              }`}
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${DOT_CLASS[dotKind(agent)]}`}
             />
           )}
           {tab.pane_count > 1 && (

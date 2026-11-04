@@ -74,11 +74,6 @@ static SNAPSHOT_CACHE: Lazy<Mutex<Option<(Instant, Arc<ProcSnapshot>)>>> =
 /// "once per ~3s poll", not once per session. Holding the SYSTEM lock while
 /// iterating ~thousands of processes costs ~10–40ms; calling it N times per
 /// poll (once per agent session) was the bottleneck that prompted this split.
-pub fn refresh_global() {
-    let mut sys = SYSTEM.lock();
-    sys.refresh_processes_specifics(ProcessRefreshKind::everything());
-}
-
 /// Point-in-time copy of everything a batch scan needs from the sysinfo
 /// cache: the live pid set, parent links, and each process's image name +
 /// joined command line. Built once per poll under the `SYSTEM` lock, which
@@ -265,16 +260,9 @@ pub fn process_infos(pids: &[u32]) -> Vec<ProcessInfo> {
 /// cache (so it must follow a `session_pids` call in the same poll). Used by
 /// agent detection to recognise node-based CLI launchers whose image name is
 /// just `node.exe`.
-pub fn process_cmdline(pid: u32) -> Option<(String, String)> {
-    let sys = SYSTEM.lock();
-    let p = sys.process(Pid::from_u32(pid))?;
-    Some((p.name().to_string(), join_cmdline(p.cmd())))
-}
-
-/// Same as `process_cmdline` but reads a caller-provided `ProcSnapshot`.
-/// Use this inside a batch built on `refresh_and_snapshot()` —
-/// `process_cmdline` would re-lock the `SYSTEM` mutex and deadlock against
-/// a caller still holding it (parking_lot Mutex is not reentrant).
+/// Reads a caller-provided `ProcSnapshot` (the only variant; the old direct
+/// form re-locked the `SYSTEM` mutex and deadlocked against a caller still
+/// holding it — parking_lot Mutex is not reentrant).
 pub fn process_cmdline_with_sys(sys: &ProcSnapshot, pid: u32) -> Option<(String, String)> {
     sys.cmdline.get(&pid).cloned()
 }

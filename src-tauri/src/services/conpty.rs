@@ -89,7 +89,6 @@ const PTY_SIGNAL_RESIZE_WINDOW: u16 = 8;
 const STARTF_USESTDHANDLES: u32 = 0x00000100;
 const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x00080000;
 const CREATE_UNICODE_ENVIRONMENT: u32 = 0x00000400;
-const STILL_ACTIVE: u32 = 259;
 const SYSTEM_CONSOLE_INFORMATION_CLASS: u32 = 132;
 
 #[repr(C)]
@@ -283,13 +282,6 @@ impl ConPty {
 
     pub fn process_id(&self) -> Option<u32> { self.child_pid }
 
-    pub fn is_conhost_alive(&self) -> bool {
-        self.conhost.as_ref().is_some_and(|h| {
-            let mut code: u32 = 0;
-            unsafe { let _ = GetExitCodeProcess(HANDLE(h.as_raw_handle()), &mut code); }
-            code == STILL_ACTIVE
-        })
-    }
 }
 
 impl Drop for ConPty {

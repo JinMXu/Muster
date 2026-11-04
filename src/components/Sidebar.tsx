@@ -7,20 +7,7 @@ import { IconFolder, IconPanelLeftClose, IconPlus, IconSettings, IconX } from ".
 import { useT } from "../lib/i18n/context";
 import AgentMiniBar from "./AgentMiniBar";
 import UsageMiniMeter from "./UsageMiniMeter";
-
-type DotKind = AgentState | "approval";
-
-/// Tailwind dot-class per kind — mirrors the colors used in `AgentMiniBar`.
-const DOT_CLASS: Record<DotKind, string> = {
-  approval: "bg-rose-400 animate-pulse",
-  working: "bg-emerald-400",
-  waiting: "bg-amber-400 animate-pulse",
-  done: "bg-sky-400",
-};
-
-function dotOf(r: LiveAgentStatus): DotKind {
-  return r.attention === "approval" ? "approval" : (r.state as AgentState);
-}
+import { DOT_CLASS, dotKind, type DotKind } from "../lib/agentColors";
 
 /// Compact number: 1493 → "1.5k".
 function fmtCount(n: number): string {
@@ -151,7 +138,7 @@ export default function Sidebar({
                 sessionIds
                   .map((id) => agentStates[id])
                   .filter((s): s is LiveAgentStatus => !!s)
-                  .map(dotOf),
+                  .map(dotKind),
               ),
             ];
             return (

@@ -5,14 +5,13 @@ import { useAllAgents, type AllAgentStatus } from "../hooks/useAllAgents";
 import { useT } from "../lib/i18n/context";
 import type { AgentAttention, AgentState, Uuid } from "../lib/types";
 import { IconTerminal, IconX } from "./icons";
+import { DOT_CLASS, dotKind, type DotKind } from "../lib/agentColors";
 
 /// Cross-window coding-agent overview capsule that lives in the left
 /// sidebar's footer. Click opens a small popover listing every detected agent
 /// across every window, sorted by attention (approval → done → waiting →
 /// working); click a row jumps the user to that agent's pane, in whichever
 /// window it lives. Hidden entirely when no agents are running.
-
-type DotKind = AgentState | "approval";
 
 /// Priority used to sort the popover: higher first.
 const PRIORITY: Record<DotKind, number> = {
@@ -21,20 +20,6 @@ const PRIORITY: Record<DotKind, number> = {
   done: 2,
   working: 1,
 };
-
-/// Tailwind dot-class per kind — mirrors the colors used in `Header.tsx`.
-const DOT_CLASS: Record<DotKind, string> = {
-  approval: "bg-rose-400 animate-pulse",
-  working: "bg-emerald-400",
-  waiting: "bg-amber-400 animate-pulse",
-  done: "bg-sky-400",
-};
-
-/// An approval prompt is more urgent than any state, and is tracked
-/// separately from `state` (the backend reports it as `waiting`).
-function dotKind(r: { state: AgentState; attention: AgentAttention | null }): DotKind {
-  return r.attention === "approval" ? "approval" : r.state;
-}
 
 export default function AgentMiniBar({
   open,

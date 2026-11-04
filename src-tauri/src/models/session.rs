@@ -157,9 +157,11 @@ pub struct TerminalSession {
     /// The terminal size the frontend has negotiated for this session. Kept
     /// regardless of whether the PTY exists yet: a restored session is
     /// spawned at a throwaway 80x24 during startup, and a `resize` that lands
-    /// *before* `spawn()` must still be applied once the PTY comes up — else
-    /// the ConPTY stays stuck at 80x24 while xterm renders full-size, which
-    /// breaks full-screen TUIs (e.g. claude code) on restored sessions.
+    /// *before* or *while* `spawn()` is running must still be applied once the
+    /// PTY comes up (`spawn()` reads it up front, then catches up after
+    /// publishing) — else the ConPTY stays stuck at 80x24 while xterm renders
+    /// full-size, which breaks full-screen TUIs (e.g. claude code) on
+    /// restored sessions.
     desired: Mutex<(u16, u16)>,
     /// Credit window for the PTY output pump (see `PtyFlow`).
     flow: Arc<PtyFlow>,
@@ -254,7 +256,44 @@ impl TerminalSession {
 
         let writer = conpty.take_writer()?;
         *self.input_tx.lock() = Some(spawn_input_writer(self.id, writer));
+        // Publish before the catch-up below so a concurrent `resize` from here
+        // on sees the PTY and signals it directly.
         *self.conpty.lock() = Some(conpty);
+
+        // Close the *during-spawn* window: a `resize` that landed between the
+        // `desired` read at the top of this fn and the publish above updated
+        // `desired` but found no PTY to signal — and nothing else re-applies
+        // it (the frontend only pushes sizes on fit / pane re-mount), so the
+        // PTY would stay stuck at the creation size forever. Track what was
+        // actually signaled, not the creation size: a resize landing between
+        // our read and our write supersedes ours, so re-read and re-signal
+        // until `desired` matches the last signal we sent (at most one extra
+        // signal per racing resize — converges as resizes quiesce). Breaks
+        // immediately when there is nothing to catch up on.
+        let mut applied = (cols, rows);
+        loop {
+            let want = *self.desired.lock();
+            if want == applied {
+                break;
+            }
+            // Bind the guard itself: a `let-else` temporary would drop it at
+            // the end of this statement, before the resize below runs.
+            let guard = self.conpty.lock();
+            let Some(conpty) = guard.as_ref() else { break };
+            match conpty.resize(want.0, want.1) {
+                Ok(()) => {
+                    log::info!(
+                        "session {} catch-up resize -> {}x{} (spawned at {cols}x{rows})",
+                        self.id, want.0, want.1
+                    );
+                    applied = want;
+                }
+                Err(e) => {
+                    log::warn!("pty catch-up resize failed (session {}): {e}", self.id);
+                    break;
+                }
+            }
+        }
 
         Ok(())
     }

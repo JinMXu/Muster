@@ -14,10 +14,11 @@
       {
         "label": "main",
         "title": "Muster",
-        "width": 1000,
-        "height": 680,
+        "width": 1400,
+        "height": 900,
         "minWidth": 720,
         "minHeight": 480,
+        "maximized": true,
         "decorations": false,
         "transparent": false,
         "resizable": true,

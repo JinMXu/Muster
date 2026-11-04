@@ -1,5 +1,38 @@
 use std::path::PathBuf;
 
+/// A file writer for backend logs (see `bootstrap`'s env_logger target).
+/// Writes to `<app_data_dir>/muster.log` so GUI diagnostics are readable
+/// without a console. Best-effort: returns a sink that appends a line per
+/// write.
+pub fn log_writer() -> Box<dyn std::io::Write + Send> {
+    let path = app_data_dir().join("muster.log");
+    let _ = std::fs::create_dir_all(app_data_dir());
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok();
+    Box::new(FileSink(std::sync::Mutex::new(file)))
+}
+
+struct FileSink(std::sync::Mutex<Option<std::fs::File>>);
+
+impl std::io::Write for FileSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(f) = self.0.lock().unwrap().as_mut() {
+            f.write_all(buf)?;
+            f.flush()?;
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(f) = self.0.lock().unwrap().as_mut() {
+            f.flush()?;
+        }
+        Ok(())
+    }
+}
+
 /// Snapshot store locations under the user's per-app data directory.
 pub fn app_data_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| dirs::config_dir().unwrap_or_default());

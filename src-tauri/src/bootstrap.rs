@@ -115,7 +115,15 @@ pub fn run() {
         }))
         .manage(shared)
         .setup(|app| {
-            let _ = env_logger::try_init();
+            // Info by default (the agent-notification chain logs its gate
+            // decisions there); RUST_LOG overrides, e.g. `RUST_LOG=debug`.
+            let _ = env_logger::Builder::from_env(
+                env_logger::Env::default().default_filter_or("info"),
+            )
+            .target(env_logger::Target::Pipe(Box::new(
+                crate::services::persist::log_writer(),
+            )))
+            .try_init();
 
             // Resolve the bundled OpenConsole.exe (from the Windows Terminal
             // project) that our manual ConPTY backend drives instead of the
@@ -405,13 +413,15 @@ fn spawn_main_window(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Build a Muster window with the same chrome settings as the "main" window
-/// in tauri.conf.json (frameless, fixed starter size). Shared by the
-/// secondary-window spawner and the main-window recreation path.
+/// in tauri.conf.json (frameless, opened maximized; the inner size is the
+/// restore-down fallback). Shared by the secondary-window spawner and the
+/// main-window recreation path.
 fn build_window(app: &AppHandle, label: &str) -> Result<(), String> {
     WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title("Muster")
-        .inner_size(1000.0, 680.0)
+        .inner_size(1400.0, 900.0)
         .min_inner_size(720.0, 480.0)
+        .maximized(true)
         .decorations(false)
         .build()
         .map_err(|e| e.to_string())?;
@@ -541,8 +551,9 @@ fn restore_secondary_windows(app: &AppHandle) {
         spawn_pending_async(app.clone(), label.clone(), s.clone());
         if let Err(e) = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
             .title("Muster")
-            .inner_size(1000.0, 680.0)
+            .inner_size(1400.0, 900.0)
             .min_inner_size(720.0, 480.0)
+            .maximized(true)
             .decorations(false)
             .build()
         {
@@ -619,7 +630,7 @@ pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>
     // Single session: spawn inline, identical to the old sequential path.
     if pending.len() == 1 {
         match pending[0].spawn(80, 24) {
-            Ok(()) => log::info!("spawn_pending: session {} spawned ok", pending[0].id),
+            Ok(()) => log::info!("spawn_pending: session {} spawned at 80x24 (real size arrives via resize_terminal)", pending[0].id),
             Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", pending[0].id, e),
         }
         return;
@@ -654,7 +665,7 @@ pub fn spawn_pending(_app: &AppHandle, _label: &str, state: &Arc<Mutex<AppState>
                 *slot = std::time::Instant::now() + std::time::Duration::from_millis(SPAWN_STAGGER_MS);
             }
             match session.spawn(80, 24) {
-                Ok(()) => log::info!("spawn_pending: session {} spawned ok", session.id),
+                Ok(()) => log::info!("spawn_pending: session {} spawned at 80x24 (real size arrives via resize_terminal)", session.id),
                 Err(e) => log::error!("spawn_pending: session {} spawn failed: {}", session.id, e),
             }
         }));

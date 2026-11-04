@@ -84,7 +84,10 @@ pub async fn resize_terminal(window: Window, state: State<'_, SharedState>, id: 
         g.sessions.get(&id).cloned()
     };
     if let Some(session) = session {
+        log::debug!("resize {id}: {cols}x{rows}");
         let _ = tokio::task::spawn_blocking(move || session.resize(cols, rows)).await;
+    } else {
+        log::debug!("resize {id}: session not found ({cols}x{rows}), dropped");
     }
     Ok(())
 }

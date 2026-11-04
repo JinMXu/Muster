@@ -19,6 +19,12 @@ interface Entry {
   /// metrics are rebuilt (the event that knocks xterm out of "at bottom"
   /// and makes it stop following streaming output).
   atBottom: boolean;
+  /// Set after the first real fit. Before it, xterm still sits at its
+  /// 80x24 spawn size while the restore-flushed buffer is pending — scroll
+  /// events fired by that transient reflow must not clear `atBottom`, or
+  /// the viewport stays stuck above the live prompt (the covered-input-box
+  /// bug on restored sessions).
+  fitted: boolean;
 }
 
 /// Terminal instance registry — the "parking lot" for xterm instances.
@@ -190,11 +196,73 @@ function resolveFontFamily(family: string): string {
 
 /// Store the font settings and re-apply them to every parked terminal.
 export function applyTerminalFont(font: { family: string; size: number; thicken: boolean }): void {
+  const metricsChanged =
+    currentFont.family !== font.family ||
+    currentFont.size !== font.size ||
+    currentFont.thicken !== font.thicken;
   currentFont = font;
   for (const entry of registry.values()) {
     entry.term.options.fontFamily = resolveFontFamily(font.family);
     entry.term.options.fontSize = font.size || DEFAULT_FONT_SIZE;
     entry.term.options.fontWeight = font.thicken ? 600 : 400;
+  }
+  // A font change re-measures the cell size: the same cols/rows then occupy
+  // more pixels than the pane, and the pane's `overflow-hidden` clips the
+  // surplus — the bottom rows, where full-screen TUIs (claude code) pin
+  // their input box. The container itself didn't change, so no
+  // ResizeObserver fires and nothing else corrects it; refit explicitly.
+  // (The settings load lands here AFTER the startup-restored panes mounted
+  // with module-default metrics — 13px regular vs the configured 14px
+  // thicken — which is the restored-session covered-input-box bug.)
+  if (metricsChanged) {
+    for (const id of registry.keys()) refitEntry(id);
+  }
+}
+
+/// Re-sync a parked terminal's scroll viewport after its DOM element was
+/// detached and re-inserted (tab switch, zoom, project switch), or after a
+/// resize rebuilt the scroll metrics.
+///
+/// While the element is detached, the browser destroys the
+/// `.xterm-viewport` scrolling box, resetting its scrollTop to 0 — but
+/// xterm's internal ydisp keeps pointing at the previous position (usually
+/// the bottom). Re-inserting the element does not restore scrollTop, and
+/// xterm only re-applies it lazily; any scroll event read in the meantime
+/// (a wheel tick, or one queued by the detach itself) is interpreted by
+/// xterm's Viewport as a giant upward scroll and slams the viewport to the
+/// top of the scrollback, after which the terminal no longer follows
+/// output. Force the viewport's cached metrics to be recomputed so it
+/// re-applies scrollTop from ydisp right now — wherever ydisp is, so a
+/// user who scrolled up stays put.
+export function resyncViewport(term: Terminal): void {
+  const viewport = (term as unknown as {
+    viewport?: { reset(): void; syncScrollArea(immediate?: boolean): void };
+  }).viewport;
+  if (!viewport) return;
+  viewport.reset(); // clear cached sizes/scrollTop so the sync isn't skipped
+  viewport.syncScrollArea(true); // immediate: re-apply scrollTop = ydisp * rowHeight
+}
+
+/// Re-fit one parked terminal after a non-container-driven metric change
+/// (font settings applied to already-mounted panes) and push the negotiated
+/// size to its PTY. Mirrors TerminalPane's ResizeObserver path: fit,
+/// resize_terminal, re-assert the viewport bottom so streaming output stays
+/// in view after the scroll metrics are rebuilt.
+function refitEntry(sessionId: string): void {
+  const entry = registry.get(sessionId);
+  if (!entry || !entry.term.element) return;
+  const wasAtBottom = entry.atBottom;
+  try {
+    entry.fit.fit();
+  } catch (_) {
+    return; // zero-sized container — nothing to compute against
+  }
+  entry.fitted = true;
+  const { cols, rows } = entry.term;
+  if (cols && rows) api.resizeTerminal(sessionId, cols, rows).catch(() => {});
+  if (wasAtBottom) {
+    resyncViewport(entry.term);
+    entry.term.scrollToBottom();
   }
 }
 
@@ -248,13 +316,16 @@ function create(sessionId: string): Entry {
     return true;
   });
 
-  const entry: Entry = { term, fit, search, atBottom: true };
+  const entry: Entry = { term, fit, search, atBottom: true, fitted: false };
 
   // Track whether the viewport is at the bottom so the pty:data write path
   // and the resize handler (in TerminalPane) know when to re-assert
   // following. onScroll fires with the new viewportY; comparing it to
   // baseY tells us if the user is pinned to the bottom or has scrolled up.
+  // Before the first fit, scroll events come from the spawn-size → real-size
+  // reflow of the restore-flushed buffer, not from the user — ignore them.
   term.onScroll((viewportY: number) => {
+    if (!entry.fitted) return;
     entry.atBottom = viewportY === term.buffer.active.baseY;
   });
 
@@ -370,6 +441,33 @@ export function acquire(sessionId: string): Entry {
 /// terminal was never created (e.g. a session that never had a pane).
 export function getSearchAddon(sessionId: string): SearchAddon | null {
   return registry.get(sessionId)?.search ?? null;
+}
+
+/// Session ids that currently own a live xterm instance — the iteration
+/// set for the screen-text push (see `screenPush`).
+export function screenSessionIds(): string[] {
+  return [...registry.keys()];
+}
+
+/// The visible viewport's text as logical lines (wrapped rows merged back
+/// together), the input for screen-level agent state detection. Mirrors
+/// kero's `term.Text()`: what the user sees, not the raw byte stream.
+export function screenText(sessionId: string): string | null {
+  const entry = registry.get(sessionId);
+  if (!entry) return null;
+  const buf = entry.term.buffer.active;
+  const parts: string[] = [];
+  for (let i = 0; i < entry.term.rows; i++) {
+    const line = buf.getLine(buf.viewportY + i);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (line.isWrapped && parts.length > 0) {
+      parts[parts.length - 1] += text;
+    } else {
+      parts.push(text);
+    }
+  }
+  return parts.join("\n") + "\n";
 }
 
 /// Dispose the terminal for a session and drop it from the registry.

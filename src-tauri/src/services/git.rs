@@ -83,7 +83,15 @@ impl GitStatusInfo {
 /// How long a cached `git status` result is trusted without any cheap
 /// signal changing. Working-tree-only edits (no index/HEAD movement) don't
 /// trip the fingerprint below, so they surface after this window.
-const STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
+///
+/// This is a staleness BACKSTOP, not the freshness signal: the frontend's
+/// fs-watcher refreshes go through `status_forced` and recompute
+/// immediately, while the 8s/30s polls hit the cache whenever the
+/// fingerprint is unchanged. The old 5s TTL expired before every 30s
+/// poll arrived, forcing the ~1s full recompute each time for identical
+/// results; 10 minutes bounds the worst case if an fs event is ever
+/// missed without making the polls pay for it.
+const STATUS_CACHE_TTL: Duration = Duration::from_secs(600);
 
 /// Cap on per-file line-stat patches computed per diff side. The Git panel
 /// renders at most 500 rows per section, so counting beyond that is invisible

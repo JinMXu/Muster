@@ -37,6 +37,15 @@ const MAX_SCROLLBACK_PENDING_BYTES: usize = 64 * 1024;
 /// queues without bound when a command floods output.
 const MAX_PTY_IN_FLIGHT: usize = 2 * 1024 * 1024;
 
+/// The `pty:data` event payload (see the read loop's flush). Field names
+/// match what the frontend's bindings expect.
+#[derive(serde::Serialize, Clone)]
+struct PtyDataEvent<'a> {
+    id: Uuid,
+    data: &'a str,
+}
+
+
 /// Credit-based flow control for one PTY. `claim` runs before an emit,
 /// `ack` when the frontend has consumed that output, and `wait_for_room`
 /// blocks the read pump while too much is outstanding.
@@ -342,10 +351,13 @@ impl TerminalSession {
                 // would leave phantom in-flight bytes forever.
                 let len = pending.len();
                 inner.flow.claim(len);
-                let payload = serde_json::json!({
-                    "id": session_id,
-                    "data": base64_encode(pending),
-                });
+                // A typed struct serializes once; the old `json!` built a
+                // Value tree that `emit_to` then serialized again (extra
+                // allocations on the per-keystroke flush path).
+                let payload = PtyDataEvent {
+                    id: session_id,
+                    data: &base64_encode(pending),
+                };
                 // A failed emit (window gone) will never be ACKed; return the
                 // credit so a still-running session can't wedge on it.
                 if app.emit_to(&label, "pty:data", payload).is_err() {
@@ -549,12 +561,18 @@ impl TerminalSession {
         // strips cleanly.
         self.capture_active.store(true, Ordering::Relaxed);
         let tail = self.scrollback_pending.lock().clone();
-        let mut lines: Vec<String> = self.scrollback.lock().iter().cloned().collect();
-        if !tail.is_empty() {
+        let ring = self.scrollback.lock();
+        // Clone only the requested tail. The old shape cloned the whole ring
+        // (hundreds of lines) and then split_off'd all but `max` of them —
+        // on the 3s agent-poll path.
+        let has_tail = !tail.is_empty();
+        let skip = (ring.len() + usize::from(has_tail)).saturating_sub(max);
+        let mut lines: Vec<String> =
+            ring.iter().skip(skip.min(ring.len())).cloned().collect();
+        if has_tail && skip <= ring.len() {
             lines.push(tail);
         }
-        let skip = lines.len().saturating_sub(max);
-        lines.split_off(skip)
+        lines
     }
 
     /// Whether a "waiting for input" notification was sent within the last

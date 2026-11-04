@@ -55,57 +55,23 @@ pub fn run() {
                     }
                 }
             }
-            for dir in &dirs {
-                main.lock().new_project(Some(dir.to_string()));
-                spawn_pending(app, "main", &main);
-                start_read_loops(app, "main", &main);
-                // If a command was specified, send it to the newly spawned session.
-                if let Some(ref command) = cmd {
-                    if let Some(session_id) = main.lock().projects.last().and_then(|p| p.tabs.last()).and_then(|t| {
-                        t.columns.first().and_then(|c| c.panes.first()).and_then(|p| {
-                            match &p.content {
-                                crate::models::pane::PaneContent::Session(id) => Some(*id),
-                                _ => None,
-                            }
-                        })
-                    }) {
-                        if let Some(session) = main.lock().sessions.get(&session_id) {
-                            session.send_text(&format!("{command}\r"));
-                        }
-                    }
-                }
-                if let Some(window) = app.get_webview_window("main") {
-                    let view = main.lock().view();
-                    let _ = window.emit("state-changed", view);
+            // Open dirs (or the cwd, when only a command was given) as
+            // project(s) and run the command. On a worker thread: this
+            // callback fires on the main thread, and `spawn_pending` costs
+            // 100ms-1s per restored PTY.
+            let mut open_dirs = dirs.clone();
+            if open_dirs.is_empty() && cmd.is_some() {
+                let dir = cwd.clone().unwrap_or_else(|| _cwd.clone());
+                if std::path::Path::new(&dir).is_dir() {
+                    open_dirs.push(dir);
                 }
             }
-            // If no directory was given but a command was, open the current
-            // working directory as a project and run the command in it.
-            if dirs.is_empty() && cmd.is_some() {
-                let dir = cwd.unwrap_or_else(|| _cwd.clone());
-                if std::path::Path::new(&dir).is_dir() {
-                    main.lock().new_project(Some(dir.clone()));
-                    spawn_pending(app, "main", &main);
-                    start_read_loops(app, "main", &main);
-                    if let Some(ref command) = cmd {
-                        if let Some(session_id) = main.lock().projects.last().and_then(|p| p.tabs.last()).and_then(|t| {
-                            t.columns.first().and_then(|c| c.panes.first()).and_then(|p| {
-                                match &p.content {
-                                    crate::models::pane::PaneContent::Session(id) => Some(*id),
-                                    _ => None,
-                                }
-                            })
-                        }) {
-                            if let Some(session) = main.lock().sessions.get(&session_id) {
-                                session.send_text(&format!("{command}\r"));
-                            }
-                        }
-                    }
-                    if let Some(window) = app.get_webview_window("main") {
-                        let view = main.lock().view();
-                        let _ = window.emit("state-changed", view);
-                    }
-                }
+            if !open_dirs.is_empty() {
+                std::thread::spawn({
+                    let app = app.clone();
+                    let main = main.clone();
+                    move || open_dirs_and_run(&app, &main, &open_dirs, cmd.as_deref())
+                });
             }
             if let Some(window) = app.get_webview_window("main") {
                 // The main window may be hidden (tray keep-alive); bring it back.
@@ -404,8 +370,13 @@ fn spawn_main_window(app: &AppHandle) -> Result<(), String> {
             g.new_project(None);
         }
     }
-    spawn_pending(app, "main", &main);
+    // Window first, PTYs second (async, the same shape as normal startup):
+    // the tray-reopen path runs this on the main thread, where a synchronous
+    // spawn_pending used to block painting for ~N×spawn latency. The
+    // webview's `init_read_loops` invoke attaches the output pumps once its
+    // listeners are registered.
     build_window(app, "main")?;
+    spawn_pending_async(app.clone(), "main".into(), main.clone());
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_focus();
     }
@@ -461,6 +432,41 @@ fn open_directory_as_project(app: &AppHandle, dir: &str) {
     if let Some(window) = app.get_webview_window("main") {
         let view = main.lock().view();
         let _ = window.emit("state-changed", view);
+    }
+}
+
+/// The single-instance callback's dir-open sequence (its two branches used
+/// to duplicate it verbatim): open each directory as a project, spawn its
+/// PTYs, optionally send a command into the freshly created session, and
+/// push the new state. Runs on a worker thread (see the call site).
+fn open_dirs_and_run(
+    app: &AppHandle,
+    main: &Arc<Mutex<AppState>>,
+    dirs: &[String],
+    command: Option<&str>,
+) {
+    for dir in dirs {
+        main.lock().new_project(Some(dir.clone()));
+        spawn_pending(app, "main", main);
+        start_read_loops(app, "main", main);
+        if let Some(command) = command {
+            if let Some(session_id) = main.lock().projects.last().and_then(|p| p.tabs.last()).and_then(|t| {
+                t.columns.first().and_then(|c| c.panes.first()).and_then(|p| {
+                    match &p.content {
+                        crate::models::pane::PaneContent::Session(id) => Some(*id),
+                        _ => None,
+                    }
+                })
+            }) {
+                if let Some(session) = main.lock().sessions.get(&session_id) {
+                    session.send_text(&format!("{command}\r"));
+                }
+            }
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            let view = main.lock().view();
+            let _ = window.emit("state-changed", view);
+        }
     }
 }
 

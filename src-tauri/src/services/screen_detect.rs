@@ -297,12 +297,23 @@ pub fn detect(kind: &str, input: &DetectInput) -> DetectResult {
         return idle_result();
     };
     let mut won: Option<&Rule> = None;
+    // Regions and their lowercased twins, memoized per spec: several rules
+    // share a region, and each used to re-extract it plus a full lowercase
+    // of the (multi-KB) screen text per rule.
+    let mut region_cache: std::collections::HashMap<&str, (String, String)> =
+        std::collections::HashMap::new();
     for rule in rules {
         if won.is_some_and(|w| w.priority >= rule.priority) {
             continue;
         }
-        let text = region(input, &rule.region);
-        if rule.matches(&text, &text.to_lowercase()) {
+        let (text, lower) = region_cache
+            .entry(rule.region.as_str())
+            .or_insert_with(|| {
+                let text = region(input, &rule.region);
+                let lower = text.to_lowercase();
+                (text, lower)
+            });
+        if rule.matches(text, lower) {
             won = Some(rule);
         }
     }

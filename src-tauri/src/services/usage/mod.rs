@@ -141,12 +141,10 @@ impl UsageStore {
         inner.opencode_ts = cursors.opencode_ts;
         inner.updated_at = now_ms();
 
-        let store = Self {
+        Self {
             inner: Mutex::new(inner),
             dir,
-        };
-        store.compact_at_startup();
-        store
+        }
     }
 
     fn compact_at_startup(&self) {
@@ -527,6 +525,12 @@ impl UsageStore {
 pub fn spawn_scanner(app: AppHandle) {
     let usage = app.state::<SharedState>().usage.clone();
     std::thread::spawn(move || {
+        // Ledger compaction (rewrite of events/runs/active) happens here,
+        // not in the constructor: it used to run on the main thread before
+        // the first window, adding a full-ledger clone + two file writes to
+        // startup. First on this thread, so it still strictly precedes the
+        // first scan's writes.
+        usage.compact_at_startup();
         let mut last = u64::MAX;
         loop {
             let (revision, updated_at) = usage.scan();

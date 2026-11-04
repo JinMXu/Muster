@@ -67,7 +67,9 @@ export default function App() {
   const [pasteWarning, setPasteWarning] = useState<{ text: string; sessionId: string } | null>(null);
   // Resizable sidebar widths (drag handles between the panels and main).
   const leftPanel = usePanelWidth("muster:leftSidebarWidth", 224, "left");
-  const rightPanel = usePanelWidth("muster:rightSidebarWidth", 256, "right");
+  // Right sidebar: min 260 — below that the caption buttons stop fitting
+  // next to even icon-only tab chips.
+  const rightPanel = usePanelWidth("muster:rightSidebarWidth", 256, "right", 260);
 
   // Settings (theme, fonts, editor options) live in settingsStore: loaded
   // once here, applied there, reloaded when the Settings modal closes.

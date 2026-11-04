@@ -33,6 +33,9 @@ export default function RightSidebar({
 }) {
   const [tab, setTab] = useState<RightPanel>(state?.panel_tab ?? "files");
   const { t } = useT();
+  // Narrow panel: chips drop their labels (tooltips carry the names) so the
+  // top bar still fits beside the caption buttons.
+  const compact = width < 360;
   useEffect(() => {
     if (state?.panel_tab) setTab(state.panel_tab);
   }, [state?.panel_tab]);
@@ -43,9 +46,9 @@ export default function RightSidebar({
       style={{ width }}
     >
       <div className="h-9 flex items-center flex-shrink-0 pl-2" data-tauri-drag-region>
-        <Tab active={tab === "info"} onClick={() => api.togglePanel("info")} icon={<IconInfo size={14} />} label={t("rightSidebar.info")} />
-        <Tab active={tab === "files"} onClick={() => api.togglePanel("files")} icon={<IconFolder size={14} />} label={t("rightSidebar.files")} />
-        <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={14} />} label={t("rightSidebar.git")} />
+        <Tab active={tab === "info"} onClick={() => api.togglePanel("info")} icon={<IconInfo size={14} />} label={t("rightSidebar.info")} compact={compact} />
+        <Tab active={tab === "files"} onClick={() => api.togglePanel("files")} icon={<IconFolder size={14} />} label={t("rightSidebar.files")} compact={compact} />
+        <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={14} />} label={t("rightSidebar.git")} compact={compact} />
         <div className="flex-1 self-stretch" data-tauri-drag-region />
         <button
           onClick={onToggle}
@@ -76,24 +79,29 @@ function Tab({
   onClick,
   icon,
   label,
+  compact,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  /// Narrow panel: icon-only chip; the label rides the tooltip.
+  compact?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       title={label}
-      className={`h-6 px-2 rounded-md ui-fs-xs flex items-center gap-1.5 flex-shrink-0 transition-colors duration-muster ease-muster ${
+      className={`rounded-md ui-fs-xs flex items-center gap-1.5 flex-shrink-0 transition-colors duration-muster ease-muster ${
+        compact ? "px-1.5" : "px-2"
+      } h-6 ${
         active
           ? "bg-muster-selected text-muster-fg"
           : "text-muster-muted hover:bg-muster-hover hover:text-muster-fg"
       }`}
     >
       <span className={`flex items-center ${active ? "text-muster-accent" : ""}`}>{icon}</span>
-      <span>{label}</span>
+      {!compact && <span>{label}</span>}
     </button>
   );
 }

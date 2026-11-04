@@ -22,3 +22,6 @@ Thumbs.db
 
 # Local research notes, not part of the app
 _oc_research/
+
+# ZCode local session dir
+.zcode/

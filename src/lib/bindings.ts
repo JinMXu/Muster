@@ -57,7 +57,7 @@ export const commands = {
 	 *  main thread would stall webview IPC (and with it xterm's write
 	 *  callbacks, mangling TUI redraws) every time a push contends with a poll.
 	 */
-	setSessionScreen: (id: string, text: string) => __TAURI_INVOKE<null>("set_session_screen", { id, text }),
+	setSessionScreen: (id: string, text: string, diag: string | null) => __TAURI_INVOKE<null>("set_session_screen", { id, text, diag }),
 	/**
 	 *  Current agent detection for every session (all windows), read straight
 	 *  from the poller's cache — an on-demand alternative to waiting for the

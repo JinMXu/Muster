@@ -470,6 +470,83 @@ export function screenText(sessionId: string): string | null {
   return parts.join("\n") + "\n";
 }
 
+/// One-line viewport snapshot for the screen-push log — the state the user's
+/// eyes see alongside the text they see. Temporary bug-hunt instrumentation
+/// for the restored-session covered-input-box report: `vp` far from `base`
+/// while `len` grows means the viewport stopped following output; `buf=alt`
+/// means a full-screen TUI's alternate screen is active. The px metrics
+/// (canvas/screen/element/parent) split a stale renderer from a stale
+/// buffer: with the buffer text complete but pixels missing below row N,
+/// a canvas height far below `rows * cellHeight` pins the renderer as the
+/// layer that skipped the resize.
+export function screenDiag(sessionId: string): string | null {
+  const entry = registry.get(sessionId);
+  if (!entry) return null;
+  const buf = entry.term.buffer.active;
+  const el = entry.term.element;
+  const screen = el?.querySelector(".xterm-screen");
+  const canvas = el?.querySelector("canvas");
+  const viewport = el?.querySelector(".xterm-viewport");
+  // The renderer's own idea of the canvas size (xterm internal); compared
+  // against the DOM canvas it reveals whether the dimension change was
+  // dropped at the RenderService level or at the DOM level.
+  const dims = (
+    entry.term as unknown as {
+      _core?: {
+        _renderService?: {
+          dimensions?: {
+            css?: {
+              canvas?: { width?: number; height?: number };
+              cell?: { height?: number };
+            };
+          };
+        };
+      };
+    }
+  )._core?._renderService?.dimensions?.css;
+  // The renderer pause state (RenderService._isPaused): while paused,
+  // refreshRows drops requests and canvas resizes defer to a task that only
+  // flushes when the IntersectionObserver reports the terminal visible
+  // again. A terminal stuck paused with a stale canvas is exactly the
+  // "buffer text complete, pixels missing" shape.
+  const rs = (
+    entry.term as unknown as {
+      _core?: {
+        _renderService?: {
+          _isPaused?: boolean;
+          _needsFullRefresh?: boolean;
+        };
+        _charSizeService?: { width?: number; height?: number; hasValidSize?: boolean };
+      };
+    }
+  )._core;
+  const rect = (n?: Element | null) => {
+    const r = n?.getBoundingClientRect();
+    return r ? `${Math.round(r.width)}x${Math.round(r.height)}` : "?";
+  };
+  return [
+    `vp=${buf.viewportY}`,
+    `base=${buf.baseY}`,
+    `len=${buf.length}`,
+    `cursor=${buf.cursorY},${buf.cursorX}`,
+    `rows=${entry.term.rows}`,
+    `cols=${entry.term.cols}`,
+    `atBottom=${entry.atBottom}`,
+    `fitted=${entry.fitted}`,
+    `buf=${buf.type}`,
+    `cv=${canvas ? `${(canvas as HTMLCanvasElement).width}x${(canvas as HTMLCanvasElement).height}` : "?"}`,
+    `cvCss=${rect(canvas)}`,
+    `screen=${rect(screen)}`,
+    `el=${rect(el)}`,
+    `parent=${rect(el?.parentElement)}`,
+    `vpEl=${viewport ? `${(viewport as HTMLElement).clientWidth}x${(viewport as HTMLElement).clientHeight} scroll=${Math.round((viewport as HTMLElement).scrollTop)}/${(viewport as HTMLElement).scrollHeight}` : "?"}`,
+    `rndr=${dims?.canvas?.width != null && dims?.canvas?.height != null ? `${Math.round(dims.canvas.width)}x${Math.round(dims.canvas.height)} cell=${dims.cell?.height?.toFixed(1)}` : "?"}`,
+    `paused=${rs?._renderService?._isPaused}`,
+    `needsFull=${rs?._renderService?._needsFullRefresh}`,
+    `char=${rs?._charSizeService?.width}x${rs?._charSizeService?.height}`,
+  ].join(" ");
+}
+
 /// Dispose the terminal for a session and drop it from the registry.
 function release(sessionId: string): void {
   ptyAcks.forget(sessionId);

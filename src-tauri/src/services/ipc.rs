@@ -86,11 +86,26 @@ pub fn start(app: AppHandle) {
     log::info!("ipc: listening on 127.0.0.1:{port}");
 
     std::thread::spawn(move || {
+        // Connection cap: each connection parks a thread (a `watch`/`wait`
+        // verb for up to minutes), so an unbounded accept loop lets any
+        // local process pin thousands of threads. Beyond the cap the stream
+        // is dropped (closed) immediately.
+        const MAX_CONNECTIONS: usize = 32;
+        let live = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
+            if live.load(std::sync::atomic::Ordering::Relaxed) >= MAX_CONNECTIONS {
+                log::warn!("ipc: connection cap reached, dropping client");
+                continue;
+            }
+            live.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let app = app.clone();
             let token = token.clone();
-            std::thread::spawn(move || handle_connection(stream, &app, &token));
+            let live = live.clone();
+            std::thread::spawn(move || {
+                handle_connection(stream, &app, &token);
+                live.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            });
         }
     });
 }
@@ -104,15 +119,35 @@ fn write_info(port: u16, token: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, json!({ "port": port, "token": token }).to_string())?;
-    // The token grants control over this window's sessions. Restrict the
-    // file to the current user (no inherited ACEs) so another local account
-    // can't read it on shared/redirected-profile setups.
+    // The token grants control over this window's sessions, so the file must
+    // never exist with default (inheritable) ACLs: write it to a temp name,
+    // harden it to the current user only, then rename into place. The old
+    // write-then-restrict order left a window where the file was readable by
+    // inherited ACEs on shared/redirected-profile setups.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json!({ "port": port, "token": token }).to_string())?;
     #[cfg(windows)]
-    if let Err(e) = restrict_to_current_user(&path) {
-        log::warn!("ipc: failed to restrict permissions on {}: {e}", path.display());
+    {
+        if let Err(e) = restrict_to_current_user(&tmp) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(std::io::Error::other(e));
+        }
     }
+    std::fs::rename(&tmp, &path)?;
     Ok(())
+}
+
+/// Constant-time token comparison: `!=` short-circuits on the first
+/// differing byte, leaking prefix-match length through timing to a local
+/// caller with nothing better to do than measure. The xor fold compares
+/// every byte regardless (length mismatch folds into the same accumulator).
+fn token_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let mut diff = (a.len() != b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
 }
 
 /// Replace `path`'s DACL with a single full-control ACE for the current user
@@ -228,10 +263,17 @@ struct Args {
 
 fn handle_connection(mut stream: TcpStream, app: &AppHandle, token: &str) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    // Overall deadline for the request phase. The 30s read timeout above is
+    // per `read()`, so a client trickling one byte at a time could otherwise
+    // hold this thread forever (slowloris) — a cap across reads closes that.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
     let mut buf = Vec::with_capacity(1024);
     let mut byte = [0u8; 1];
     // Read until newline, capping the total size.
     loop {
+        if std::time::Instant::now() > deadline {
+            return;
+        }
         match stream.read(&mut byte) {
             Ok(0) => {
                 write_response(&stream, 0, Err("empty request".into()));
@@ -258,7 +300,7 @@ fn handle_connection(mut stream: TcpStream, app: &AppHandle, token: &str) {
             return;
         }
     };
-    if req.token != token {
+    if !token_eq(&req.token, token) {
         write_response(&stream, req.id, Err("unauthorized".into()));
         return;
     }

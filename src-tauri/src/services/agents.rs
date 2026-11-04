@@ -448,8 +448,16 @@ fn is_install_path(t: &str) -> bool {
 fn launch_command(cmd: &str, name: &str) -> Option<String> {
     let tokens = cmd_tokens(cmd);
     let Some(&first) = tokens.first() else {
-        return (!name.is_empty()).then(|| name.to_string());
+        return (!name.is_empty() && replay_safe(name)).then(|| name.to_string());
     };
+    // The persisted command is replayed verbatim into the user's shell (see
+    // `restart_session_agent`); `quote_arg` only handles whitespace, so a
+    // token like `a.js;calc.exe` would ride along as a second statement on
+    // click. Paths and package names never need more than this set — drop
+    // anything that carries shell metacharacters.
+    if !replay_safe(first) {
+        return (!name.is_empty() && replay_safe(name)).then(|| name.to_string());
+    }
     let exe = executable_stem(first);
     let second = match exe.as_str() {
         "python" | "python3" | "py" => tokens
@@ -469,7 +477,10 @@ fn launch_command(cmd: &str, name: &str) -> Option<String> {
                 )
         }),
         _ => None,
-    };
+    }
+    // Same metacharacter gate for the script/package token as for `first`
+    // (see the comment above).
+    .filter(|t| replay_safe(t));
     let mut out = quote_arg(first);
     if let Some(extra) = second {
         out.push(' ');
@@ -477,6 +488,18 @@ fn launch_command(cmd: &str, name: &str) -> Option<String> {
     }
     let out: String = out.chars().take(512).collect();
     (!out.trim().is_empty()).then_some(out)
+}
+
+/// A token the persisted launch command may safely replay into the user's
+/// shell: plain path/package characters only. Everything else — `;` `|` `&`
+/// `$` backtick `%` `!` `^` `(` — could smuggle a second statement or an
+/// expansion past the whitespace-only quoting and execute on the
+/// "re-run agent" click.
+fn replay_safe(tok: &str) -> bool {
+    !tok.is_empty()
+        && tok.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '\\' | '/' | ':' | '.' | '_' | '-' | '@' | ' ')
+        })
 }
 
 fn is_script_token(t: &str) -> bool {
@@ -1267,6 +1290,38 @@ mod tests {
             launch_command("", "claude.exe").as_deref(),
             Some("claude.exe")
         );
+    }
+
+    #[test]
+    fn launch_command_drops_shell_metacharacters() {
+        // A hostile process shapes its cmdline so the persisted script token
+        // carries a second statement; the gate must drop it (leaving the
+        // bare interpreter) instead of replaying it on the re-run click.
+        assert_eq!(
+            launch_command(r"node C:\x\a.js;calc.exe", "node.exe").as_deref(),
+            Some("node")
+        );
+        // Statement separators, pipes, expansions — all rejected, as the
+        // first token (falls back to the process name) or the second
+        // (omitted entirely).
+        assert_eq!(
+            launch_command(r"C:\x\a.js&&calc.exe node b.js", "weird.exe").as_deref(),
+            Some("weird.exe")
+        );
+        assert_eq!(
+            launch_command("npx @qwen-code/qwen | wipe", "node.exe").as_deref(),
+            Some("npx @qwen-code/qwen")
+        );
+        assert_eq!(
+            launch_command("node $(whoami).js", "node.exe").as_deref(),
+            Some("node")
+        );
+        // Scoped packages and plain paths survive the gate.
+        assert!(replay_safe(r"C:\Users\x\agent.js"));
+        assert!(replay_safe("@github/copilot"));
+        assert!(!replay_safe("a.js;calc.exe"));
+        assert!(!replay_safe("a%PATH%b"));
+        assert!(!replay_safe(""));
     }
 
     #[test]

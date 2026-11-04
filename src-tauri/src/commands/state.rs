@@ -137,12 +137,9 @@ pub async fn set_session_screen(
         if let Some(session) = g.sessions.get(&id) {
             let first = session.screen_text().is_none();
             if first {
-                log::info!(
-                    "screen push {id}: {} chars | first 160: {:?} | last 80: {:?}",
-                    text.len(),
-                    text.chars().take(160).collect::<String>(),
-                    text.chars().rev().take(80).collect::<String>(),
-                );
+                // Length only — the rendered screen routinely carries tokens
+                // and secrets, and muster.log persists unrotated.
+                log::info!("screen push {id}: first push, {} chars", text.len());
             }
             session.set_screen_text(text);
             return Ok(());

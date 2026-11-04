@@ -11,13 +11,18 @@ pub async fn open_file(window: Window, state: State<'_, SharedState>, path: Stri
     // A late invoke from an already-destroyed window resolves to null, as
     // before (async commands borrowing `State` must return a Result).
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
-    // The disk read (up to 5 MiB) happens inside `open_file`; run it on the
-    // blocking pool so it doesn't stall the async runtime / main thread.
+    // Construct the tab on the blocking pool FIRST (its disk read is up to
+    // 5 MiB), then take the AppState lock only to insert it — the lock held
+    // across the read stalled every sync command of the window (`send_text`
+    // per keystroke included) for the read's duration.
     let s2 = s.clone();
-    let id = tokio::task::spawn_blocking(move || s2.lock().open_file(&path, to_side))
-        .await
-        .ok()
-        .flatten();
+    let id = tokio::task::spawn_blocking(move || {
+        let file = std::sync::Arc::new(crate::models::file::FileTab::open(&path));
+        s2.lock().open_file(file, to_side)
+    })
+    .await
+    .ok()
+    .flatten();
     emit_state(&window, &s);
     Ok(id)
 }
@@ -39,10 +44,14 @@ pub async fn open_file_at(window: Window, state: State<'_, SharedState>, path: S
     }
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
     let s2 = s.clone();
-    let id = tokio::task::spawn_blocking(move || s2.lock().open_file(&path, false))
-        .await
-        .ok()
-        .flatten();
+    // Construct on the pool, insert under a brief lock (see `open_file`).
+    let id = tokio::task::spawn_blocking(move || {
+        let file = std::sync::Arc::new(crate::models::file::FileTab::open(&path));
+        s2.lock().open_file(file, false)
+    })
+    .await
+    .ok()
+    .flatten();
     emit_state(&window, &s);
     if let Some(id) = id {
         let _ = window.emit("file-reveal", serde_json::json!({ "id": id, "line": line }));
@@ -127,13 +136,17 @@ pub fn project_dirty_files(window: Window, state: State<SharedState>, project_id
 #[specta::specta]
 pub async fn open_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String, staged: bool) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
-    // `open_diff` loads both sides via git2 synchronously; run it on the
-    // blocking pool so repo I/O doesn't stall the async runtime.
+    // The git2 reload runs in DiffTab::new on the blocking pool; the AppState
+    // lock is taken only for the insert (see `open_file`).
+    let lang = crate::services::i18n::effective(&state.settings.lock().language);
     let s2 = s.clone();
-    let id = tokio::task::spawn_blocking(move || s2.lock().open_diff(&repo_root, &path, staged))
-        .await
-        .ok()
-        .flatten();
+    let id = tokio::task::spawn_blocking(move || {
+        let diff = std::sync::Arc::new(crate::models::diff::DiffTab::new(repo_root, path, staged, &lang));
+        s2.lock().open_diff(diff)
+    })
+    .await
+    .ok()
+    .flatten();
     emit_state(&window, &s);
     Ok(id)
 }
@@ -142,13 +155,15 @@ pub async fn open_diff(window: Window, state: State<'_, SharedState>, repo_root:
 #[specta::specta]
 pub async fn open_commit_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String, old_rev: String, new_rev: String) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
-    // git2 diff loading happens inside `open_commit_diff`; blocking pool, as
-    // with `open_diff`.
+    let lang = crate::services::i18n::effective(&state.settings.lock().language);
     let s2 = s.clone();
-    let id = tokio::task::spawn_blocking(move || s2.lock().open_commit_diff(&repo_root, &path, &old_rev, &new_rev))
-        .await
-        .ok()
-        .flatten();
+    let id = tokio::task::spawn_blocking(move || {
+        let diff = std::sync::Arc::new(crate::models::diff::DiffTab::with_revs(repo_root, path, old_rev, new_rev, &lang));
+        s2.lock().open_commit_diff(diff)
+    })
+    .await
+    .ok()
+    .flatten();
     emit_state(&window, &s);
     Ok(id)
 }
@@ -176,11 +191,15 @@ pub async fn reload_diff(window: Window, state: State<'_, SharedState>, id: Uuid
 #[specta::specta]
 pub async fn open_workdir_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
+    let lang = crate::services::i18n::effective(&state.settings.lock().language);
     let s2 = s.clone();
-    let id = tokio::task::spawn_blocking(move || s2.lock().open_workdir_diff(&repo_root, &path))
-        .await
-        .ok()
-        .flatten();
+    let id = tokio::task::spawn_blocking(move || {
+        let diff = std::sync::Arc::new(crate::models::diff::DiffTab::new_workdir(repo_root, path, &lang));
+        s2.lock().open_workdir_diff(diff)
+    })
+    .await
+    .ok()
+    .flatten();
     emit_state(&window, &s);
     Ok(id)
 }
@@ -190,11 +209,15 @@ pub async fn open_workdir_diff(window: Window, state: State<'_, SharedState>, re
 #[specta::specta]
 pub async fn open_checkpoint_diff(window: Window, state: State<'_, SharedState>, repo_root: String, path: String, old_rev: String) -> Result<Option<Uuid>, String> {
     let Some(s) = state.get_label(window.label()) else { return Ok(None) };
+    let lang = crate::services::i18n::effective(&state.settings.lock().language);
     let s2 = s.clone();
-    let id = tokio::task::spawn_blocking(move || s2.lock().open_checkpoint_diff(&repo_root, &path, &old_rev))
-        .await
-        .ok()
-        .flatten();
+    let id = tokio::task::spawn_blocking(move || {
+        let diff = std::sync::Arc::new(crate::models::diff::DiffTab::new_checkpoint(repo_root, path, old_rev, &lang));
+        s2.lock().open_checkpoint_diff(diff)
+    })
+    .await
+    .ok()
+    .flatten();
     emit_state(&window, &s);
     Ok(id)
 }

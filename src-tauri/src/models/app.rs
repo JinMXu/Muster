@@ -778,9 +778,14 @@ impl AppState {
 
     // ---- Files / Diffs -----------------------------------------------------
 
-    pub fn open_file(&mut self, path: &str, to_side: bool) -> Option<Uuid> {
+    /// Registers an already-constructed file tab in the tree (map + pane).
+    /// The construction — `FileTab::open`'s disk read — happens on the
+    /// caller's blocking pool BEFORE this, so this lock is only held for
+    /// map/pane work, never for I/O (see commands::editor: the old shape
+    /// held the AppState lock across the read, stalling every sync command
+    /// of the window, `send_text` included, for its duration).
+    pub fn open_file(&mut self, file: Arc<FileTab>, to_side: bool) -> Option<Uuid> {
         self.bump();
-        let file = Arc::new(FileTab::open(path));
         let id = file.id;
 
         let project_id = self.selected_project_id?;
@@ -890,10 +895,11 @@ impl AppState {
         out
     }
 
-    pub fn open_diff(&mut self, repo_root: &str, path: &str, staged: bool) -> Option<Uuid> {
+    /// Registers an already-constructed diff tab; the constructor's git2
+    /// reload ran on the caller's blocking pool (see `open_file` for why the
+    /// lock must not span it).
+    pub fn open_diff(&mut self, diff: Arc<DiffTab>) -> Option<Uuid> {
         self.bump();
-        let lang = crate::services::i18n::effective(&self.settings.lock().language);
-        let diff = Arc::new(DiffTab::new(repo_root.to_string(), path.to_string(), staged, &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));
@@ -904,10 +910,8 @@ impl AppState {
     /// Open a diff of `path` between two arbitrary commits (empty rev = the
     /// file didn't exist on that side). Appended as a new pane/tab like the
     /// working-tree diffs.
-    pub fn open_commit_diff(&mut self, repo_root: &str, path: &str, old_rev: &str, new_rev: &str) -> Option<Uuid> {
+    pub fn open_commit_diff(&mut self, diff: Arc<DiffTab>) -> Option<Uuid> {
         self.bump();
-        let lang = crate::services::i18n::effective(&self.settings.lock().language);
-        let diff = Arc::new(DiffTab::with_revs(repo_root.to_string(), path.to_string(), old_rev.to_string(), new_rev.to_string(), &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));
@@ -916,10 +920,8 @@ impl AppState {
     }
 
     /// Open a diff of `path` against its HEAD version (new side = worktree).
-    pub fn open_workdir_diff(&mut self, repo_root: &str, path: &str) -> Option<Uuid> {
+    pub fn open_workdir_diff(&mut self, diff: Arc<DiffTab>) -> Option<Uuid> {
         self.bump();
-        let lang = crate::services::i18n::effective(&self.settings.lock().language);
-        let diff = Arc::new(DiffTab::new_workdir(repo_root.to_string(), path.to_string(), &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));
@@ -929,10 +931,8 @@ impl AppState {
 
     /// Open a diff of `path` between `old_rev` and the current worktree
     /// (the checkpoint panel's "changes since checkpoint" view).
-    pub fn open_checkpoint_diff(&mut self, repo_root: &str, path: &str, old_rev: &str) -> Option<Uuid> {
+    pub fn open_checkpoint_diff(&mut self, diff: Arc<DiffTab>) -> Option<Uuid> {
         self.bump();
-        let lang = crate::services::i18n::effective(&self.settings.lock().language);
-        let diff = Arc::new(DiffTab::new_checkpoint(repo_root.to_string(), path.to_string(), old_rev.to_string(), &lang));
         let id = diff.id;
         let project_id = self.selected_project_id?;
         self.append_tab(project_id, PaneContent::Diff(id));

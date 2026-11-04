@@ -116,6 +116,42 @@ pub fn list_all_sessions(window: Window, state: State<SharedState>) -> Vec<Sessi
         .unwrap_or_default()
 }
 
+/// The frontend's periodic push of a session's visible screen text (kero's
+/// `term.Text()`), the input for screen-level agent state detection (see
+/// `services::screen_detect`). Absent sessions are ignored: a push may land
+/// just after its pane closed.
+///
+/// `async` on purpose: sync commands run on the main thread, and this one
+/// waits on the AppState lock the agent poller also holds — blocking the
+/// main thread would stall webview IPC (and with it xterm's write
+/// callbacks, mangling TUI redraws) every time a push contends with a poll.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_session_screen(
+    state: State<'_, SharedState>,
+    id: Uuid,
+    text: String,
+) -> Result<(), String> {
+    for (_, s) in state.all() {
+        let g = s.lock();
+        if let Some(session) = g.sessions.get(&id) {
+            let first = session.screen_text().is_none();
+            if first {
+                log::info!(
+                    "screen push {id}: {} chars | first 160: {:?} | last 80: {:?}",
+                    text.len(),
+                    text.chars().take(160).collect::<String>(),
+                    text.chars().rev().take(80).collect::<String>(),
+                );
+            }
+            session.set_screen_text(text);
+            return Ok(());
+        }
+    }
+    log::debug!("screen push {id}: session not found, dropped");
+    Ok(())
+}
+
 /// Current agent detection for every session (all windows), read straight
 /// from the poller's cache — an on-demand alternative to waiting for the
 /// next `agent-status-changed` push. Consumed by the command palette and the

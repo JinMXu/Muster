@@ -145,6 +145,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             state::theme_colors,
             state::session_info,
             state::list_all_sessions,
+            state::set_session_screen,
             state::agent_status_snapshot,
             state::file_info,
             state::diff_info,

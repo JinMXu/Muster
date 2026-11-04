@@ -1,0 +1,13 @@
+ ▐▛███▛█   Claude Code v2.1.304
+▝▜██████▀  Opus 5.5 (1M context) with medium effort · Claude Max
+ ▝▝   ▝▝   ~/dev
+
+
+❯ First think briefly, then use the Bash tool to run exactly: date > /tmp/kero-probe-date.txt
+
+✢ Osmosing…
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · esc to interrupt · ← 1 agent

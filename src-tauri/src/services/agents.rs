@@ -3,7 +3,9 @@
 //! waiting for input, or have finished without the user looking yet. A
 //! background loop refreshes the statuses every few seconds, emits
 //! `agent-status-changed` events to each window, and raises a system
-//! notification when an agent turns waiting or finishes.
+//! notification when an agent finishes, or hits an approval prompt that
+//! needs the user to act. Plain idle-prompt waiting never notifies — the
+//! UI dots carry that state instead.
 //!
 //! Status is a three-state model:
 //! - `working` — agent process alive, produced PTY output recently;
@@ -86,6 +88,39 @@ impl AgentKind {
         AgentKind::Comate,
     ];
 
+    /// Serde key of the kind (snake_case, as specta serializes it) — the
+    /// name the screen-detect manifests are looked up by.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentKind::Opencode => "opencode",
+            AgentKind::ClaudeCode => "claude_code",
+            AgentKind::Codex => "codex",
+            AgentKind::KimiCode => "kimi_code",
+            AgentKind::Aider => "aider",
+            AgentKind::Gemini => "gemini",
+            AgentKind::Goose => "goose",
+            AgentKind::Atomcode => "atomcode",
+            AgentKind::Copilot => "copilot",
+            AgentKind::Cursor => "cursor",
+            AgentKind::Kiro => "kiro",
+            AgentKind::Amp => "amp",
+            AgentKind::Droid => "droid",
+            AgentKind::Crush => "crush",
+            AgentKind::Cline => "cline",
+            AgentKind::ContinueCli => "continue_cli",
+            AgentKind::Kilo => "kilo",
+            AgentKind::Grok => "grok",
+            AgentKind::OpenHands => "open_hands",
+            AgentKind::Pi => "pi",
+            AgentKind::Vibe => "vibe",
+            AgentKind::Qwen => "qwen",
+            AgentKind::Qoder => "qoder",
+            AgentKind::Trae => "trae",
+            AgentKind::CodeBuddy => "code_buddy",
+            AgentKind::Comate => "comate",
+        }
+    }
+
     /// Human-readable display name. Agent identifiers are brand names, so
     /// they are intentionally not translated.
     pub fn label(self) -> &'static str {
@@ -152,10 +187,17 @@ pub struct AgentCache {
     pub statuses: HashMap<Uuid, AgentStatus>,
 }
 
-/// A session stops being "working" after this much output silence.
-const WAITING_AFTER: Duration = Duration::from_secs(10);
+/// A session stops being "working" after this much output silence. Long
+/// enough that an agent thinking through a slow model call or running a
+/// quiet tool doesn't read as "needs input" — those produce 10-30s gaps
+/// that would otherwise toast on every pause.
+const WAITING_AFTER: Duration = Duration::from_secs(30);
 /// Notify at most once per session per minute about a waiting agent.
 const NOTIFY_COOLDOWN: Duration = Duration::from_secs(60);
+/// Approval notifications get their own, much shorter cooldown: they are
+/// the urgent case and must stay timely, but a tail that keeps matching the
+/// approval phrases while output flaps must not re-toast every poll.
+const APPROVAL_NOTIFY_COOLDOWN: Duration = Duration::from_secs(10);
 /// No system notifications during the launch window. Restored sessions spawn
 /// fresh shells and their first status transitions carry no signal — this
 /// keeps a restart from ever opening with a burst of agent pings (mirrors
@@ -191,7 +233,11 @@ const MARKERS: &[(AgentKind, &[&str])] = &[
     (AgentKind::Kilo, &["kilo", "kilocode", "@kilocode"]),
     (AgentKind::Grok, &["grok", "grok-cli"]),
     (AgentKind::OpenHands, &["openhands", "openhands-cli"]),
-    (AgentKind::Pi, &["pi"]),
+    // Pi ships as `@earendil-works/pi-coding-agent`: its launcher is a
+    // plain `cli.js` under node (no `pi` anywhere in the image name or the
+    // script file), so the npm package directory is the only signal — same
+    // trick as Qwen's `@qwen-code` scope.
+    (AgentKind::Pi, &["pi", "pi-coding-agent"]),
     (AgentKind::Vibe, &["vibe", "mistral-vibe"]),
     (AgentKind::Qwen, &["qwen", "qwen-code", "@qwen-code"]),
     (AgentKind::Qoder, &["qoder"]),
@@ -497,15 +543,31 @@ fn approval_needed(lines: &[String]) -> bool {
 
 /// Spawn the background poll loop. Runs for the app's lifetime; every
 /// `POLL_INTERVAL` recomputes every window's sessions, diffs against the
-/// cache, emits changes per window, and sends throttled notifications for
-/// agents that turned waiting.
+/// cache, emits changes per window, and raises the finish/approval
+/// notifications.
 pub fn spawn_poll_loop(app: AppHandle) {
     std::thread::spawn(move || {
         let started = std::time::Instant::now();
         loop {
             std::thread::sleep(Duration::from_secs(3));
+            // One manifest rule panicking (say, an index off a char
+            // boundary) must never kill the whole detection thread — that
+            // freezes agent states silently (no more done/approval toasts).
+            // Catch it, log, and keep polling.
             let shared = app.state::<SharedState>();
-            poll_once(&app, &shared, started);
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                poll_once(&app, &shared, started);
+            }));
+            if let Err(e) = r {
+                let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = e.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                log::error!("agent poll panicked, continuing: {msg}");
+            }
         }
     });
 }
@@ -660,14 +722,78 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
                     // gate also clears a stale prompt from the flag as soon
                     // as the approved command starts producing output.
                     let idle = session.idle_for();
-                    let attention = (idle >= Duration::from_millis(700)
-                        && !session.awaiting_output()
-                        && approval_needed(&tail))
-                    .then_some(AgentAttention::Approval);
-                    let agent_state = if attention.is_some() || idle >= WAITING_AFTER {
-                        AgentState::Waiting
-                    } else {
-                        AgentState::Working
+                    // Screen-level detection (kero's per-agent manifests run
+                    // over the pushed visible screen) leads when this agent
+                    // has a manifest and the frontend has pushed its screen;
+                    // the idle-timeout heuristic below is the fallback for
+                    // agents without one (or before the first push).
+                    let kind_key = detected.kind.as_str();
+                    let screen_verdict = session
+                        .screen_text()
+                        .filter(|_| crate::services::screen_detect::known(kind_key))
+                        .map(|text| {
+                            let input = crate::services::screen_detect::DetectInput {
+                                screen: &text,
+                                title: &session.title(),
+                                progress: &session.progress_report(),
+                            };
+                            crate::services::screen_detect::detect(kind_key, &input)
+                        });
+                    let mut attention = None;
+                    let agent_state = match screen_verdict {
+                        Some(r) if !r.skip => match r.state {
+                            crate::services::screen_detect::ScreenState::Working => {
+                                AgentState::Working
+                            }
+                            crate::services::screen_detect::ScreenState::Blocked => {
+                                attention = Some(AgentAttention::Approval);
+                                AgentState::Waiting
+                            }
+                            crate::services::screen_detect::ScreenState::Idle if r.visible => {
+                                // The agent sits at its (visible) prompt: its
+                                // turn just finished. This is the done signal
+                                // for resident agents (Claude Code stays at
+                                // its prompt instead of exiting) — whether
+                                // the user gets the toast is the window-focus
+                                // gate in `notify_changed` (looking elsewhere
+                                // = unfocused window), NOT whether the pane
+                                // sits in the selected tab: gating on that
+                                // ate every notification for the tab the user
+                                // actually works in. A typed-but-unanswered
+                                // message reads as waiting, not finished.
+                                if session.awaiting_output() {
+                                    AgentState::Waiting
+                                } else {
+                                    AgentState::Done
+                                }
+                            }
+                            _ => {
+                                // Idle by elimination: the old heuristic
+                                // decides (10s→…→WAITING_AFTER).
+                                attention = (idle >= Duration::from_millis(700)
+                                    && !session.awaiting_output()
+                                    && approval_needed(&tail))
+                                .then_some(AgentAttention::Approval);
+                                if attention.is_some() || idle >= WAITING_AFTER {
+                                    AgentState::Waiting
+                                } else {
+                                    AgentState::Working
+                                }
+                            }
+                        },
+                        _ => {
+                            // No manifest (or no screen yet): the old
+                            // heuristic decides.
+                            attention = (idle >= Duration::from_millis(700)
+                                && !session.awaiting_output()
+                                && approval_needed(&tail))
+                            .then_some(AgentAttention::Approval);
+                            if attention.is_some() || idle >= WAITING_AFTER {
+                                AgentState::Waiting
+                            } else {
+                                AgentState::Working
+                            }
+                        }
                     };
                     let status = AgentStatus {
                         agent: detected.kind,
@@ -677,6 +803,19 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
                     current.insert(sid, status);
                     meta.insert(sid, (session.title(), project.name(&g)));
                     if prev.get(&sid) != Some(&status) {
+                        log::info!(
+                            "agent status [{label}] {} ({}): {:?} -> {:?} attention={:?} \
+                             (screen_verdict={:?}, idle={:?}, seen={}, awaiting={})",
+                            detected.kind.label(),
+                            &sid,
+                            prev.get(&sid).map(|p| p.state),
+                            status.state,
+                            status.attention,
+                            screen_verdict,
+                            idle,
+                            seen.contains(&sid),
+                            session.awaiting_output(),
+                        );
                         changed.insert(sid, Some(status));
                         per_window.entry(label.clone()).or_default().push((sid, Some(status)));
                     }
@@ -791,11 +930,11 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
     shared.agents.lock().statuses = current;
 }
 
-/// Send a system notification when a session turned waiting or finished,
-/// throttled per session (waiting) and skipped while the owning window is
+/// Send a system notification when a session finished, or hit an approval
+/// prompt that needs the user to act. Skipped while the owning window is
 /// focused — the user is already looking. A `done` transition always
-/// notifies once (it fires exactly once per agent run); the cooldown is
-/// still recorded so a later `waiting` can't immediately re-fire.
+/// notifies once (it fires exactly once per agent run); approvals carry
+/// their own short cooldown.
 fn notify_changed(
     app: &AppHandle,
     label: &str,
@@ -803,10 +942,26 @@ fn notify_changed(
     prev: &HashMap<Uuid, AgentStatus>,
     rows: &[(Uuid, Option<AgentStatus>)],
 ) {
-    let focused = app
-        .get_webview_window(label)
-        .map(|w| w.is_focused().unwrap_or(true))
-        .unwrap_or(true);
+    // "Looking elsewhere" = the window is gone (tray keep-alive), hidden,
+    // minimized, or simply not the foreground one. is_focused() alone is
+    // not enough: a window hidden while focused may still report focused
+    // (the OS focus transfer doesn't always clear the flag), and the old
+    // unwrap_or(true) default silently ate every notification for a
+    // tray-mode session — the one case the user is guaranteed to be away.
+    let window = app.get_webview_window(label);
+    let (exists, visible, focused_flag) = match &window {
+        Some(w) => (
+            true,
+            w.is_visible().unwrap_or(false),
+            w.is_focused().unwrap_or(false),
+        ),
+        None => (false, false, false),
+    };
+    let focused = exists && focused_flag && visible;
+    log::info!(
+        "notify gate [{label}]: window(exists={exists}, visible={visible}, focused_flag={focused_flag}) -> focused={focused}, {} row(s) to consider",
+        rows.len()
+    );
     if focused {
         return;
     }
@@ -819,42 +974,52 @@ fn notify_changed(
         let prev_attention = prev.get(sid).and_then(|p| p.attention);
         let Some(session) = g.sessions.get(sid) else { continue };
         let body = match status.state {
-            // An approval prompt is more urgent than an ordinary idle prompt,
-            // and may arrive while the agent was already `waiting` — key off
-            // the attention transition instead of the state transition.
+            // Needs user action: an approval prompt blocks the agent until
+            // the user answers. Keyed off the attention transition (it may
+            // arrive while the agent was already `waiting`), with a short
+            // own cooldown so a flapping tail can't re-toast every poll.
             AgentState::Waiting
                 if status.attention == Some(AgentAttention::Approval)
                     && prev_attention != Some(AgentAttention::Approval) =>
             {
-                // Record the send for later cooldown, but don't let a recent
-                // waiting ping suppress an approval request.
-                session.try_mark_agent_notify(NOTIFY_COOLDOWN);
+                if !session.try_mark_approval_notify(APPROVAL_NOTIFY_COOLDOWN) {
+                    continue;
+                }
                 crate::services::i18n::translate("notify-agent-approval", &lang)
                     .replace("{agent}", status.agent.label())
                     .replace("{title}", &session.title())
             }
-            AgentState::Waiting
-                if prev_state != Some(AgentState::Waiting) && status.attention.is_none() =>
-            {
-                if !session.try_mark_agent_notify(NOTIFY_COOLDOWN) {
-                    continue;
-                }
-                crate::services::i18n::translate("notify-agent-waiting", &lang)
-                    .replace("{agent}", status.agent.label())
-                    .replace("{title}", &session.title())
-            }
+            // Finished: the agent process exited while the session is still
+            // alive. Fires exactly once per run; the cooldown is recorded so
+            // a later approval ping can't ride on it unnoticed.
             AgentState::Done
                 if matches!(prev_state, Some(AgentState::Working) | Some(AgentState::Waiting)) =>
             {
-                // Record the send so a flapping agent can't re-notify, but
-                // don't gate the `done` notification itself — it fires once.
                 session.try_mark_agent_notify(NOTIFY_COOLDOWN);
                 crate::services::i18n::translate("notify-agent-done", &lang)
                     .replace("{agent}", status.agent.label())
                     .replace("{title}", &session.title())
             }
-            _ => continue,
+            // Plain `waiting` (output silence at a prompt) deliberately does
+            // NOT notify: thinking pauses and quiet tool calls look exactly
+            // like it, and it flapped. The UI dots carry that state instead.
+            _ => {
+                log::debug!(
+                    "notify skip [{label}] {} {}: state={state:?} attention={attention:?} prev_state={prev_state:?} prev_attention={prev_attention:?} (no qualifying transition)",
+                    status.agent.label(),
+                    sid,
+                    state = status.state,
+                    attention = status.attention,
+                );
+                continue;
+            }
         };
+        log::info!(
+            "notify send [{label}] {} {}: {}",
+            status.agent.label(),
+            sid,
+            body
+        );
         crate::services::notify::send(app, label, *sid, body);
     }
 }
@@ -944,6 +1109,13 @@ mod tests {
         assert_eq!(match_cmdline(cmd), Some(AgentKind::ClaudeCode));
         let cmd = "bun C:\\tools\\kimi\\kimi.js";
         assert_eq!(match_cmdline(cmd), Some(AgentKind::KimiCode));
+        // Pi's real chain (PowerShell runs the npm .ps1 shim in-process, so
+        // only the node child remains, whose script is a plain cli.js under
+        // the @earendil-works/pi-coding-agent package dir).
+        let cmd = r#""C:\nvm4w\nodejs\node.exe" "C:\nvm4w\nodejs\node_modules\@earendil-works\pi-coding-agent\dist\bundle\cli.js" --mode json"#;
+        assert_eq!(match_cmdline(cmd), Some(AgentKind::Pi));
+        let cmd = r#""C:\nvm4w\nodejs\node.exe" "C:\nvm4w\nodejs\node_modules\@earendil-works\pi-coding-agent\dist\bundle\cli.js""#;
+        assert_eq!(match_cmdline(cmd), Some(AgentKind::Pi));
     }
 
     #[test]

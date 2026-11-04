@@ -47,6 +47,18 @@ export const commands = {
 } | null>("session_info", { id }),
 	listAllSessions: () => __TAURI_INVOKE<SessionInfo[]>("list_all_sessions"),
 	/**
+	 *  The frontend's periodic push of a session's visible screen text (kero's
+	 *  `term.Text()`), the input for screen-level agent state detection (see
+	 *  `services::screen_detect`). Absent sessions are ignored: a push may land
+	 *  just after its pane closed.
+	 * 
+	 *  `async` on purpose: sync commands run on the main thread, and this one
+	 *  waits on the AppState lock the agent poller also holds — blocking the
+	 *  main thread would stall webview IPC (and with it xterm's write
+	 *  callbacks, mangling TUI redraws) every time a push contends with a poll.
+	 */
+	setSessionScreen: (id: string, text: string) => __TAURI_INVOKE<null>("set_session_screen", { id, text }),
+	/**
 	 *  Current agent detection for every session (all windows), read straight
 	 *  from the poller's cache — an on-demand alternative to waiting for the
 	 *  next `agent-status-changed` push. Consumed by the command palette and the
@@ -425,6 +437,8 @@ export type DirEntry = {
 	name: string,
 	path: string,
 	is_directory: boolean,
+	/**  The entry is excluded by git/gitignore rules (the tree fades it). */
+	is_ignored: boolean,
 };
 
 /**  One unsaved file entry shown in the close-confirmation dialog. */
@@ -753,13 +767,18 @@ export type ThemeColors = {
 
 /**
  *  Lightweight theme metadata for the settings picker: name, dark/light
- *  classification, and two swatch colors for a visual preview.
+ *  classification, swatch colors, and a small ANSI strip for the grid tile.
  */
 export type ThemeInfo = {
 	name: string,
 	is_dark: boolean,
 	background: string,
 	accent: string,
+	/**
+	 *  Picker tile material: background, foreground, cursor, selection_bg,
+	 *  then palette colors 0–7.
+	 */
+	preview: string[],
 };
 
 /**

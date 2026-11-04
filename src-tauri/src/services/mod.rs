@@ -10,6 +10,7 @@ pub mod mcp;
 pub mod notify;
 pub mod persist;
 pub mod procs;
+pub mod screen_detect;
 pub mod search;
 pub mod shell;
 pub mod usage;

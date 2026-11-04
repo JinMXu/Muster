@@ -41,6 +41,7 @@ export const api = {
   sessionInfo: (id: Uuid) =>
     commands.sessionInfo(id) as unknown as Promise<SessionInfo | null>,
   listAllSessions: () => commands.listAllSessions(),
+  setSessionScreen: (id: Uuid, text: string) => commands.setSessionScreen(id, text),
   agentStatusSnapshot: () => commands.agentStatusSnapshot() as Promise<SessionAgentStatus[]>,
   usageOverview: (sinceMs: number) => commands.usageOverview(sinceMs),
   usageCompare: (sinceMs: number | null, untilMs: number | null, projectId: string | null) =>

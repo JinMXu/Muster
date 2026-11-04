@@ -122,6 +122,14 @@ pub struct TerminalSession {
     /// Last time an agent "waiting for input" notification was sent, for
     /// rate limiting.
     last_agent_notify: Mutex<Option<Instant>>,
+    /// Last time an approval notification was sent — its own, shorter
+    /// cooldown, independent of the waiting one (approvals are urgent and
+    /// must not suppress, nor be suppressed by, waiting pings).
+    last_approval_notify: Mutex<Option<Instant>>,
+    /// The visible screen's text, pushed by the frontend every poll (kero's
+    /// `term.Text()`): the input for screen-level agent state detection.
+    /// `None` until the first push; cleared never (overwritten in place).
+    screen_text: Mutex<Option<String>>,
     /// Last coding agent detected in this session, plus the minimal command
     /// that launched it. Persisted in the layout snapshot so a relaunch can
     /// offer to restart the agent in the restored shell.
@@ -146,6 +154,13 @@ pub struct TerminalSession {
     /// thread (see `spawn_input_writer`). `None` before `spawn()` and after
     /// `terminate()` (dropping it closes the channel → the thread exits).
     input_tx: Mutex<Option<std::sync::mpsc::Sender<Vec<u8>>>>,
+    /// The terminal size the frontend has negotiated for this session. Kept
+    /// regardless of whether the PTY exists yet: a restored session is
+    /// spawned at a throwaway 80x24 during startup, and a `resize` that lands
+    /// *before* `spawn()` must still be applied once the PTY comes up — else
+    /// the ConPTY stays stuck at 80x24 while xterm renders full-size, which
+    /// breaks full-screen TUIs (e.g. claude code) on restored sessions.
+    desired: Mutex<(u16, u16)>,
     /// Credit window for the PTY output pump (see `PtyFlow`).
     flow: Arc<PtyFlow>,
 }
@@ -167,6 +182,8 @@ impl TerminalSession {
             last_output_at: Mutex::new(Instant::now()),
             last_input_at: Mutex::new(None),
             last_agent_notify: Mutex::new(None),
+            last_approval_notify: Mutex::new(None),
+            screen_text: Mutex::new(None),
             last_agent: Mutex::new(None),
             scrollback: Mutex::new(VecDeque::new()),
             scrollback_pending: Mutex::new(String::new()),
@@ -174,6 +191,7 @@ impl TerminalSession {
             capture_active: AtomicBool::new(false),
             conpty: Mutex::new(None),
             input_tx: Mutex::new(None),
+            desired: Mutex::new((80, 24)),
             flow: Arc::new(PtyFlow::default()),
         }
     }
@@ -200,7 +218,20 @@ impl TerminalSession {
                 "session terminated before spawn",
             ));
         }
+        // Use the size the frontend last negotiated (via `resize_terminal`),
+        // which may be more current than this spawn's throwaway default — a
+        // restored session is spawned at 80x24 during startup before its pane
+        // fits, and a resize that already landed must stick. A non-default
+        // explicit size (e.g. the CLI's 120x30) records itself.
+        let (cols, rows) = {
+            let mut desired = self.desired.lock();
+            if cols != 80 || rows != 24 {
+                *desired = (cols, rows);
+            }
+            (desired.0, desired.1)
+        };
         let mut conpty = ConPty::create(cols, rows)?;
+        log::info!("session {} spawned at {cols}x{rows}", self.id);
 
         let shell = &self.shell;
         let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
@@ -500,6 +531,37 @@ impl TerminalSession {
         true
     }
 
+    /// Same gate for approval notifications, on its own timestamp — see
+    /// `last_approval_notify`.
+    pub fn try_mark_approval_notify(&self, cooldown: Duration) -> bool {
+        let mut last = self.last_approval_notify.lock();
+        let now = Instant::now();
+        if last.is_some_and(|t| now.duration_since(t) < cooldown) {
+            return false;
+        }
+        *last = Some(now);
+        true
+    }
+
+    /// The visible screen's text for screen-level agent detection (see
+    /// `services::screen_detect`). `None` until the frontend's first push.
+    pub fn screen_text(&self) -> Option<String> {
+        self.screen_text.lock().clone()
+    }
+
+    pub fn set_screen_text(&self, text: String) {
+        *self.screen_text.lock() = Some(text);
+    }
+
+    /// OSC 9;4 progress after the leading `9;4`, as `state;progress` — the
+    /// form the screen-detect manifests' `osc_progress` rules match on.
+    pub fn progress_report(&self) -> String {
+        match *self.progress.lock() {
+            Some((state, value)) => format!("{state};{value}"),
+            None => String::new(),
+        }
+    }
+
     pub fn send_text(&self, text: &str) {
         if let Some(tx) = self.input_tx.lock().as_ref() {
             *self.last_input_at.lock() = Some(Instant::now());
@@ -514,6 +576,11 @@ impl TerminalSession {
     }
 
     pub fn resize(&self, cols: u16, rows: u16) {
+        // Always record the negotiated size. `spawn()` reads it, so a resize
+        // that lands before the PTY exists (restored-session startup race) is
+        // still applied once it comes up, rather than dropped forever.
+        *self.desired.lock() = (cols, rows);
+        log::info!("session {} resize -> {}x{} (pty {})", self.id, cols, rows, self.is_spawned());
         if let Some(conpty) = self.conpty.lock().as_ref() {
             if let Err(e) = conpty.resize(cols, rows) {
                 log::warn!("pty resize failed (session {}): {e}", self.id);
@@ -1072,6 +1139,25 @@ mod tests {
         // A line that is NOT an extension (e.g. a new prompt) still stacks.
         s.record_output(b"\n");
         assert_eq!(s.scrollback_lines(100), vec!["echo HI\n", "\n"]);
+    }
+
+    #[test]
+    fn resize_before_spawn_records_the_negotiated_size() {
+        // A restored session is spawned at a throwaway 80x24 during startup;
+        // the pane may fit and call resize_terminal *before* the PTY exists.
+        // The size must still be applied when spawn() comes up, and the
+        // throwaway 80x24 must never clobber it.
+        let s = TerminalSession::new(
+            uuid::Uuid::new_v4(),
+            "C:\\work".into(),
+            crate::services::shell::detect_default_shell(),
+        );
+        // No PTY yet: resize records but has nothing to signal.
+        s.resize(160, 50);
+        assert_eq!(*s.desired.lock(), (160, 50));
+        // An explicit size records itself (covers the CLI's 120x30 path).
+        s.resize(120, 30);
+        assert_eq!(*s.desired.lock(), (120, 30));
     }
 
     #[test]

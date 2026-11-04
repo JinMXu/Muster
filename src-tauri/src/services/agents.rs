@@ -541,6 +541,18 @@ fn approval_needed(lines: &[String]) -> bool {
     has_yes && has_no && numbered
 }
 
+/// One live session collected under the window lock (poll phase 1) for the
+/// lock-free detection pass (phase 2). Carries the display fields that needed
+/// the AppState (`project_name`) so nothing in phase 2 has to re-lock.
+struct WorkItem {
+    label: String,
+    session: std::sync::Arc<crate::models::session::TerminalSession>,
+    sid: Uuid,
+    shell_pid: u32,
+    project_id: Uuid,
+    project_name: String,
+}
+
 /// Spawn the background poll loop. Runs for the app's lifetime; every
 /// `POLL_INTERVAL` recomputes every window's sessions, diffs against the
 /// cache, emits changes per window, and raises the finish/approval
@@ -664,9 +676,13 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
     // must never stall this window's commands for a poll cycle.
     let mut pending_obs: Vec<crate::services::usage::RunObservation> = Vec::new();
 
+    // Phase 1 (brief per-window locks): collect the owner/seen maps and a
+    // work list of live sessions with the display fields the detection pass
+    // needs. Nothing heavier than map iteration happens under the lock.
+    let mut work: Vec<WorkItem> = Vec::new();
+    let mut bump_labels: Vec<String> = Vec::new();
     for (label, state) in shared.all() {
-        let mut g = state.lock();
-        let mut persisted_changed = false;
+        let g = state.lock();
         for sid in g.sessions.keys() {
             owner.insert(*sid, label.clone());
         }
@@ -684,170 +700,188 @@ fn poll_once(app: &AppHandle, shared: &SharedState, started: std::time::Instant)
             }
         }
         for project in &g.projects {
+            let project_name = project.name(&g);
             for sid in project.session_ids() {
                 let Some(session) = g.sessions.get(&sid) else { continue };
                 if !session.is_spawned() || session.is_exited() {
                     continue;
                 }
-                let shell_pid = session.shell_pid().unwrap_or(0);
-                let pids = crate::services::procs::session_pids_with_sys(
-                    &procs_cache,
+                work.push(WorkItem {
+                    label: label.clone(),
+                    session: session.clone(),
                     sid,
-                    shell_pid,
-                );
-                if let Some(detected) = detect_agent_with_sys(&procs_cache, &pids) {
-                    if session.record_agent(detected.kind, detected.command.clone()) {
-                        persisted_changed = true;
-                    }
-                    live_agents.insert(sid);
-                    pending_obs.push(crate::services::usage::RunObservation {
-                        session_id: sid,
-                        agent: detected.kind,
-                        project_id: project.id,
-                        project: project.name(&g),
-                        cwd: session.current_directory(),
-                        branch: None,
-                        now_ms,
-                    });
-                    // Reading the tail activates the capture ring for this
-                    // session (agent sessions only). That is the price of
-                    // prompt detection: ANSI-stripped lines are accumulated
-                    // from here on, unlike the capture-on-demand default.
-                    // Capture must start as soon as the agent is detected,
-                    // otherwise a prompt printed before the first idle poll
-                    // would never enter the ring.
-                    let tail = session.scrollback_lines(8);
-                    // Only inspect once output has settled: an agent that is
-                    // streaming is not blocked on an approval prompt, and the
-                    // gate also clears a stale prompt from the flag as soon
-                    // as the approved command starts producing output.
-                    let idle = session.idle_for();
-                    // Screen-level detection (kero's per-agent manifests run
-                    // over the pushed visible screen) leads when this agent
-                    // has a manifest and the frontend has pushed its screen;
-                    // the idle-timeout heuristic below is the fallback for
-                    // agents without one (or before the first push).
-                    let kind_key = detected.kind.as_str();
-                    let screen_verdict = session
-                        .screen_text()
-                        .filter(|_| crate::services::screen_detect::known(kind_key))
-                        .map(|text| {
-                            let input = crate::services::screen_detect::DetectInput {
-                                screen: &text,
-                                title: &session.title(),
-                                progress: &session.progress_report(),
-                            };
-                            crate::services::screen_detect::detect(kind_key, &input)
-                        });
-                    let mut attention = None;
-                    let agent_state = match screen_verdict {
-                        Some(r) if !r.skip => match r.state {
-                            crate::services::screen_detect::ScreenState::Working => {
-                                AgentState::Working
-                            }
-                            crate::services::screen_detect::ScreenState::Blocked => {
-                                attention = Some(AgentAttention::Approval);
-                                AgentState::Waiting
-                            }
-                            crate::services::screen_detect::ScreenState::Idle if r.visible => {
-                                // The agent sits at its (visible) prompt: its
-                                // turn just finished. This is the done signal
-                                // for resident agents (Claude Code stays at
-                                // its prompt instead of exiting) — whether
-                                // the user gets the toast is the window-focus
-                                // gate in `notify_changed` (looking elsewhere
-                                // = unfocused window), NOT whether the pane
-                                // sits in the selected tab: gating on that
-                                // ate every notification for the tab the user
-                                // actually works in. A typed-but-unanswered
-                                // message reads as waiting, not finished.
-                                if session.awaiting_output() {
-                                    AgentState::Waiting
-                                } else {
-                                    AgentState::Done
-                                }
-                            }
-                            _ => {
-                                // Idle by elimination: the old heuristic
-                                // decides (10s→…→WAITING_AFTER).
-                                attention = (idle >= Duration::from_millis(700)
-                                    && !session.awaiting_output()
-                                    && approval_needed(&tail))
-                                .then_some(AgentAttention::Approval);
-                                if attention.is_some() || idle >= WAITING_AFTER {
-                                    AgentState::Waiting
-                                } else {
-                                    AgentState::Working
-                                }
-                            }
-                        },
-                        _ => {
-                            // No manifest (or no screen yet): the old
-                            // heuristic decides.
-                            attention = (idle >= Duration::from_millis(700)
-                                && !session.awaiting_output()
-                                && approval_needed(&tail))
-                            .then_some(AgentAttention::Approval);
-                            if attention.is_some() || idle >= WAITING_AFTER {
-                                AgentState::Waiting
-                            } else {
-                                AgentState::Working
-                            }
-                        }
-                    };
-                    let status = AgentStatus {
-                        agent: detected.kind,
-                        state: agent_state,
-                        attention,
-                    };
-                    current.insert(sid, status);
-                    meta.insert(sid, (session.title(), project.name(&g)));
-                    if prev.get(&sid) != Some(&status) {
-                        log::info!(
-                            "agent status [{label}] {} ({}): {:?} -> {:?} attention={:?} \
-                             (screen_verdict={:?}, idle={:?}, seen={}, awaiting={})",
-                            detected.kind.label(),
-                            &sid,
-                            prev.get(&sid).map(|p| p.state),
-                            status.state,
-                            status.attention,
-                            screen_verdict,
-                            idle,
-                            seen.contains(&sid),
-                            session.awaiting_output(),
-                        );
-                        changed.insert(sid, Some(status));
-                        per_window.entry(label.clone()).or_default().push((sid, Some(status)));
-                    }
-                } else if let Some(prev_status) = prev.get(&sid) {
-                    // The agent was alive last poll but is gone now, while the
-                    // session itself is still alive → it finished. Show a
-                    // `done` dot unless the user is already looking at it
-                    // (then drop the dot — it's been "seen").
-                    if seen.contains(&sid) {
-                        changed.insert(sid, None);
-                        per_window.entry(label.clone()).or_default().push((sid, None));
-                    } else {
-                        let status = AgentStatus {
-                            agent: prev_status.agent,
-                            state: AgentState::Done,
-                            attention: None,
-                        };
-                        current.insert(sid, status);
-                        meta.insert(sid, (session.title(), project.name(&g)));
-                        if prev.get(&sid) != Some(&status) {
-                            changed.insert(sid, Some(status));
-                            per_window.entry(label.clone()).or_default().push((sid, Some(status)));
-                        }
-                    }
-                }
-                // else: no agent now and never had one → nothing to report.
+                    shell_pid: session.shell_pid().unwrap_or(0),
+                    project_id: project.id,
+                    project_name: project_name.clone(),
+                });
             }
         }
-        // A newly detected agent changes what the autosave snapshot should
-        // contain (its launch command for restart-after-relaunch).
-        if persisted_changed {
-            g.bump();
+    }
+    // Phase 2 (lock-free): detection and the state machine run over the
+    // collected items — the heavy per-session work (process-tree walk,
+    // scrollback tail clone, screen text + manifest regex) must not sit
+    // inside a window lock that `send_text` contends with every keystroke.
+    for item in work {
+        let WorkItem { label, session, sid, shell_pid, project_id, project_name } = item;
+        let pids = crate::services::procs::session_pids_with_sys(
+            &procs_cache,
+            sid,
+            shell_pid,
+        );
+        if let Some(detected) = detect_agent_with_sys(&procs_cache, &pids) {
+            if session.record_agent(detected.kind, detected.command.clone()) {
+                bump_labels.push(label.clone());
+            }
+            live_agents.insert(sid);
+            pending_obs.push(crate::services::usage::RunObservation {
+                session_id: sid,
+                agent: detected.kind,
+                project_id,
+                project: project_name.clone(),
+                cwd: session.current_directory(),
+                branch: None,
+                now_ms,
+            });
+            // Reading the tail activates the capture ring for this
+            // session (agent sessions only). That is the price of
+            // prompt detection: ANSI-stripped lines are accumulated
+            // from here on, unlike the capture-on-demand default.
+            // Capture must start as soon as the agent is detected,
+            // otherwise a prompt printed before the first idle poll
+            // would never enter the ring.
+            let tail = session.scrollback_lines(8);
+            // Only inspect once output has settled: an agent that is
+            // streaming is not blocked on an approval prompt, and the
+            // gate also clears a stale prompt from the flag as soon
+            // as the approved command starts producing output.
+            let idle = session.idle_for();
+            // Screen-level detection (kero's per-agent manifests run
+            // over the pushed visible screen) leads when this agent
+            // has a manifest and the frontend has pushed its screen;
+            // the idle-timeout heuristic below is the fallback for
+            // agents without one (or before the first push).
+            let kind_key = detected.kind.as_str();
+            let screen_verdict = session
+                .screen_text()
+                .filter(|_| crate::services::screen_detect::known(kind_key))
+                .map(|text| {
+                    let input = crate::services::screen_detect::DetectInput {
+                        screen: &text,
+                        title: &session.title(),
+                        progress: &session.progress_report(),
+                    };
+                    crate::services::screen_detect::detect(kind_key, &input)
+                });
+            let mut attention = None;
+            let agent_state = match screen_verdict {
+                Some(r) if !r.skip => match r.state {
+                    crate::services::screen_detect::ScreenState::Working => {
+                        AgentState::Working
+                    }
+                    crate::services::screen_detect::ScreenState::Blocked => {
+                        attention = Some(AgentAttention::Approval);
+                        AgentState::Waiting
+                    }
+                    crate::services::screen_detect::ScreenState::Idle if r.visible => {
+                        // The agent sits at its (visible) prompt: its
+                        // turn just finished. This is the done signal
+                        // for resident agents (Claude Code stays at
+                        // its prompt instead of exiting) — whether
+                        // the user gets the toast is the window-focus
+                        // gate in `notify_changed` (looking elsewhere
+                        // = unfocused window), NOT whether the pane
+                        // sits in the selected tab: gating on that
+                        // ate every notification for the tab the user
+                        // actually works in. A typed-but-unanswered
+                        // message reads as waiting, not finished.
+                        if session.awaiting_output() {
+                            AgentState::Waiting
+                        } else {
+                            AgentState::Done
+                        }
+                    }
+                    _ => {
+                        // Idle by elimination: the old heuristic
+                        // decides (10s→…→WAITING_AFTER).
+                        attention = (idle >= Duration::from_millis(700)
+                            && !session.awaiting_output()
+                            && approval_needed(&tail))
+                        .then_some(AgentAttention::Approval);
+                        if attention.is_some() || idle >= WAITING_AFTER {
+                            AgentState::Waiting
+                        } else {
+                            AgentState::Working
+                        }
+                    }
+                },
+                _ => {
+                    // No manifest (or no screen yet): the old
+                    // heuristic decides.
+                    attention = (idle >= Duration::from_millis(700)
+                        && !session.awaiting_output()
+                        && approval_needed(&tail))
+                    .then_some(AgentAttention::Approval);
+                    if attention.is_some() || idle >= WAITING_AFTER {
+                        AgentState::Waiting
+                    } else {
+                        AgentState::Working
+                    }
+                }
+            };
+            let status = AgentStatus {
+                agent: detected.kind,
+                state: agent_state,
+                attention,
+            };
+            current.insert(sid, status);
+            meta.insert(sid, (session.title(), project_name));
+            if prev.get(&sid) != Some(&status) {
+                log::info!(
+                    "agent status [{label}] {} ({}): {:?} -> {:?} attention={:?} \
+                     (screen_verdict={:?}, idle={:?}, seen={}, awaiting={})",
+                    detected.kind.label(),
+                    &sid,
+                    prev.get(&sid).map(|p| p.state),
+                    status.state,
+                    status.attention,
+                    screen_verdict,
+                    idle,
+                    seen.contains(&sid),
+                    session.awaiting_output(),
+                );
+                changed.insert(sid, Some(status));
+                per_window.entry(label.clone()).or_default().push((sid, Some(status)));
+            }
+        } else if let Some(prev_status) = prev.get(&sid) {
+            // The agent was alive last poll but is gone now, while the
+            // session itself is still alive → it finished. Show a
+            // `done` dot unless the user is already looking at it
+            // (then drop the dot — it's been "seen").
+            if seen.contains(&sid) {
+                changed.insert(sid, None);
+                per_window.entry(label.clone()).or_default().push((sid, None));
+            } else {
+                let status = AgentStatus {
+                    agent: prev_status.agent,
+                    state: AgentState::Done,
+                    attention: None,
+                };
+                current.insert(sid, status);
+                meta.insert(sid, (session.title(), project_name));
+                if prev.get(&sid) != Some(&status) {
+                    changed.insert(sid, Some(status));
+                    per_window.entry(label.clone()).or_default().push((sid, Some(status)));
+                }
+            }
+        }
+        // else: no agent now and never had one → nothing to report.
+    }
+    // Phase 3: a newly detected agent changes what the autosave snapshot
+    // should contain (its launch command for restart-after-relaunch) — bump
+    // the affected windows now that no lock is held.
+    for label in bump_labels {
+        if let Some(state) = shared.get_label(&label) {
+            state.lock().bump();
         }
     }
     // Apply run observations now that no window state lock is held. The

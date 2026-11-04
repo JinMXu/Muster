@@ -6,7 +6,8 @@
 
 **Windows 原生的终端工作区 — 终端、文件、Diff、Git，一窗之内。**
 
-基于 **Tauri 2 + React + xterm.js**，Rust 后端直接驱动 ConPTY 与 libgit2。
+基于 **Tauri 2 + React + xterm.js**，Rust 后端直接驱动 ConPTY 与 libgit2，
+为 AI coding agent 时代打造的可观测、可编排终端。
 
 **📥 [下载最新版安装包（MSI / NSIS）](https://github.com/JinMXu/Muster/releases/latest)**
 
@@ -16,35 +17,39 @@
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-FFC131?style=flat-square&logo=tauri)](https://tauri.app/)
 
-![Muster 主界面](docs/screenshots/main-window.png)
+<br/>
+
+<img src="docs/screenshots/main-window.png" alt="Muster 主界面" width="100%" />
+
+<sub><b>主界面一览</b> — niri 风格分屏终端里运行 Claude Code；右侧信息面板实时呈现 Shell 状态、Git 分支、进程树与监听端口</sub>
 
 </div>
 
 ---
 
-## 亮点
+## ✨ 亮点
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-**🖥️ 终端工作区**
+### 🖥️ 终端工作区
 
 niri 风格分屏布局，拖拽重排、焦点跟随、单 pane 最大化。ConPTY 驱动的完整终端仿真，PowerShell 深度集成 — 每条命令自动上报 cwd。
 
 </td>
 <td width="33%" valign="top">
 
-**📂 文件与 Git 内建**
+### 📂 文件与 Git 内建
 
 Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提交/push/pull/stash/分支管理，**检查点**功能持续追踪 HEAD 之后的全部变更。
 
 </td>
 <td width="33%" valign="top">
 
-**🤖 Agent 感知**
+### 🤖 Agent 感知
 
-自动识别 Claude Code / OpenCode / Codex / GitHub Copilot / Cursor / Gemini CLI / Qwen Code 等 26 种 coding agent，标签显示状态点（绿=运行、黄=等待输入、红=待批准、蓝=已完成），失焦时发系统通知；重启后可从终端右键菜单重新运行上次的 agent。CLI 桥让 AI 代理驱动终端。
+自动识别 Claude Code / Codex / GitHub Copilot / Cursor / Gemini CLI / Qwen Code 等 **26 种** coding agent，标签显示状态点（🟢 运行、🟡 等待输入、🔴 待批准、🔵 已完成），失焦时发系统通知。CLI 桥 + MCP server 让 AI 代理直接驱动终端。
 
 </td>
 </tr>
@@ -52,29 +57,52 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 
 ---
 
-## 功能一览
+## 📋 功能一览
+
+### 终端与布局
 
 | 模块 | 能力 |
 |:---|:---|
 | **多窗口** | 多开窗口并行，布局定时快照，重启完整恢复。最后窗口关闭后驻留系统托盘（左键点击或右键菜单恢复主窗口/打开目录/设置/退出），终端会话不中断 |
 | **分屏布局** | 列×行网格，拖拽 pane 到任意边缘重排，跨标签页拖拽，焦点跟随，zoom 最大化 |
 | **终端** | ConPTY 完整仿真（xterm.js），PowerShell 自动上报 cwd，响铃通知 |
-| **Worktree 追踪** | `cd` 进 worktree 后面板即时重锚定（事件驱动），Info 面板显示标记 |
+| **会话持久化** | 布局/项目/选中状态每 5 秒自动快照，重启完整恢复 |
+| **终端搜索** | 终端焦点下 `Ctrl+F` 滚动回滚搜索，增量高亮 |
+| **主题** | 内置 GitHub 风格默认主题 + 精选 20 款 Ghostty 主题（深浅各 10），深色/浅色独立设置，跟随系统 |
+
+### 文件与编辑
+
+| 模块 | 能力 |
+|:---|:---|
 | **文件编辑器** | Monaco 语法高亮/查找替换/自动换行；内联 diff vs HEAD（实时更新）、git blame、文件历史；终端报错行点击直达 |
 | **差异查看器** | Monaco Diff 内联/分栏对比，支持任意两提交对比 |
 | **文件树** | 懒加载目录树，内联重命名/新建，拖拽文件到终端粘贴路径 |
-| **Git 面板** | libgit2 工作区/暂存区状态，暂存/提交（`Ctrl+Enter`）/push/pull/fetch/分支/stash/冲突检测/最近提交；检查点锚定快照，持续追踪后续变更 |
 | **项目搜索** | `Ctrl+Shift+F` 全文搜索，gitignore 感知，结果按文件分组、命中高亮 |
-| **终端搜索** | 终端焦点下 `Ctrl+F` 滚动回滚搜索，增量高亮 |
-| **命令面板** | `Ctrl+P` 模糊搜索项目文件、最近文件、命令、会话 |
-| **标签切换器** | `Ctrl+Tab` 循环切换标签，带预览 |
-| **主题** | 内置 GitHub 风格 + 完整 Ghostty 主题目录（598 款），深色/浅色独立设置，跟随系统 |
-| **国际化** | 中文 / English，可跟随系统语言 |
-| **会话持久化** | 布局/项目/选中状态每 5 秒自动快照，重启完整恢复 |
+| **Worktree 追踪** | `cd` 进 worktree 后面板即时重锚定（事件驱动），Info 面板显示标记 |
+
+### Git
+
+| 模块 | 能力 |
+|:---|:---|
+| **Git 面板** | libgit2 工作区/暂存区状态，暂存/提交（`Ctrl+Enter`）/push/pull/fetch/分支/stash/冲突检测/最近提交 |
+| **检查点** | 锚定快照，持续追踪 HEAD 之后的全部变更，随时回看 |
+
+### Agent 与自动化
+
+| 模块 | 能力 |
+|:---|:---|
 | **Agent 总览** | 左下角 mini-bar 跨窗口汇总所有 agent 状态，点击跳转（`Ctrl+Shift+A`） |
 | **Agent CLI 桥** | `muster` 命令驱动终端：`split`/`send`/`capture`/`run`/`wait`/`watch` 等 |
 | **Agent 用量对比** | agent×model 效率矩阵：tokens/run、fresh input、cache hit、tokens/turn、时长；本地日志自动解析 |
 | **MCP server** | `muster mcp` 把窗口、会话与 Agent 状态暴露为 MCP 工具，Claude Code / Cursor 等可直接编排 |
+
+### 体验与细节
+
+| 模块 | 能力 |
+|:---|:---|
+| **命令面板** | `Ctrl+P` 模糊搜索项目文件、最近文件、命令、会话 |
+| **标签切换器** | `Ctrl+Tab` 循环切换标签，带预览 |
+| **国际化** | 中文 / English，可跟随系统语言 |
 | **CLI 工具** | `muster <path>` 从任意终端打开项目，支持 `--cmd` 执行命令 |
 | **剪贴板安全** | 粘贴疑似可执行命令时弹窗确认 |
 | **信息面板** | Shell PID、cwd、Git 分支/远程、进程树、监听端口 |
@@ -84,7 +112,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 
 ---
 
-## 技术栈
+## 🛠 技术栈
 
 | 层 | 技术 |
 |:---|:---|
@@ -100,7 +128,7 @@ Monaco 编辑器 + Diff 视图，主题跟随全局。Git 面板支持暂存/提
 
 ---
 
-## 快速开始
+## 🚀 快速开始
 
 ### 环境要求
 
@@ -171,7 +199,7 @@ LIB = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\T
 
 ---
 
-## 配置
+## ⚙️ 配置
 
 配置文件为 TOML 格式：
 
@@ -182,7 +210,7 @@ LIB = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\T
 
 ---
 
-## 命令行
+## ⌨️ 命令行
 
 在设置中选择 "Add Muster to PATH" 后：
 
@@ -237,7 +265,7 @@ muster usage --view coverage           # 26 种 agent 的数据源覆盖
 
 ---
 
-## 快捷键
+## ⌨️ 快捷键
 
 <details open>
 <summary><b>窗口与项目</b></summary>
@@ -293,10 +321,10 @@ muster usage --view coverage           # 26 种 agent 的数据源覆盖
 
 ---
 
-## 目录结构
+## 📁 目录结构
 
 ```
-kero-windows/
+Muster/
 ├── src/                    # React 前端
 │   ├── assets/             # 生成的文件图标子集
 │   ├── components/         # 界面组件（终端、文件树、Git 面板、设置等）
@@ -321,8 +349,22 @@ kero-windows/
 
 ---
 
-## 致谢
+## 🤝 参与贡献
+
+欢迎 Issue 与 PR，贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
+## 🙏 致谢
 
 Muster 是 [Kero](https://github.com/egoist/kero) 的 Windows 重实现 — Kero 是由 [@egoist](https://github.com/egoist) 开发的 macOS 原生终端工作区（Swift + libghostty）。本项目在产品形态与交互设计上深受其启发，在此致谢。
 
 主题目录来源于 [Ghostty](https://ghostty.org/) 项目；终端字体为 [JetBrains Mono](https://www.jetbrains.com/lp/mono/) 与 [Nerd Fonts](https://www.nerdfonts.com/) 符号字体。
+
+---
+
+<div align="center">
+
+<sub>Muster — 为终端与 AI agent 打造的一窗式工作区</sub>
+
+</div>

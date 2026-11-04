@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AppStateView, ListenPort, ProcessInfo } from "../lib/types";
+import type { AgentAttention, AgentState, AppStateView, ListenPort, ProcessInfo } from "../lib/types";
 import { api } from "../lib/invoke";
 import { refreshGitStatus, useGitStatus } from "../lib/gitStatusStore";
 import { forceProjectPoll, useProjectCwd, useProjectSessions } from "../lib/useProjectCwd";
 import { reloadSettings, useSettings } from "../lib/settingsStore";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
-import { IconArrowUpRight, IconGlobe, IconRefresh, IconX } from "./icons";
+import { IconArrowUpRight, IconFolder, IconGitBranch, IconGlobe, IconRefresh, IconTerminal, IconX } from "./icons";
+import { BrandIcon, hasBrandIcon } from "./brandIcons";
 import { useT } from "../lib/i18n/context";
-import { agentLabel, useAgentStatus } from "../hooks/useAgentStatus";
+import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
 
 /// Info panel: details about the focused session, selected project, and the
 /// repository it lives in (shell/PID, cwd, project dir, git branch/remote),
@@ -122,6 +123,26 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       .catch(() => {});
   };
 
+  // The agent's live state drives the hero pill; a session without a live
+  // agent falls back to plain running/exited.
+  const live: LiveAgentStatus | null = (projSession && liveAgents[projSession.id]) || null;
+  const pillKind: PillKind = live
+    ? dotKind(live)
+    : projSession && !projSession.has_exited
+      ? "running"
+      : "exited";
+  const pillLabel = live
+    ? live.attention === "approval"
+      ? t("agents.state.approval")
+      : live.state === "working"
+        ? t("agents.state.working")
+        : live.state === "waiting"
+          ? t("agents.state.waiting")
+          : t("agents.state.done")
+    : projSession
+      ? projSession.has_exited ? t("info.exited") : t("info.running")
+      : t("info.exited");
+
   return (
     <div className="p-3 ui-fs-base space-y-3">
       <div className="flex items-center justify-between">
@@ -134,102 +155,143 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
           <IconRefresh size={11} className={spinning ? "animate-spin" : ""} />
         </button>
       </div>
-      <Row label={t("info.project")} value={project?.name ?? "—"} />
-      <Row
-        label={t("info.projectDirectory")}
-        value={root ?? "—"}
-        hint={
-          git?.is_worktree
-            ? t("info.worktree")
-            : project?.custom_directory
-              ? undefined
-              : t("info.auto")
-        }
-      />
-      {cwd && root && normalize(cwd) !== normalize(root) && (
-        <Row label={t("info.currentDirectory")} value={cwd} />
-      )}
-      <hr className="border-muster-hairline" />
-      <Row
-        label={t("info.shell")}
-        value={
-          projSession
-            ? `${projSession.shell_name}${projSession.pid ? `${t("info.pidSep")}${projSession.pid}` : ""}`
-            : "—"
-        }
-      />
-      <Row label={t("info.status")} value={projSession ? (projSession.has_exited ? t("info.exited") : t("info.running")) : "—"} />
-      {projSession?.agent && (
-        <div>
-          <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{t("info.agent")}</div>
-          <div className="flex items-center justify-between gap-2 mt-0.5">
-            <span className="ui-fs-sm text-muster-fg/80">{agentLabel(projSession.agent)}</span>
-            {projSession.agent_command && !liveAgents[projSession.id] && (
+
+      {/* Hero: the agent (or bare shell) is this session's identity — brand
+          mark, name, and the state pill get the only card in the panel.
+          Shell/PID demote to a muted line underneath. */}
+      <div className="rounded-lg bg-muster-hover/40 border border-muster-hairline px-2.5 py-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {projSession?.agent && hasBrandIcon(projSession.agent) ? (
+            <BrandIcon kind={projSession.agent} size={16} className="text-muster-fg/90 flex-shrink-0" />
+          ) : (
+            <span className="text-muster-fg/90 flex-shrink-0 flex items-center">
+              <IconTerminal size={15} />
+            </span>
+          )}
+          <span className="ui-fs-sm font-medium text-muster-fg/90 truncate min-w-0">
+            {projSession?.agent
+              ? agentLabel(projSession.agent)
+              : projSession?.shell_name ?? "—"}
+          </span>
+          <span
+            className={`ml-auto flex-shrink-0 flex items-center gap-1 px-1.5 h-5 rounded-full bg-muster-hover/60 ui-fs-xs leading-none ${PILL_TEXT[pillKind]}`}
+            title={pillLabel}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PILL_DOT[pillKind]}`} />
+            {pillLabel}
+          </span>
+        </div>
+        {projSession && (
+          <div className="mt-1.5 flex items-center gap-1.5 ui-fs-xs text-muster-muted/80 min-w-0">
+            <span className="truncate">
+              {projSession.shell_name}
+              {projSession.pid ? ` · PID ${projSession.pid}` : ""}
+            </span>
+            {projSession.agent && projSession.agent_command && !live && (
               <button
                 onClick={() => api.restartSessionAgent(projSession.id).catch(() => {})}
-                className="ui-fs-xs text-muster-accent hover:underline flex-shrink-0"
+                className="ml-auto flex-shrink-0 text-muster-accent hover:underline"
               >
                 {t("info.restartAgent")}
               </button>
             )}
           </div>
+        )}
+      </div>
+
+      {/* Git as one chip line; paths demote to muted mono-ish lines below —
+          they are reference, not headline. */}
+      {(git?.is_repo || root) && (
+        <div className="space-y-1.5 min-w-0">
+          {git?.is_repo && (
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+              <span className="flex items-center gap-1 rounded-md bg-muster-hover/60 px-1.5 h-6 min-w-0">
+                <IconGitBranch size={12} className="text-muster-accent flex-shrink-0" />
+                <span className="ui-fs-xs font-medium text-muster-fg/90 truncate">
+                  {git.branch ?? t("info.detached")}
+                </span>
+                {git.ahead > 0 && <span className="ui-fs-xs text-emerald-400/90 tabular-nums">↑{git.ahead}</span>}
+                {git.behind > 0 && <span className="ui-fs-xs text-amber-400/90 tabular-nums">↓{git.behind}</span>}
+                {git.is_worktree && (
+                  <span className="ui-fs-2xs text-muster-muted/70">{t("info.worktree")}</span>
+                )}
+              </span>
+              {git.upstream && (
+                <span className="ui-fs-xs text-muster-muted/75 truncate">{git.upstream}</span>
+              )}
+            </div>
+          )}
+          {root && (
+            <PathLine path={root} />
+          )}
+          {cwd && root && normalize(cwd) !== normalize(root) && (
+            <PathLine path={cwd} label={t("info.currentDirectory")} />
+          )}
         </div>
       )}
-      {git?.is_repo && (
-        <>
-          <hr className="border-muster-hairline" />
-          <Row label={t("info.branch")} value={git.branch ?? t("info.detached")} />
-          <Row
-            label={t("info.remote")}
-            value={
-              git.upstream
-                ? `${git.upstream}${git.ahead > 0 ? ` ↑${git.ahead}` : ""}${git.behind > 0 ? ` ↓${git.behind}` : ""}`
-                : t("info.unpublished")
-            }
-          />
-        </>
+
+      <hr className="border-muster-hairline" />
+
+      {/* Processes/ports render only while there is something to say — no
+          "no listening ports" filler. */}
+      {shellPid != null && procs.length > 0 && (
+        <Section label={t("info.processes")}>
+          {procs.map((p) => (
+            <ProcRow key={p.pid} p={p} onKill={kill} onMenu={procMenu} />
+          ))}
+        </Section>
       )}
-      {shellPid != null && (
-        <>
-          <hr className="border-muster-hairline" />
-          <Section label={t("info.processes")}>
-            {procs.length === 0 ? (
-              <div className="ui-fs-sm text-muster-muted/70 px-1">{t("info.noRunningProcesses")}</div>
-            ) : (
-              procs.map((p) => (
-                <ProcRow key={p.pid} p={p} onKill={kill} onMenu={procMenu} />
-              ))
-            )}
-          </Section>
-          <Section
-            label={t("info.ports")}
-            action={
-              <button
-                onClick={toggleProjectPorts}
-                title={t("info.includeProjectPorts")}
-                aria-pressed={projectPorts}
-                className={`rounded p-0.5 active:scale-[.97] transition-colors duration-muster ease-muster ${
-                  projectPorts
-                    ? "text-muster-accent"
-                    : "text-muster-muted/60 hover:text-muster-fg hover:bg-muster-hover-btn"
-                }`}
-              >
-                <IconGlobe size={11} />
-              </button>
-            }
-          >
-            {ports.length === 0 ? (
-              <div className="ui-fs-sm text-muster-muted/70 px-1">{t("info.noListeningPorts")}</div>
-            ) : (
-              ports.map((pt) => (
-                <PortRow key={pt.port} pt={pt} onMenu={portMenu} />
-              ))
-            )}
-          </Section>
-        </>
+      {shellPid != null && ports.length > 0 && (
+        <Section
+          label={t("info.ports")}
+          action={
+            <button
+              onClick={toggleProjectPorts}
+              title={t("info.includeProjectPorts")}
+              aria-pressed={projectPorts}
+              className={`rounded p-0.5 active:scale-[.97] transition-colors duration-muster ease-muster ${
+                projectPorts
+                  ? "text-muster-accent"
+                  : "text-muster-muted/60 hover:text-muster-fg hover:bg-muster-hover-btn"
+              }`}
+            >
+              <IconGlobe size={11} />
+            </button>
+          }
+        >
+          {ports.map((pt) => (
+            <PortRow key={pt.port} pt={pt} onMenu={portMenu} />
+          ))}
+        </Section>
       )}
     </div>
   );
+}
+
+/// Agent/shell state pill palette, keyed like AgentMiniBar's dot classes so
+/// the same state reads the same color everywhere.
+type PillKind = AgentState | "approval" | "running" | "exited";
+
+const PILL_DOT: Record<PillKind, string> = {
+  approval: "bg-rose-400 animate-pulse",
+  working: "bg-emerald-400",
+  waiting: "bg-amber-400 animate-pulse",
+  done: "bg-sky-400",
+  running: "bg-emerald-400",
+  exited: "bg-muster-muted/50",
+};
+
+const PILL_TEXT: Record<PillKind, string> = {
+  approval: "text-rose-300",
+  working: "text-muster-fg/85",
+  waiting: "text-amber-200/90",
+  done: "text-sky-200/90",
+  running: "text-muster-fg/85",
+  exited: "text-muster-muted/70",
+};
+
+function dotKind(r: { state: AgentState; attention: AgentAttention | null }): PillKind {
+  return r.attention === "approval" ? "approval" : r.state;
 }
 
 /// Path comparison ignoring trailing separators and slash direction, so the
@@ -244,14 +306,16 @@ function formatMem(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
+/// A muted reference line for a filesystem path (project root, current cwd).
+/// Paths are reference, not headline: truncate with the full path on hover.
+function PathLine({ path, label }: { path: string; label?: string }) {
   return (
-    <div>
-      <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{label}</div>
-      <div className="ui-fs-sm text-muster-fg/80 break-all mt-0.5">
-        {value}
-        {hint && <span className="text-muster-muted/70 ml-1">{hint}</span>}
-      </div>
+    <div className="flex items-center gap-1.5 min-w-0" title={path}>
+      <IconFolder size={12} className="text-muster-muted/70 flex-shrink-0" />
+      <span className="ui-fs-xs text-muster-muted/85 truncate min-w-0">
+        {label && <span className="text-muster-muted/60 mr-1">{label}:</span>}
+        {path}
+      </span>
     </div>
   );
 }
@@ -290,14 +354,15 @@ function ProcRow({
     <div
       className="group flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muster-hover ui-fs-sm text-muster-fg/80"
       onContextMenu={(e) => onMenu(e, p)}
+      // PID and CPU are power-user details: live on hover, not in the row.
+      title={`${p.name} · PID ${p.pid} · CPU ${p.cpu.toFixed(0)}%`}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
       <span className="truncate min-w-0 flex-1" title={p.exe || p.name}>
         {p.name}
       </span>
-      <span className="text-muster-muted flex-shrink-0">{p.pid}</span>
-      <span className="text-muster-muted flex-shrink-0 text-right">
-        {p.cpu.toFixed(0)}% · {formatMem(p.mem_bytes)}
+      <span className="text-muster-muted flex-shrink-0 text-right tabular-nums">
+        {formatMem(p.mem_bytes)}
       </span>
       <button
         onClick={() => onKill(p.pid)}

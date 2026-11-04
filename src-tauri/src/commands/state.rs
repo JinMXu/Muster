@@ -127,28 +127,23 @@ pub fn list_all_sessions(window: Window, state: State<SharedState>) -> Vec<Sessi
 /// callbacks, mangling TUI redraws) every time a push contends with a poll.
 #[tauri::command]
 #[specta::specta]
-// `diag` is a temporary bug hunt (restored-session viewport): the frontend's
-// viewport snapshot for this push — `vp/base/len/cursor/rows/cols/atBottom/buf`.
-// Every push is logged at info while the hunt is on; restore the `first`
-// gating once the scroll mystery is solved.
 pub async fn set_session_screen(
     state: State<'_, SharedState>,
     id: Uuid,
     text: String,
-    diag: Option<String>,
 ) -> Result<(), String> {
     for (_, s) in state.all() {
         let g = s.lock();
         if let Some(session) = g.sessions.get(&id) {
-            log::info!(
-                "screen push {id}: {} chars{} | first 160: {:?} | last 80: {:?}",
-                text.len(),
-                diag.as_deref()
-                    .map(|d| format!(" | {d}"))
-                    .unwrap_or_default(),
-                text.chars().take(160).collect::<String>(),
-                text.chars().rev().take(80).collect::<String>(),
-            );
+            let first = session.screen_text().is_none();
+            if first {
+                log::info!(
+                    "screen push {id}: {} chars | first 160: {:?} | last 80: {:?}",
+                    text.len(),
+                    text.chars().take(160).collect::<String>(),
+                    text.chars().rev().take(80).collect::<String>(),
+                );
+            }
             session.set_screen_text(text);
             return Ok(());
         }

@@ -1,12 +1,10 @@
 import { api } from "./invoke";
-import { screenDiag, screenSessionIds, screenText } from "./terminalRegistry";
+import { screenSessionIds, screenText } from "./terminalRegistry";
 
 const PUSH_INTERVAL_MS = 3000;
 
 /// Last text pushed per session — a screen that hasn't changed isn't pushed
-/// again, so an idle workspace generates no IPC traffic at all. During the
-/// viewport bug hunt the diag snapshot also participates: a viewport move
-/// without a text change (the scroll-follow failure mode) must still push.
+/// again, so an idle workspace generates no IPC traffic at all.
 const lastPushed = new Map<string, string>();
 
 /// Push every open terminal's visible screen text to the backend, which
@@ -22,17 +20,13 @@ export function startScreenPush(): void {
     for (const id of live) {
       const text = screenText(id);
       if (!text || text.trim() === "") continue;
-      const diag = screenDiag(id);
-      const last = lastPushed.get(id);
-      const lastDiag = last?.split("\n##DIAG##")[1] ?? null;
-      const lastText = last?.split("\n##DIAG##")[0] ?? null;
-      if (lastText === text && lastDiag === diag) continue;
+      if (lastPushed.get(id) === text) continue;
       const first = !lastPushed.has(id);
-      lastPushed.set(id, `${text}\n##DIAG##${diag}`);
+      lastPushed.set(id, text);
       console.debug(
-        `[screenPush] ${id.slice(0, 8)} push ${text.length} chars (first=${first}) ${diag ?? ""}`,
+        `[screenPush] ${id.slice(0, 8)} push ${text.length} chars (first=${first})`,
       );
-      void api.setSessionScreen(id, text, diag).catch(() => {
+      void api.setSessionScreen(id, text).catch(() => {
         // A push racing the pane's close is harmless; the next tick moves on.
       });
     }

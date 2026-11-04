@@ -383,6 +383,21 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
             )}
           </div>
         )}
+        {!filterOpen && (
+          // Checkpoint lives here, not in its own row: one small affordance
+          // doesn't earn a full-width banner slot.
+          <button
+            onClick={() =>
+              api.git.headOid(info.repo_root).then((oid) => {
+                if (oid) setCheckpoint({ root: info.repo_root, oid, time: Date.now() });
+              })
+            }
+            title={t("git.setCheckpoint")}
+            className="px-1 rounded ui-fs-xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0"
+          >
+            {t("git.setCheckpoint")}
+          </button>
+        )}
         <button
           title={t("git.filterFiles")}
           onClick={() => {
@@ -399,6 +414,8 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
 
       {banner}
       {checkpoint && checkpoint.root === info.repo_root ? (
+        /* While a checkpoint is active its since-checkpoint summary earns a
+           banner; the idle "set checkpoint" affordance lives in the header. */
         <div className="flex-shrink-0 px-3 py-1.5 border-b border-muster-hairline">
           <div className="flex items-center gap-2 ui-fs-xs text-muster-muted">
             <span className="text-muster-accent flex items-center">
@@ -435,104 +452,96 @@ export default function GitPanel({ state, active }: { state: AppStateView | null
             </div>
           )}
         </div>
-      ) : info.is_repo && info.repo_root ? (
-        <div className="flex-shrink-0 px-3 py-1.5 border-b border-muster-hairline flex items-center">
-          <button
-            onClick={() =>
-              api.git.headOid(info.repo_root).then((oid) => {
-                if (oid) setCheckpoint({ root: info.repo_root, oid, time: Date.now() });
-              })
-            }
-            title={t("git.setCheckpoint")}
-            className="flex items-center gap-1 ui-fs-xs text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn rounded px-1.5 py-0.5 active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            <span className="text-muster-accent flex items-center">
-              <IconGitBranch size={11} />
-            </span>
-            {t("git.setCheckpoint")}
-          </button>
-        </div>
       ) : null}
 
-      <div className="px-3 py-2 space-y-1.5">
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder={t("git.commitPlaceholder", { branch: info.branch ?? "HEAD" })}
-          rows={3}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && defaultCommitEnabled) {
-              defaultCommit();
-            }
-          }}
-          className="w-full bg-muster-hover rounded-md px-2 py-1.5 ui-fs-sm outline-none resize-none"
-        />
-        <div className="flex">
-          <button
-            onClick={defaultCommit}
-            disabled={!defaultCommitEnabled}
-            className="flex-1 px-3 py-1.5 rounded-l-md bg-muster-accent/85 text-white ui-fs-sm disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            {stagedCount > 0 ? t("git.commitNStaged", { n: stagedCount }) : t("git.stageAllAndCommitBtn")}
-          </button>
-          <button
-            onClick={openCommitMenu}
-            title={t("git.commitOptions")}
-            className="px-1.5 rounded-r-md bg-muster-accent/85 text-white border-l border-muster-border-strong flex items-center active:scale-[.97] transition-transform duration-muster ease-muster"
-          >
-            <IconChevronDown size={11} />
-          </button>
-        </div>
-        <div className="flex gap-1">
-          <SmallButton
-            onClick={() =>
-              runOp(t("git.fetch"), t("git.fetchCli"), api.git.fetch(info.repo_root).then(() => t("git.fetched")))
-            }
-            disabled={info.remotes.length === 0}
-            loading={loadingLabel === t("git.fetch")}
-          >
-            {t("git.fetch")}
-          </SmallButton>
-          <SmallButton
-            onClick={() =>
-              runOp(t("git.pull"), t("git.pullCli"), api.git.pull(info.repo_root).then(() => t("git.pulled")))
-            }
-            disabled={!info.has_upstream}
-            loading={loadingLabel === t("git.pull")}
-          >
-            {t("git.pull")}
-          </SmallButton>
-          <SmallButton
-            onClick={() => {
-              const remote = info.remotes[0] ?? "origin";
-              runOp(
-                t("git.push"),
-                t("git.pushCli", { remote, branch: info.branch ?? "HEAD" }),
-                api.git.push(info.repo_root, remote).then(() => t("git.pushed"))
-              );
+      {/* The commit block only earns space while there is something to commit
+          (or a draft to keep); a clean tree goes straight from the clean line
+          to history. */}
+      {(!isClean || message.length > 0) && (
+        <div className="px-3 py-2 space-y-1.5">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder={t("git.commitPlaceholder", { branch: info.branch ?? "HEAD" })}
+            rows={2}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && defaultCommitEnabled) {
+                defaultCommit();
+              }
             }}
-            loading={loadingLabel === t("git.push")}
-          >
-            {t("git.push")}
-          </SmallButton>
-          <SmallButton
-            onClick={() =>
-              runOp(t("git.stash"), t("git.stashCli"), api.git.stashAll(info.repo_root).then(() => t("git.stashed")))
-            }
-            loading={loadingLabel === t("git.stash")}
-          >
-            {t("git.stash")}
-          </SmallButton>
-          <SmallButton
-            onClick={() =>
-              runOp(t("git.pop"), t("git.popCli"), api.git.stashPop(info.repo_root).then(() => t("git.popped")))
-            }
-            disabled={info.stash_count === 0}
-            loading={loadingLabel === t("git.pop")}
-          >
-            {t("git.pop")}
-          </SmallButton>
+            className="w-full bg-muster-hover rounded-md px-2 py-1.5 ui-fs-sm outline-none resize-none"
+          />
+          <div className="flex">
+            <button
+              onClick={defaultCommit}
+              disabled={!defaultCommitEnabled}
+              className="flex-1 px-3 py-1.5 rounded-l-md bg-muster-accent/85 text-white ui-fs-sm disabled:opacity-40 enabled:active:scale-[.97] transition-transform duration-muster ease-muster"
+            >
+              {stagedCount > 0 ? t("git.commitNStaged", { n: stagedCount }) : t("git.stageAllAndCommitBtn")}
+            </button>
+            <button
+              onClick={openCommitMenu}
+              title={t("git.commitOptions")}
+              className="px-1.5 rounded-r-md bg-muster-accent/85 text-white border-l border-muster-border-strong flex items-center active:scale-[.97] transition-transform duration-muster ease-muster"
+            >
+              <IconChevronDown size={11} />
+            </button>
+          </div>
         </div>
+      )}
+      <div className="px-3 pb-2 flex items-center gap-0.5">
+        <ToolButton
+          onClick={() =>
+            runOp(t("git.fetch"), t("git.fetchCli"), api.git.fetch(info.repo_root).then(() => t("git.fetched")))
+          }
+          disabled={info.remotes.length === 0}
+          loading={loadingLabel === t("git.fetch")}
+        >
+          {t("git.fetch")}
+        </ToolButton>
+        <ToolButton
+          onClick={() =>
+            runOp(t("git.pull"), t("git.pullCli"), api.git.pull(info.repo_root).then(() => t("git.pulled")))
+          }
+          disabled={!info.has_upstream}
+          loading={loadingLabel === t("git.pull")}
+        >
+          {t("git.pull")}
+        </ToolButton>
+        <ToolButton
+          onClick={() => {
+            const remote = info.remotes[0] ?? "origin";
+            runOp(
+              t("git.push"),
+              t("git.pushCli", { remote, branch: info.branch ?? "HEAD" }),
+              api.git.push(info.repo_root, remote).then(() => t("git.pushed"))
+            );
+          }}
+          loading={loadingLabel === t("git.push")}
+        >
+          {t("git.push")}
+        </ToolButton>
+        <div className="flex-1" />
+        <ToolButton
+          onClick={() =>
+            runOp(t("git.stash"), t("git.stashCli"), api.git.stashAll(info.repo_root).then(() => t("git.stashed")))
+          }
+          disabled={isClean}
+          loading={loadingLabel === t("git.stash")}
+          title={isClean ? t("git.workingTreeClean") : undefined}
+        >
+          {t("git.stash")}
+        </ToolButton>
+        <ToolButton
+          onClick={() =>
+            runOp(t("git.pop"), t("git.popCli"), api.git.stashPop(info.repo_root).then(() => t("git.popped")))
+          }
+          disabled={info.stash_count === 0}
+          loading={loadingLabel === t("git.pop")}
+          title={info.stash_count > 0 ? t("git.popCount", { n: info.stash_count }) : undefined}
+        >
+          {t("git.pop")}
+        </ToolButton>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-3">
@@ -798,25 +807,30 @@ function HeaderButton({
   );
 }
 
-function SmallButton({
+/// Ghost toolbar button for the sync/stash utility row: quiet until hovered,
+/// so five always-on actions don't read as a wall of gray slabs.
+function ToolButton({
   children,
   onClick,
   disabled,
   loading,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   loading?: boolean;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled || loading}
-      className={`flex-1 px-1.5 py-1 rounded ui-fs-xs transition-all duration-muster ease-muster ${
+      title={title}
+      className={`px-1.5 h-6 rounded ui-fs-xs transition-all duration-muster ease-muster ${
         loading
-          ? "bg-muster-hover-btn text-muster-fg opacity-60"
-          : "bg-muster-hover enabled:hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97]"
+          ? "bg-muster-hover-btn text-muster-fg/80"
+          : "text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn disabled:opacity-40 enabled:active:scale-[.97]"
       }`}
     >
       <span className={loading ? "inline-flex items-center gap-1" : ""}>

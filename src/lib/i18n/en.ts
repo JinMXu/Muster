@@ -309,6 +309,7 @@ const en = {
     discardAllBtn: "Discard All",
     noMatchingFiles: "No matching files",
     workingTreeClean: "Working tree clean",
+    popCount: "Restore stash ({n})",
     recentCommits: "Recent commits",
     discardConfirmTitle: "Discard changes",
     discardConfirmSingularUntracked:

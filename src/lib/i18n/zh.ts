@@ -309,6 +309,7 @@ const zh = {
     discardAllBtn: "全部丢弃",
     noMatchingFiles: "没有匹配的文件",
     workingTreeClean: "工作区干净，没有更改",
+    popCount: "恢复储藏 ({n})",
     recentCommits: "最近提交",
     discardConfirmTitle: "丢弃更改",
     discardConfirmSingularUntracked: "此未跟踪文件将被移至回收站：",

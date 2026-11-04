@@ -910,6 +910,7 @@ export default function App() {
               onProjectMenu={projectMenu}
               onOpenSettings={openSettingsGeneral}
               onOpenUsage={openUsagePanel}
+              onToggle={toggleLeftSidebar}
               width={leftPanel.width}
               agentBarOpen={agentBarOpen}
               onAgentBarToggle={toggleAgentBar}
@@ -947,7 +948,7 @@ export default function App() {
         {(stateView?.is_panel_visible ?? false) && (
           <>
             <ResizeHandle onMouseDown={rightPanel.onHandleMouseDown} />
-            <RightSidebar state={stateView} width={rightPanel.width} />
+            <RightSidebar state={stateView} width={rightPanel.width} onToggle={toggleRightPanel} />
           </>
         )}
       </div>

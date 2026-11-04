@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { events } from "../lib/bindings";
 import type { ProjectView, PtyProgress, TabView, Uuid } from "../lib/types";
 import WindowControls from "./WindowControls";
-import { IconColumns, IconMaximize2, IconPanelLeft, IconPanelRight, IconPlus, IconX } from "./icons";
+import { IconColumns, IconMaximize2, IconPanelLeftOpen, IconPanelRightOpen, IconPlus, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import { api } from "../lib/invoke";
 import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
@@ -132,19 +132,18 @@ export default function Header({
       className="h-9 flex items-center pl-2"
       data-tauri-drag-region
     >
-      {/* Left sidebar toggle — the mouse twin of Ctrl+B. Mirrors the right
-          panel's toggle on the opposite edge: accent while visible, muted
-          when hidden. Sits flush to the content's left edge, so with the
-          sidebar hidden it is the top-left corner's visible way back. */}
-      <button
-        onClick={toggleLeftSidebar}
-        title={t("header.toggleLeftSidebarTooltip")}
-        className={`w-5 h-5 mr-1 rounded flex items-center justify-center ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0 ${
-          leftSidebarVisible ? "text-muster-accent" : "text-muster-muted"
-        }`}
-      >
-        <IconPanelLeft size={13} />
-      </button>
+      {/* Left sidebar's way back while it is hidden (the collapse twin lives
+          in the sidebar's own top-left corner). PanelLeftOpen points inward —
+          the direction the sidebar returns from. */}
+      {!leftSidebarVisible && (
+        <button
+          onClick={toggleLeftSidebar}
+          title={t("header.toggleLeftSidebarTooltip")}
+          className="w-5 h-5 mr-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster flex-shrink-0"
+        >
+          <IconPanelLeftOpen size={13} />
+        </button>
+      )}
       <div
         className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto self-stretch"
         style={{ scrollbarWidth: "none" }}
@@ -189,15 +188,15 @@ export default function Header({
             <IconMaximize2 size={13} />
           </button>
         )}
-        {project && (
+        {/* The right panel's collapse twin lives in its own top bar, flush
+            left of the caption buttons; this is the way back while hidden. */}
+        {project && !panelVisible && (
           <button
             onClick={togglePanel}
             title={t("header.toggleRightSidebarTooltip")}
-            className={`w-5 h-5 rounded flex items-center justify-center ui-fs-base hover:bg-muster-hover-btn active:scale-[.97] transition-transform duration-muster ease-muster ${
-              panelVisible ? "text-muster-accent" : "text-muster-muted"
-            }`}
+            className="w-5 h-5 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
           >
-            <IconPanelRight size={13} />
+            <IconPanelRightOpen size={13} />
           </button>
         )}
       </div>

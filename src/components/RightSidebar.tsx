@@ -6,7 +6,7 @@ import FileTree from "./FileTree";
 import GitPanel from "./GitPanel";
 import InfoPanel from "./InfoPanel";
 import WindowControls from "./WindowControls";
-import { IconFolder, IconGitBranch, IconInfo } from "./icons";
+import { IconFolder, IconGitBranch, IconInfo, IconPanelRightClose } from "./icons";
 
 /// Right sidebar with Files / Git / Info tabs, anchored to the selected
 /// project's directory (its custom_directory, or the cwd of its session).
@@ -19,7 +19,18 @@ import { IconFolder, IconGitBranch, IconInfo } from "./icons";
 /// the middle, and the window caption buttons flush to the top-right corner
 /// (Header skips its own WindowControls while this panel is visible).
 /// Clicking the active chip hides the panel (the Header button re-opens it).
-export default function RightSidebar({ state, width }: { state: AppStateView | null; width: number }) {
+export default function RightSidebar({
+  state,
+  width,
+  onToggle,
+}: {
+  state: AppStateView | null;
+  width: number;
+  /// Collapse this panel (same backend command as Ctrl+Shift+B). Lives in the
+  /// panel's top bar flush left of the caption buttons; the Header hosts the
+  /// expand twin while the panel is hidden.
+  onToggle: () => void;
+}) {
   const [tab, setTab] = useState<RightPanel>(state?.panel_tab ?? "files");
   const { t } = useT();
   useEffect(() => {
@@ -36,6 +47,13 @@ export default function RightSidebar({ state, width }: { state: AppStateView | n
         <Tab active={tab === "files"} onClick={() => api.togglePanel("files")} icon={<IconFolder size={12} />} label={t("rightSidebar.files")} />
         <Tab active={tab === "git"} onClick={() => api.togglePanel("git")} icon={<IconGitBranch size={12} />} label={t("rightSidebar.git")} />
         <div className="flex-1 self-stretch" data-tauri-drag-region />
+        <button
+          onClick={onToggle}
+          title={t("header.toggleRightSidebarTooltip")}
+          className="w-5 h-5 mr-1 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
+        >
+          <IconPanelRightClose size={13} />
+        </button>
         <WindowControls />
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">

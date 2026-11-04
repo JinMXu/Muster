@@ -3,7 +3,7 @@ import type { AgentAttention, AgentState, ProjectView, Uuid } from "../lib/types
 import { api } from "../lib/invoke";
 import { useGitStatus } from "../lib/gitStatusStore";
 import { useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
-import { IconFolder, IconPlus, IconSettings, IconX } from "./icons";
+import { IconFolder, IconPanelLeftClose, IconPlus, IconSettings, IconX } from "./icons";
 import { useT } from "../lib/i18n/context";
 import AgentMiniBar from "./AgentMiniBar";
 import UsageMiniMeter from "./UsageMiniMeter";
@@ -77,6 +77,7 @@ export default function Sidebar({
   onProjectMenu,
   onOpenSettings,
   onOpenUsage,
+  onToggle,
   width,
   agentBarOpen,
   onAgentBarToggle,
@@ -94,6 +95,10 @@ export default function Sidebar({
   onProjectMenu: (project: ProjectView, x: number, y: number, requestRename: () => void) => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
+  /// Collapse this sidebar (same backend command as Ctrl+B). Lives in the
+  /// sidebar's top-left corner per the layout annotation; the Header hosts
+  /// the expand twin while the sidebar is hidden.
+  onToggle: () => void;
   /// Resizable panel width in px (drag handle lives in App).
   width: number;
   /// Cross-state agent mini-bar popover is owned by App so the global
@@ -119,7 +124,16 @@ export default function Sidebar({
       style={{ width }}
       data-tauri-drag-region
     >
-      <div className="h-9" data-tauri-drag-region />
+      <div className="h-9 flex items-center pl-2 flex-shrink-0" data-tauri-drag-region>
+        <button
+          onClick={onToggle}
+          title={t("header.toggleLeftSidebarTooltip")}
+          className="w-5 h-5 rounded text-muster-muted hover:text-muster-fg hover:bg-muster-hover-btn flex items-center justify-center ui-fs-base active:scale-[.97] transition-transform duration-muster ease-muster"
+        >
+          <IconPanelLeftClose size={13} />
+        </button>
+        <div className="flex-1 self-stretch" data-tauri-drag-region />
+      </div>
       <div className="flex-1 overflow-y-auto px-2">
         <div className="space-y-1">
           {projects.map((p, i) => {

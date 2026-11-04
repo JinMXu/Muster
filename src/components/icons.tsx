@@ -29,7 +29,11 @@ import {
   MessageCircle,
   Minus,
   PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Plug,
   Plus,
@@ -74,7 +78,11 @@ export const IconPencil = fromLucide(Pencil);
 export const IconTrash = fromLucide(Trash);
 export const IconMaximize2 = fromLucide(Maximize2);
 export const IconPanelLeft = fromLucide(PanelLeft);
+export const IconPanelLeftClose = fromLucide(PanelLeftClose);
+export const IconPanelLeftOpen = fromLucide(PanelLeftOpen);
 export const IconPanelRight = fromLucide(PanelRight);
+export const IconPanelRightClose = fromLucide(PanelRightClose);
+export const IconPanelRightOpen = fromLucide(PanelRightOpen);
 export const IconSquare = fromLucide(Square);
 export const IconRefresh = fromLucide(RefreshCw);
 export const IconArrowUpRight = fromLucide(ArrowUpRight);

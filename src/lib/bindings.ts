@@ -350,6 +350,7 @@ export const events = {
 	fileReveal: makeEvent<FileReveal>("file-reveal"),
 	fileSaved: makeEvent<FileSaved>("file-saved"),
 	fsChanged: makeEvent<FsChanged>("fs-changed"),
+	nativeFileDrop: makeEvent<NativeFileDrop>("native-file-drop"),
 	notificationActivate: makeEvent<NotificationActivate>("notification-activate"),
 	openSettings: makeEvent<OpenSettings>("open-settings"),
 	ptyData: makeEvent<PtyData>("pty:data"),
@@ -574,6 +575,20 @@ export type ListenPort = {
 	port: number,
 	pid: number,
 	process_name: string,
+};
+
+/**
+ *  OS file drag events from the chained native drop target
+ *  (services/native_drop.rs). `kind` is "enter" | "over" | "drop" | "leave";
+ *  x/y are physical pixels relative to the webview client area. Only
+ *  Explorer-style file drags (CF_HDROP) surface here — in-page HTML5 drags
+ *  keep going through the browser untouched.
+ */
+export type NativeFileDrop = {
+	kind: string,
+	paths: string[],
+	x: number,
+	y: number,
 };
 
 export type NotificationActivate = {

@@ -7,6 +7,7 @@ pub mod git;
 pub mod i18n;
 pub mod ipc;
 pub mod mcp;
+pub mod native_drop;
 pub mod notify;
 pub mod persist;
 pub mod procs;

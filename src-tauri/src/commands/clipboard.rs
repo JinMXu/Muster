@@ -35,7 +35,7 @@ fn clipboard_files_win() -> Vec<String> {
     use windows::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     };
-    use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+    use windows::Win32::UI::Shell::HDROP;
 
     // CF_HDROP = 15, kept raw to avoid pulling in the Win32_System_Ole
     // feature just for the typed constant.
@@ -70,16 +70,5 @@ fn clipboard_files_win() -> Vec<String> {
         return Vec::new();
     };
     let hdrop = HDROP(handle.0 as *mut _);
-    // ifile = 0xFFFFFFFF is the documented "how many files" query.
-    let count = unsafe { DragQueryFileW(hdrop, u32::MAX, None) };
-    let mut paths = Vec::with_capacity(count as usize);
-    for i in 0..count {
-        // NULL-buffer query returns the length WITHOUT the null; the copy
-        // needs room for it, hence len + 1.
-        let len = unsafe { DragQueryFileW(hdrop, i, None) } as usize;
-        let mut buf = vec![0u16; len + 1];
-        let written = unsafe { DragQueryFileW(hdrop, i, Some(&mut buf)) } as usize;
-        paths.push(String::from_utf16_lossy(&buf[..written]));
-    }
-    paths
+    crate::services::native_drop::hdrop_to_strings(hdrop)
 }

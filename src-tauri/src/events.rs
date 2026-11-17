@@ -98,3 +98,16 @@ pub struct UsageUpdated {
     pub revision: u64,
     pub updated_at: i64,
 }
+
+/// OS file drag events from the chained native drop target
+/// (services/native_drop.rs). `kind` is "enter" | "over" | "drop" | "leave";
+/// x/y are physical pixels relative to the webview client area. Only
+/// Explorer-style file drags (CF_HDROP) surface here — in-page HTML5 drags
+/// keep going through the browser untouched.
+#[derive(Debug, Clone, Serialize, specta::Type, tauri_specta::Event)]
+pub struct NativeFileDrop {
+    pub kind: String,
+    pub paths: Vec<String>,
+    pub x: i32,
+    pub y: i32,
+}

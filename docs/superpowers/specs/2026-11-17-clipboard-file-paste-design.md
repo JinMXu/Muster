@@ -119,3 +119,19 @@ IsClipboardFormatAvailable(CF_HDROP)?
   与现有拖放路径行为一致，未来如需按 shell 类型切换引用规则再议
 - `elementFromPoint` 命中测试依赖 `[data-terminal-pane]` 属性，
   隐藏 tab 下的窗格不可命中（不可见即不可点，行为正确）
+
+## 实现差异（2026-11-17 当天补记）
+
+C 节的 Tauri `onDragDropEvent` 方案**落地时被推翻**：本仓库
+`tauri.conf.json` 刻意配置了 `"dragDropEnabled": false`——该 flag 打开后
+wry 会对每个 WebView2 子窗口 `RevokeDragDrop` 并替换 Chromium 的 drop
+处理器，直接杀死 FileTree→终端、窗格重排等页内 HTML5 拖拽；flag 关闭时
+`onDragDropEvent` 则永远不会触发（首次实现因此无效）。
+
+替代实现：`services/native_drop.rs` 自建**链式 IDropTarget**——通过 OLE
+窗口属性 `OleDropTargetInterface` 找到 Chromium 已注册的处理器，在原窗口
+上换入我们的包装器：带 CF_HDROP（Explorer 文件）的拖动发出自建
+`native-file-drop` 事件（每个安装线程独立 STA + 消息泵），其余一切转发给
+原处理器，HTML5 拖拽零回归。前端 `useNativeFileDrop` 改听该事件，坐标
+换算（物理 px ÷ devicePixelRatio）与命中测试不变。安装点覆盖主窗口
+（setup）、`build_window` 与副窗口恢复路径。

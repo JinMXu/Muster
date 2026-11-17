@@ -1,43 +1,40 @@
 import { useEffect } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 
+import { events } from "../lib/bindings";
 import { api } from "../lib/invoke";
 import { formatFilePaths } from "../lib/terminalPaste";
 import { setExternalDropTarget } from "../lib/externalDropStore";
 
 /// Route OS-originated file drags (Explorer) onto the terminal pane under
-/// the cursor. Tauri's `dragDropEnabled` intercepts those before any HTML5
-/// drop event fires, so this can't live in TerminalPane's onDrop — events
-/// arrive window-global with physical coordinates and we hit-test
-/// `[data-terminal-pane]` ourselves. In-page drags (FileTree → pane) keep
-/// using HTML5 dataTransfer and never produce these events, so the two
-/// paths can't double-insert.
+/// the cursor. The events come from the native chained drop target
+/// (services/native_drop.rs) as window-global payloads with physical
+/// coordinates, so we hit-test `[data-terminal-pane]` ourselves. In-page
+/// drags (FileTree → pane) keep using HTML5 dataTransfer and never produce
+/// these events, so the two paths can't double-insert.
 export function useNativeFileDrop() {
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let disposed = false;
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        const p = event.payload;
-        if (p.type === "leave") {
-          setExternalDropTarget(null);
-        } else if (p.type === "drop") {
-          const sessionId = paneAt(p.position);
-          setExternalDropTarget(null);
-          if (sessionId && p.paths.length > 0) {
-            // Same insertable form as paste: quoted paths, no trailing
-            // newline, so the user composes the rest of the command.
-            api.sendText(sessionId, formatFilePaths(p.paths));
-          }
-        } else {
-          // enter/over: only carry a position; hover feedback via the store.
-          setExternalDropTarget(paneAt(p.position));
+    events.nativeFileDrop.listen((event) => {
+      const p = event.payload;
+      if (p.kind === "leave") {
+        setExternalDropTarget(null);
+      } else if (p.kind === "drop") {
+        const sessionId = paneAt(p);
+        setExternalDropTarget(null);
+        if (sessionId && p.paths.length > 0) {
+          // Same insertable form as paste: quoted paths, no trailing
+          // newline, so the user composes the rest of the command.
+          api.sendText(sessionId, formatFilePaths(p.paths));
         }
-      })
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
-      });
+      } else {
+        // enter/over carry the hover position only; feed the ring highlight.
+        setExternalDropTarget(paneAt(p));
+      }
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
     return () => {
       disposed = true;
       unlisten?.();

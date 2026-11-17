@@ -266,6 +266,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             crate::events::OpenSettings,
             crate::events::SettingsChanged,
             crate::events::UsageUpdated,
+            crate::events::NativeFileDrop,
         ])
 }
 

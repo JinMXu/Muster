@@ -74,6 +74,8 @@ export const api = {
 
   spawnSession: () => commands.spawnSession(null),
   listShells: () => commands.listShells(),
+  // CF_HDROP read for file-copy paste; never rejects — empty means no files.
+  readClipboardFiles: () => commands.readClipboardFiles(),
   sendText: (id: Uuid, text: string) => commands.sendText(id, text),
   terminalAck: (id: Uuid, bytes: number) => commands.terminalAck(id, bytes),
   resizeTerminal: (id: Uuid, cols: number, rows: number) =>

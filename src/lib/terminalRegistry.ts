@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./invoke";
 import { events } from "./bindings";
+import { getPastePayload } from "./terminalPaste";
 import { createPtyAckBatcher } from "./ptyAcks";
 import type { ThemeColors } from "./types";
 
@@ -308,8 +309,10 @@ function create(sessionId: string): Entry {
     }
     if (key === "v") {
       e.preventDefault();
-      navigator.clipboard.readText().then((text) => {
-        if (text) api.sendText(sessionId, text);
+      // Text pastes as-is (no warning, as always here); an Explorer file
+      // copy surfaces as quoted paths instead of silent nothing.
+      void getPastePayload().then((payload) => {
+        if (payload.kind !== "none") api.sendText(sessionId, payload.text);
       });
       return false;
     }

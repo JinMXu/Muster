@@ -5,6 +5,8 @@ import { useAgentStatus, agentLabel } from "../hooks/useAgentStatus";
 import { acquire, resyncViewport } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
 import { shellQuotePath } from "../lib/shellEscape";
+import { getPastePayload } from "../lib/terminalPaste";
+import { subscribeExternalDrop, getExternalDropTarget } from "../lib/externalDropStore";
 import { openMenu } from "../lib/menuStore";
 import { useT } from "../lib/i18n/context";
 import { getTerminalSearchState, subscribeTerminalSearch } from "../lib/terminalSearch";
@@ -39,14 +41,22 @@ export default function TerminalPane({
   // Whether the scrollback search bar is open for THIS pane's session.
   const searchState = useSyncExternalStore(subscribeTerminalSearch, getTerminalSearchState);
   const searchOpen = searchState.sessionId === sessionId;
+  // Hover feedback for an OS file drag (Explorer). Hit-testing happens in
+  // useNativeFileDrop (window-global events); this pane only renders the
+  // same ring the internal FileTree drag shows.
+  const externalDrop = useSyncExternalStore(subscribeExternalDrop, getExternalDropTarget);
+  const externalDropActive = externalDrop.sessionId === sessionId;
 
   const doPaste = async () => {
-    const text = await navigator.clipboard.readText().catch(() => "");
-    if (text && looksDangerousPaste(text)) {
-      setPasteWarning(text);
+    const payload = await getPastePayload();
+    if (payload.kind === "none") return;
+    // Text keeps the dangerous-paste dialog; file paths (Explorer copy /
+    // CF_HDROP) are opaque data and go straight in, like the drop path below.
+    if (payload.kind === "text" && looksDangerousPaste(payload.text)) {
+      setPasteWarning(payload.text);
       return;
     }
-    if (text) api.sendText(sessionId, text);
+    api.sendText(sessionId, payload.text);
   };
 
   useEffect(() => {
@@ -125,7 +135,7 @@ export default function TerminalPane({
       ref={containerRef}
       data-terminal-pane={sessionId}
       className={`relative w-full h-full overflow-hidden bg-muster-bg ${
-        dropActive ? "ring-1 ring-inset ring-muster-accent" : ""
+        dropActive || externalDropActive ? "ring-1 ring-inset ring-muster-accent" : ""
       }`}
       onDragEnter={(e) => {
         if (!e.dataTransfer.types.includes("application/x-muster-path")) return;

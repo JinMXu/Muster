@@ -19,6 +19,7 @@ use crate::models::app::AppState;
 use crate::services::agents::AgentCache;
 use crate::services::config::Settings;
 
+mod clipboard;
 mod editor;
 mod fs;
 mod git;
@@ -247,6 +248,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             fs::add_to_path,
             fs::remove_from_path,
             fs::is_on_path,
+            clipboard::read_clipboard_files,
         ])
         .events(collect_events![
             crate::events::StateChanged,

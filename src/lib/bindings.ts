@@ -330,6 +330,17 @@ export const commands = {
 	addToPath: () => __TAURI_INVOKE<null>("add_to_path"),
 	removeFromPath: () => __TAURI_INVOKE<null>("remove_from_path"),
 	isOnPath: () => __TAURI_INVOKE<boolean>("is_on_path"),
+	/**
+	 *  Files currently on the clipboard as CF_HDROP (Explorer "copy"). The
+	 *  frontend converts them to quoted shell paths and feeds the PTY.
+	 * 
+	 *  Never errors: anything unavailable — no files on the clipboard, the
+	 *  clipboard held open by another process, a non-Windows build — degrades
+	 *  to an empty list and the paste flow falls through as if nothing were
+	 *  copied. Runs on the IPC thread like `send_text`; the retry budget below
+	 *  (≤10ms) is the same order as the AppState lock it already waits on.
+	 */
+	readClipboardFiles: () => __TAURI_INVOKE<string[]>("read_clipboard_files"),
 };
 
 /** Events */

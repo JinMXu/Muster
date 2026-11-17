@@ -33,6 +33,7 @@ import { openTerminalSearch } from "./lib/terminalSearch";
 import type { Lang } from "./lib/i18n/types";
 import type { AgentKind, AppStateView, DirtyFile, PaneContentKind, ProjectView, TabView, Uuid } from "./lib/types";
 import { agentLabel } from "./hooks/useAgentStatus";
+import { useNativeFileDrop } from "./hooks/useNativeFileDrop";
 
 // Modal overlays load on first open; none are needed to render the workspace.
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
@@ -111,6 +112,9 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+
+  // OS file drags (Explorer) → insert paths into the pane under the cursor.
+  useNativeFileDrop();
 
   const savedSettings = useSettings();
   const sysLang = useMemo(() => detectInitialLang(), []);

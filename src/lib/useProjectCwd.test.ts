@@ -141,3 +141,54 @@ describe("useProjectCwd", () => {
     expect(mocks.listAllSessions).toHaveBeenCalledTimes(calls);
   });
 });
+
+describe("useSessionAnchor", () => {
+  beforeEach(() => {
+    mocks.resolveProjectRoot.mockReset();
+  });
+
+  it("resolves the given session's cwd to its repo root, caching it", async () => {
+    mocks.resolveProjectRoot.mockResolvedValue("D:\repo");
+    const hook = await loadHook();
+
+    const { result, rerender } = renderHook(({ cwd }) => hook.useSessionAnchor(cwd, null), {
+      initialProps: { cwd: "D:\repo\a" as string | null },
+    });
+    await flush();
+    expect(result.current).toEqual({ cwd: "D:\repo\a", root: "D:\repo" });
+
+    // Switching panes away and back reuses the cached root.
+    rerender({ cwd: null });
+    expect(result.current).toEqual({ cwd: null, root: null });
+    rerender({ cwd: "D:\repo\a" });
+    await flush();
+    expect(result.current).toEqual({ cwd: "D:\repo\a", root: "D:\repo" });
+    expect(mocks.resolveProjectRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a late root for a cwd it has since moved off", async () => {
+    let finishSlow: (root: string) => void = () => {};
+    mocks.resolveProjectRoot.mockImplementation((cwd: string) =>
+      cwd === "D:\slow" ? new Promise<string>((r) => (finishSlow = r)) : Promise.resolve("D:\fast-root")
+    );
+    const hook = await loadHook();
+
+    const { result, rerender } = renderHook(({ cwd }) => hook.useSessionAnchor(cwd, null), {
+      initialProps: { cwd: "D:\slow" },
+    });
+    rerender({ cwd: "D:\fast" });
+    await flush();
+    await act(async () => finishSlow("D:\slow-root"));
+    await flush();
+
+    expect(result.current).toEqual({ cwd: "D:\fast", root: "D:\fast-root" });
+  });
+
+  it("anchors to a pinned directory without resolving", async () => {
+    const hook = await loadHook();
+    const { result } = renderHook(() => hook.useSessionAnchor("D:\elsewhere", "D:\pinned"));
+    await flush();
+    expect(result.current).toEqual({ cwd: "D:\pinned", root: "D:\pinned" });
+    expect(mocks.resolveProjectRoot).not.toHaveBeenCalled();
+  });
+});

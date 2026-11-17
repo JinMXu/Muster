@@ -268,3 +268,46 @@ export function forceProjectPoll(projectId: string | null) {
   const e = entries.get(projectId);
   if (e) void tick(e);
 }
+
+/// Anchor for ONE session's cwd rather than the project's first session:
+/// the Info panel follows the focused pane, so with Claude Code and Codex
+/// split side by side its directory/git rows match the selected card. Same
+/// rules as `useProjectCwd` — a pinned directory wins, else the cwd's repo
+/// root (shared `rootCache`). `cwd` comes from the shared session poll,
+/// which `session-cwd-changed` already refreshes.
+export function useSessionAnchor(cwd: string | null, pinned: string | null): ProjectAnchor {
+  const [anchor, setAnchor] = useState<ProjectAnchor>(EMPTY);
+
+  useEffect(() => {
+    if (pinned) {
+      setAnchor({ cwd: pinned, root: pinned });
+      return;
+    }
+    if (!cwd) {
+      setAnchor(EMPTY);
+      return;
+    }
+    const cached = rootCache.get(cwd);
+    if (cached !== undefined) {
+      setAnchor({ cwd, root: cached });
+      return;
+    }
+    // Keep the previous root while resolving (no flicker); the alive guard
+    // drops a late answer for a cwd we have since moved off.
+    setAnchor((prev) => ({ cwd, root: prev.root }));
+    let alive = true;
+    api
+      .resolveProjectRoot(cwd)
+      .catch(() => cwd)
+      .then((root) => {
+        if (!alive) return;
+        cacheRoot(cwd, root);
+        setAnchor({ cwd, root });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [cwd, pinned]);
+
+  return anchor;
+}

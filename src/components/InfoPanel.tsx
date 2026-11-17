@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AgentAttention, AgentState, AppStateView, ListenPort, ProcessInfo } from "../lib/types";
+import type { AppStateView, ListenPort, ProcessInfo, SessionInfo, Uuid } from "../lib/types";
 import { api } from "../lib/invoke";
 import { refreshGitStatus, useGitStatus } from "../lib/gitStatusStore";
-import { forceProjectPoll, useProjectCwd, useProjectSessions } from "../lib/useProjectCwd";
+import { forceProjectPoll, useProjectSessions, useSessionAnchor } from "../lib/useProjectCwd";
 import { reloadSettings, useSettings } from "../lib/settingsStore";
 import { openMenu, type MenuEntry } from "../lib/menuStore";
 import { IconArrowUpRight, IconFolder, IconGitBranch, IconGlobe, IconRefresh, IconTerminal, IconX } from "./icons";
 import { BrandIcon, hasBrandIcon } from "./brandIcons";
 import { useT } from "../lib/i18n/context";
 import { agentLabel, useAgentStatus, type LiveAgentStatus } from "../hooks/useAgentStatus";
+import { resolvePanelSessions } from "../lib/sessionUtils";
+import { DOT_CLASS, STATE_LABEL_KEY, dotKind, type DotKind } from "../lib/agentColors";
 
 /// Info panel: details about the focused session, selected project, and the
 /// repository it lives in (shell/PID, cwd, project dir, git branch/remote),
@@ -23,16 +25,32 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
   // not a private interval that ran in parallel with it.
   const sessions = useProjectSessions(state);
   const project = state?.projects.find((p) => p.id === state.selected_project_id) ?? null;
-  const projSession = sessions.find((s) => s.project_id === project?.id) ?? null;
-  const { root, cwd } = useProjectCwd(state);
+  // Every terminal pane in the selected tab gets its own card (a split tab
+  // running Claude Code next to Codex shows both). The focused pane's
+  // session is the selected one and drives every row below the cards —
+  // directory, git, processes, ports.
+  const { cards, selected: projSession, missing } = resolvePanelSessions(project, sessions);
+  const multi = cards.length > 1;
+  // A pane opened since the last 5s poll has no session row yet: poll now
+  // instead of leaving its card out for up to 5s.
+  const missingKey = missing.join(",");
+  useEffect(() => {
+    if (missingKey && project) forceProjectPoll(project.id);
+  }, [missingKey, project?.id]);
+  const { root, cwd } = useSessionAnchor(projSession?.working_directory ?? null, project?.custom_directory ?? null);
   const settings = useSettings();
   const projectPorts = settings?.project_ports ?? false;
   // Git branch/remote come from the shared store (one poller per repo root,
   // fanned out to GitPanel/FileTree/this panel) instead of a private interval.
   // `active` keeps this hidden panel from polling at full speed.
   const git = useGitStatus(root, active);
-  const [procs, setProcs] = useState<ProcessInfo[]>([]);
-  const [ports, setPorts] = useState<ListenPort[]>([]);
+  // Poll results are tagged with the session they belong to: after a pane
+  // switch the previous session's rows must not render (under the new
+  // session's name) while the first poll for the new one is in flight.
+  const [polled, setPolled] = useState<PolledRows>(NO_ROWS);
+  const owned = polled.sessionId != null && polled.sessionId === projSession?.id;
+  const procs = owned ? polled.procs : NO_ROWS.procs;
+  const ports = owned ? polled.ports : NO_ROWS.ports;
   // Bumped by the header refresh button to re-run every poll below at once.
   const [nonce, setNonce] = useState(0);
   const [spinning, setSpinning] = useState(false);
@@ -58,8 +76,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
   useEffect(() => {
     if (!active) return;
     if (shellPid == null || projSession == null) {
-      setProcs([]);
-      setPorts([]);
+      setPolled(NO_ROWS);
       return;
     }
     const sessionId = projSession.id;
@@ -68,11 +85,12 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       if (document.hidden) return;
       const list = await api.sessionProcesses(sessionId, shellPid).catch(() => [] as ProcessInfo[]);
       if (!alive) return;
-      setProcs(list);
+      // Ports of a different session are dropped, not carried over.
+      setPolled((prev) => ({ sessionId, procs: list, ports: prev.sessionId === sessionId ? prev.ports : [] }));
       const pids = list.map((p) => p.pid);
       const ps = await api.sessionPorts(pids, projectPorts ? root : null).catch(() => [] as ListenPort[]);
       if (!alive) return;
-      setPorts(ps);
+      setPolled((prev) => (prev.sessionId === sessionId ? { ...prev, ports: ps } : prev));
     };
     tick();
     const i = setInterval(tick, 3000);
@@ -123,26 +141,6 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       .catch(() => {});
   };
 
-  // The agent's live state drives the hero pill; a session without a live
-  // agent falls back to plain running/exited.
-  const live: LiveAgentStatus | null = (projSession && liveAgents[projSession.id]) || null;
-  const pillKind: PillKind = live
-    ? dotKind(live)
-    : projSession && !projSession.has_exited
-      ? "running"
-      : "exited";
-  const pillLabel = live
-    ? live.attention === "approval"
-      ? t("agents.state.approval")
-      : live.state === "working"
-        ? t("agents.state.working")
-        : live.state === "waiting"
-          ? t("agents.state.waiting")
-          : t("agents.state.done")
-    : projSession
-      ? projSession.has_exited ? t("info.exited") : t("info.running")
-      : t("info.exited");
-
   return (
     <div className="p-3 ui-fs-base space-y-3">
       <div className="flex items-center justify-between">
@@ -156,46 +154,27 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
         </button>
       </div>
 
-      {/* Hero: the agent (or bare shell) is this session's identity — brand
-          mark, name, and the state pill get the only card in the panel.
-          Shell/PID demote to a muted line underneath. */}
-      <div className="rounded-lg bg-muster-hover/40 border border-muster-hairline px-2.5 py-2">
-        <div className="flex items-center gap-2 min-w-0">
-          {projSession?.agent && hasBrandIcon(projSession.agent) ? (
-            <BrandIcon kind={projSession.agent} size={16} className="text-muster-fg/90 flex-shrink-0" />
-          ) : (
-            <span className="text-muster-fg/90 flex-shrink-0 flex items-center">
-              <IconTerminal size={15} />
-            </span>
-          )}
-          <span className="ui-fs-sm font-medium text-muster-fg/90 truncate min-w-0">
-            {projSession?.agent
-              ? agentLabel(projSession.agent)
-              : projSession?.shell_name ?? "—"}
-          </span>
-          <span
-            className={`ml-auto flex-shrink-0 flex items-center gap-1 px-1.5 h-5 rounded-full bg-muster-hover/60 ui-fs-xs leading-none ${PILL_TEXT[pillKind]}`}
-            title={pillLabel}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PILL_DOT[pillKind]}`} />
-            {pillLabel}
-          </span>
-        </div>
-        {projSession && (
-          <div className="mt-1.5 flex items-center gap-1.5 ui-fs-xs text-muster-muted/80 min-w-0">
-            <span className="truncate">
-              {projSession.shell_name}
-              {projSession.pid ? ` · PID ${projSession.pid}` : ""}
-            </span>
-            {projSession.agent && projSession.agent_command && !live && (
-              <button
-                onClick={() => api.restartSessionAgent(projSession.id).catch(() => {})}
-                className="ml-auto flex-shrink-0 text-muster-accent hover:underline"
-              >
-                {t("info.restartAgent")}
-              </button>
-            )}
-          </div>
+      {/* Hero: the agent (or bare shell) is each session's identity — brand
+          mark, name, and the state pill get the only cards in the panel.
+          With split panes there is one card per pane: the focused pane's is
+          ringed, the others focus their pane on click. */}
+      <div className="space-y-1.5">
+        {cards.length > 0 ? (
+          cards.map((s) => (
+            <SessionCard
+              key={s.id}
+              session={s}
+              live={liveAgents[s.id] ?? null}
+              selected={multi && s.id === projSession?.id}
+              onSelect={
+                multi && s.id !== projSession?.id
+                  ? () => void api.focusAgentSession(s.id).catch(() => {})
+                  : undefined
+              }
+            />
+          ))
+        ) : (
+          <SessionCard session={null} live={null} selected={false} />
         )}
       </div>
 
@@ -235,7 +214,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       {/* Processes/ports render only while there is something to say — no
           "no listening ports" filler. */}
       {shellPid != null && procs.length > 0 && (
-        <Section label={t("info.processes")}>
+        <Section label={t("info.processes")} suffix={multi ? sessionName(projSession) : undefined}>
           {procs.map((p) => (
             <ProcRow key={p.pid} p={p} onKill={kill} onMenu={procMenu} />
           ))}
@@ -244,6 +223,7 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
       {shellPid != null && ports.length > 0 && (
         <Section
           label={t("info.ports")}
+          suffix={multi ? sessionName(projSession) : undefined}
           action={
             <button
               onClick={toggleProjectPorts}
@@ -268,15 +248,105 @@ export default function InfoPanel({ state, active }: { state: AppStateView | nul
   );
 }
 
-/// Agent/shell state pill palette, keyed like AgentMiniBar's dot classes so
-/// the same state reads the same color everywhere.
-type PillKind = AgentState | "approval" | "running" | "exited";
+/// Card title for a session: the agent's brand name, else the shell name.
+function sessionName(s: SessionInfo | null): string {
+  if (!s) return "—";
+  return s.agent ? agentLabel(s.agent) : s.shell_name;
+}
+
+/// One session's identity card: brand mark, name, live state pill, and a
+/// muted shell/PID line. `selected` rings the focused pane's card when the
+/// tab has several; `onSelect` (set on the other cards) focuses that pane.
+function SessionCard({
+  session,
+  live,
+  selected,
+  onSelect,
+}: {
+  session: SessionInfo | null;
+  live: LiveAgentStatus | null;
+  selected: boolean;
+  onSelect?: () => void;
+}) {
+  const { t } = useT();
+  // The agent's live state drives the pill; a session without a live agent
+  // falls back to plain running/exited.
+  const pillKind: PillKind = live ? dotKind(live) : session && !session.has_exited ? "running" : "exited";
+  const pillLabel = t(live ? STATE_LABEL_KEY[dotKind(live)] : pillKind === "running" ? "info.running" : "info.exited");
+
+  // Not a <button>: the card can hold the Restart button, and buttons don't
+  // nest. A clickable card gets the button role and keyboard activation.
+  const interactive = onSelect
+    ? {
+        role: "button",
+        tabIndex: 0,
+        onClick: onSelect,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          onSelect();
+        },
+      }
+    : {};
+
+  return (
+    <div
+      {...interactive}
+      aria-current={selected || undefined}
+      className={`rounded-lg border px-2.5 py-2 transition-colors duration-muster ease-muster ${
+        selected ? "bg-muster-hover/60 border-muster-accent/60" : "bg-muster-hover/40 border-muster-hairline"
+      } ${
+        onSelect
+          ? "cursor-pointer hover:bg-muster-hover/60 focus-visible:outline-none focus-visible:border-muster-accent/60"
+          : ""
+      }`}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        {session?.agent && hasBrandIcon(session.agent) ? (
+          <BrandIcon kind={session.agent} size={16} className="text-muster-fg/90 flex-shrink-0" />
+        ) : (
+          <span className="text-muster-fg/90 flex-shrink-0 flex items-center">
+            <IconTerminal size={15} />
+          </span>
+        )}
+        <span className="ui-fs-sm font-medium text-muster-fg/90 truncate min-w-0">{sessionName(session)}</span>
+        <span
+          className={`ml-auto flex-shrink-0 flex items-center gap-1 px-1.5 h-5 rounded-full bg-muster-hover/60 ui-fs-xs leading-none ${PILL_TEXT[pillKind]}`}
+          title={pillLabel}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PILL_DOT[pillKind]}`} />
+          {pillLabel}
+        </span>
+      </div>
+      {session && (
+        <div className="mt-1.5 flex items-center gap-1.5 ui-fs-xs text-muster-muted/80 min-w-0">
+          <span className="truncate">
+            {session.shell_name}
+            {session.pid ? ` · PID ${session.pid}` : ""}
+          </span>
+          {session.agent && session.agent_command && !live && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                api.restartSessionAgent(session.id).catch(() => {});
+              }}
+              className="ml-auto flex-shrink-0 text-muster-accent hover:underline"
+            >
+              {t("info.restartAgent")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/// Agent/shell state pill palette: the shared agent-dot vocabulary plus the
+/// two plain-shell kinds, so a state reads the same color everywhere.
+type PillKind = DotKind | "running" | "exited";
 
 const PILL_DOT: Record<PillKind, string> = {
-  approval: "bg-rose-400 animate-pulse",
-  working: "bg-emerald-400",
-  waiting: "bg-amber-400 animate-pulse",
-  done: "bg-sky-400",
+  ...DOT_CLASS,
   running: "bg-emerald-400",
   exited: "bg-muster-muted/50",
 };
@@ -290,9 +360,14 @@ const PILL_TEXT: Record<PillKind, string> = {
   exited: "text-muster-muted/70",
 };
 
-function dotKind(r: { state: AgentState; attention: AgentAttention | null }): PillKind {
-  return r.attention === "approval" ? "approval" : r.state;
+/// The process/port rows of the last poll, with the session they belong to.
+interface PolledRows {
+  sessionId: Uuid | null;
+  procs: ProcessInfo[];
+  ports: ListenPort[];
 }
+
+const NO_ROWS: PolledRows = { sessionId: null, procs: [], ports: [] };
 
 /// Path comparison ignoring trailing separators and slash direction, so the
 /// Current Directory row doesn't flicker over cosmetic differences.
@@ -322,17 +397,23 @@ function PathLine({ path, label }: { path: string; label?: string }) {
 
 function Section({
   label,
+  suffix,
   action,
   children,
 }: {
   label: string;
+  /// Whose rows these are, shown when the tab holds several sessions.
+  suffix?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div className="ui-fs-xs text-muster-muted uppercase tracking-wide">{label}</div>
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="ui-fs-xs text-muster-muted uppercase tracking-wide truncate min-w-0">
+          {label}
+          {suffix && <span className="normal-case tracking-normal text-muster-muted/70"> · {suffix}</span>}
+        </div>
         {action}
       </div>
       <div className="mt-1 space-y-0.5">{children}</div>

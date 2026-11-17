@@ -128,10 +128,18 @@ wry 会对每个 WebView2 子窗口 `RevokeDragDrop` 并替换 Chromium 的 drop
 处理器，直接杀死 FileTree→终端、窗格重排等页内 HTML5 拖拽；flag 关闭时
 `onDragDropEvent` 则永远不会触发（首次实现因此无效）。
 
-替代实现：`services/native_drop.rs` 自建**链式 IDropTarget**——通过 OLE
-窗口属性 `OleDropTargetInterface` 找到 Chromium 已注册的处理器，在原窗口
-上换入我们的包装器：带 CF_HDROP（Explorer 文件）的拖动发出自建
-`native-file-drop` 事件（每个安装线程独立 STA + 消息泵），其余一切转发给
-原处理器，HTML5 拖拽零回归。前端 `useNativeFileDrop` 改听该事件，坐标
-换算（物理 px ÷ devicePixelRatio）与命中测试不变。安装点覆盖主窗口
-（setup）、`build_window` 与副窗口恢复路径。
+替代尝试：`services/native_drop.rs` 自建链式 IDropTarget（通过
+`OleDropTargetInterface` 属性找到 Chromium 的目标并转发）。
+
+**该方案经实测被否决**（启动即 AV，probe 数据见下）：
+- 找到的目标窗口是 `Chrome_WidgetWin_1`，属于 **WebView2 host 进程**
+  （pid 不同于主进程）——窗口所有权在别的进程，`RegisterDragDrop`/
+  `RevokeDragDrop` 无法在非所有者进程上操作；
+- 真实 Windows 上 `OleDropTargetInterface` 属性存的是 ole32 内部包装
+  指针，不是裸 IDropTarget 指针（自注册对比：prop ≠ 传入指针），直接
+  QI 解引用 = 访问违例。
+
+外部文件拖放在多进程 WebView2 + 保留 HTML5 拖拽的约束下暂无可靠原生路
+径；粘贴路径（CF_HDROP → `read_clipboard_files`）不受影响，独立可用。
+拖放功能保留前端代码（useNativeFileDrop/externalDropStore）但后端不
+安装，后续如 WebView2/tauri 提供受支持 API 再启用。

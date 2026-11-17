@@ -5,7 +5,7 @@ import { useAllAgents, type AllAgentStatus } from "../hooks/useAllAgents";
 import { useT } from "../lib/i18n/context";
 import type { AgentAttention, AgentState, Uuid } from "../lib/types";
 import { IconTerminal, IconX } from "./icons";
-import { DOT_CLASS, dotKind, type DotKind } from "../lib/agentColors";
+import { DOT_CLASS, STATE_LABEL_KEY, dotKind, type DotKind } from "../lib/agentColors";
 
 /// Cross-window coding-agent overview capsule that lives in the left
 /// sidebar's footer. Click opens a small popover listing every detected agent
@@ -198,14 +198,7 @@ function AgentRow({
 }) {
   const { t } = useT();
   const kind = dotKind(row);
-  const stateLabel =
-    kind === "approval"
-      ? t("agents.state.approval")
-      : row.state === "working"
-        ? t("agents.state.working")
-        : row.state === "waiting"
-          ? t("agents.state.waiting")
-          : t("agents.state.done");
+  const stateLabel = t(STATE_LABEL_KEY[kind]);
   return (
     <div
       onClick={onActivate}

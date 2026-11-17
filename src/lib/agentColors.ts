@@ -1,4 +1,5 @@
 import type { AgentAttention, AgentState } from "./types";
+import type { TKey } from "./i18n/context";
 
 /// The agent-state dot vocabulary, shared by the tab strip (Header), the
 /// sidebar's project rows, the agent mini bar, the command palette and the
@@ -22,3 +23,12 @@ export function dotKind(r: {
 }): DotKind {
   return r.attention === "approval" ? "approval" : r.state;
 }
+
+/// Translation key for each kind's state label (the agent mini bar and the
+/// Info panel's state pill share it).
+export const STATE_LABEL_KEY: Record<DotKind, TKey> = {
+  approval: "agents.state.approval",
+  working: "agents.state.working",
+  waiting: "agents.state.waiting",
+  done: "agents.state.done",
+};

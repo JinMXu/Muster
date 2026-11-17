@@ -198,6 +198,9 @@ pub fn run() {
                 let view = main.lock().view();
                 let _ = window.emit("state-changed", view);
             }
+            // Resolve dropped-file paths through WebView2's web-message
+            // bridge (see services/native_drop.rs).
+            crate::services::native_drop::attach(app.handle().clone(), "main".into());
 
             // Restore secondary windows that were open when the app last quit.
             // Each `sessions-win-N.json` on disk becomes a live window with
@@ -396,6 +399,7 @@ fn build_window(app: &AppHandle, label: &str) -> Result<(), String> {
         .decorations(false)
         .build()
         .map_err(|e| e.to_string())?;
+    crate::services::native_drop::attach(app.clone(), label.to_string());
     Ok(())
 }
 
@@ -566,6 +570,8 @@ fn restore_secondary_windows(app: &AppHandle) {
             log::warn!("failed to restore secondary window {label}: {e}");
             // Clean up the state entry so it doesn't leak.
             state.remove_label(&label);
+        } else {
+            crate::services::native_drop::attach(app.clone(), label.clone());
         }
     }
 }

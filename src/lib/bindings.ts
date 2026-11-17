@@ -350,7 +350,7 @@ export const events = {
 	fileReveal: makeEvent<FileReveal>("file-reveal"),
 	fileSaved: makeEvent<FileSaved>("file-saved"),
 	fsChanged: makeEvent<FsChanged>("fs-changed"),
-	nativeFileDrop: makeEvent<NativeFileDrop>("native-file-drop"),
+	nativeDropPaths: makeEvent<NativeDropPaths>("native-drop-paths"),
 	notificationActivate: makeEvent<NotificationActivate>("notification-activate"),
 	openSettings: makeEvent<OpenSettings>("open-settings"),
 	ptyData: makeEvent<PtyData>("pty:data"),
@@ -578,17 +578,14 @@ export type ListenPort = {
 };
 
 /**
- *  OS file drag events from the chained native drop target
- *  (services/native_drop.rs). `kind` is "enter" | "over" | "drop" | "leave";
- *  x/y are physical pixels relative to the webview client area. Only
- *  Explorer-style file drags (CF_HDROP) surface here — in-page HTML5 drags
- *  keep going through the browser untouched.
+ *  Absolute paths for a DOM file drop, resolved by the WebView2 web-message
+ *  bridge (services/native_drop.rs). `token` is the correlation id the page
+ *  sent with `chrome.webview.postMessageWithAdditionalObjects`, so the
+ *  frontend can pair the paths with the pane that received the drop.
  */
-export type NativeFileDrop = {
-	kind: string,
+export type NativeDropPaths = {
+	token: string,
 	paths: string[],
-	x: number,
-	y: number,
 };
 
 export type NotificationActivate = {

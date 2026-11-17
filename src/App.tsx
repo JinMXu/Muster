@@ -33,7 +33,7 @@ import { openTerminalSearch } from "./lib/terminalSearch";
 import type { Lang } from "./lib/i18n/types";
 import type { AgentKind, AppStateView, DirtyFile, PaneContentKind, ProjectView, TabView, Uuid } from "./lib/types";
 import { agentLabel } from "./hooks/useAgentStatus";
-import { useNativeFileDrop } from "./hooks/useNativeFileDrop";
+import { initNativeDropPaths } from "./lib/nativeDropPaths";
 
 // Modal overlays load on first open; none are needed to render the workspace.
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
@@ -113,8 +113,21 @@ export default function App() {
     };
   }, []);
 
-  // OS file drags (Explorer) → insert paths into the pane under the cursor.
-  useNativeFileDrop();
+  // OS file drops: terminal panes resolve paths through the native bridge
+  // (see lib/nativeDropPaths); everywhere else, block the webview's default
+  // "navigate to the dropped file" so a stray drop can't replace the app.
+  useEffect(() => {
+    initNativeDropPaths();
+    const guard = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", guard);
+    window.addEventListener("drop", guard);
+    return () => {
+      window.removeEventListener("dragover", guard);
+      window.removeEventListener("drop", guard);
+    };
+  }, []);
 
   const savedSettings = useSettings();
   const sysLang = useMemo(() => detectInitialLang(), []);

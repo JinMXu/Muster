@@ -99,15 +99,12 @@ pub struct UsageUpdated {
     pub updated_at: i64,
 }
 
-/// OS file drag events from the chained native drop target
-/// (services/native_drop.rs). `kind` is "enter" | "over" | "drop" | "leave";
-/// x/y are physical pixels relative to the webview client area. Only
-/// Explorer-style file drags (CF_HDROP) surface here — in-page HTML5 drags
-/// keep going through the browser untouched.
+/// Absolute paths for a DOM file drop, resolved by the WebView2 web-message
+/// bridge (services/native_drop.rs). `token` is the correlation id the page
+/// sent with `chrome.webview.postMessageWithAdditionalObjects`, so the
+/// frontend can pair the paths with the pane that received the drop.
 #[derive(Debug, Clone, Serialize, specta::Type, tauri_specta::Event)]
-pub struct NativeFileDrop {
-    pub kind: String,
+pub struct NativeDropPaths {
+    pub token: String,
     pub paths: Vec<String>,
-    pub x: i32,
-    pub y: i32,
 }

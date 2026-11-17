@@ -143,3 +143,41 @@ wry 会对每个 WebView2 子窗口 `RevokeDragDrop` 并替换 Chromium 的 drop
 径；粘贴路径（CF_HDROP → `read_clipboard_files`）不受影响，独立可用。
 拖放功能保留前端代码（useNativeFileDrop/externalDropStore）但后端不
 安装，后续如 WebView2/tauri 提供受支持 API 再启用。
+
+## 最终实现（同日晚，替换 C 节全部内容）
+
+**采用 WebView2 官方 WebMessage 桥，不碰任何 OLE 窗口注册。**
+
+关键事实：`dragDropEnabled: false`（保持不动）意味着 WebView2 的外部拖放
+是开启的，Explorer 拖文件进窗口**本来就会在页面里触发标准 HTML5
+`drop`**，`dataTransfer.files` 有值——此前"拖拽没反应"只是因为 onDrop 只
+认 `application/x-muster-path`，对 Files 直接 return。缺的只有磁盘路径，
+而 WebView2 正为此提供受支持 API（1.0.1774.30 起稳定）：
+
+```
+页面:  chrome.webview.postMessageWithAdditionalObjects("muster:files:<token>", e.dataTransfer.files)
+宿主:  ICoreWebView2WebMessageReceivedEventArgs2::AdditionalObjects
+        → ICoreWebView2File::Path  (绝对磁盘路径)
+```
+
+落地组成：
+- `services/native_drop.rs`：`attach()` 经 `Window::with_webview` 拿到
+  `ICoreWebView2`，注册第二个 `WebMessageReceived` 处理器（与 wry 的 IPC
+  处理器并存、按 `muster:files:` 前缀过滤）；解析 token、读
+  `AdditionalObjects`、取路径，发 `native-drop-paths` 事件（token, paths）。
+  依赖 `webview2-com = "0.38"`（与 wry 同版本）+ `windows-core = "0.61"`
+  （Interface trait；注意它和我们主用的 `windows` 0.58 是两份独立拷贝）。
+- `lib/nativeDropPaths.ts`：`requestDroppedPaths(sessionId, files)` 发
+  token 并登记 sessionId，事件回来时 `formatFilePaths` → `sendText`。
+- `TerminalPane`：`onDragEnter/onDragOver` 额外认 `Files`；`onDrop` 先看
+  `dataTransfer.files`，命中则走桥（真实 HTML5 事件里 JS 本来就该处理）。
+- App 挂一个 window 级 `dragover`/`drop` 守卫：Files 类型一律
+  `preventDefault`，避免拖到非终端区域时 WebView2 导航到该文件。
+
+验证（临时 debug_log 通道 + 页面内合成 drop，验证后已移除）：
+- 合成 `new File()` 被 API 拒绝，错误文案 `additional File object is not
+  a file on the disk`——证明该 API 正是为真实磁盘文件设计；
+- 空对象列表消息走通全链路：Rust `bridge got 0 path(s)` → 事件 →
+  前端监听器收到 `paths=0`。
+- 真实 Explorer 拖放的路径提取（`ICoreWebView2File::Path`）为
+  WebView2 文档契约，需人工手测确认。

@@ -6,7 +6,7 @@ import { acquire, resyncViewport } from "../lib/terminalRegistry";
 import { api } from "../lib/invoke";
 import { shellQuotePath } from "../lib/shellEscape";
 import { getPastePayload } from "../lib/terminalPaste";
-import { subscribeExternalDrop, getExternalDropTarget } from "../lib/externalDropStore";
+import { droppedFiles, requestDroppedPaths } from "../lib/nativeDropPaths";
 import { openMenu } from "../lib/menuStore";
 import { useT } from "../lib/i18n/context";
 import { getTerminalSearchState, subscribeTerminalSearch } from "../lib/terminalSearch";
@@ -41,11 +41,6 @@ export default function TerminalPane({
   // Whether the scrollback search bar is open for THIS pane's session.
   const searchState = useSyncExternalStore(subscribeTerminalSearch, getTerminalSearchState);
   const searchOpen = searchState.sessionId === sessionId;
-  // Hover feedback for an OS file drag (Explorer). Hit-testing happens in
-  // useNativeFileDrop (window-global events); this pane only renders the
-  // same ring the internal FileTree drag shows.
-  const externalDrop = useSyncExternalStore(subscribeExternalDrop, getExternalDropTarget);
-  const externalDropActive = externalDrop.sessionId === sessionId;
 
   const doPaste = async () => {
     const payload = await getPastePayload();
@@ -135,10 +130,10 @@ export default function TerminalPane({
       ref={containerRef}
       data-terminal-pane={sessionId}
       className={`relative w-full h-full overflow-hidden bg-muster-bg ${
-        dropActive || externalDropActive ? "ring-1 ring-inset ring-muster-accent" : ""
+        dropActive ? "ring-1 ring-inset ring-muster-accent" : ""
       }`}
       onDragEnter={(e) => {
-        if (!e.dataTransfer.types.includes("application/x-muster-path")) return;
+        if (!isClaimedDrag(e.dataTransfer)) return;
         dragDepth.current += 1;
         setDropActive(true);
       }}
@@ -147,14 +142,27 @@ export default function TerminalPane({
         if (dragDepth.current === 0) setDropActive(false);
       }}
       onDragOver={(e) => {
-        // Only claim drags carrying a file path; pane-move drags fall
+        // Claim in-page path drags and OS file drags; pane-move drags fall
         // through to the PaneLayout drop target around us.
-        if (e.dataTransfer.types.includes("application/x-muster-path")) {
+        if (isClaimedDrag(e.dataTransfer)) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
         }
       }}
       onDrop={(e) => {
+        // OS file drop (Explorer): the page has the File objects but not
+        // their disk paths — the native bridge resolves them and replies on
+        // the nativeDropPaths event, which inserts the quoted paths.
+        const files = droppedFiles(e.dataTransfer);
+        if (files) {
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDropActive(false);
+          if (!requestDroppedPaths(sessionId, files)) {
+            console.warn("[drop] file-path bridge unavailable in this WebView2 runtime");
+          }
+          return;
+        }
         const path = e.dataTransfer.getData("application/x-muster-path");
         dragDepth.current = 0;
         setDropActive(false);
@@ -237,4 +245,10 @@ export default function TerminalPane({
     )}
     </>
   );
+}
+
+/// Drags this pane accepts: in-page path drags (FileTree) and OS file drops.
+/// Pane-move drags carry neither and fall through to the layout drop target.
+function isClaimedDrag(dt: DataTransfer | null): boolean {
+  return !!dt && (dt.types.includes("application/x-muster-path") || dt.types.includes("Files"));
 }
